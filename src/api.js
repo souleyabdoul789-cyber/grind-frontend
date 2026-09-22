@@ -43,3 +43,48 @@ export function enregistrerProfil(sessionToken, { age, pays, niveau, difficultes
     difficultes,
   });
 }
+
+// ---------- Fil d'actu ----------
+
+export async function listerPosts(categorie) {
+  const url = new URL(`${GRIND_URL}/api/posts`);
+  if (categorie) url.searchParams.set("categorie", categorie);
+  const res = await fetch(url);
+  return res.json();
+}
+
+export function creerPost(sessionToken, { categorie, contenu, date_limite }) {
+  return poster(`${GRIND_URL}/api/posts`, {
+    session_token: sessionToken,
+    categorie,
+    contenu,
+    date_limite,
+  });
+}
+
+export function togglerLike(sessionToken, postId) {
+  return poster(`${GRIND_URL}/api/posts/${postId}/like`, { session_token: sessionToken });
+}
+
+export async function listerCommentaires(postId) {
+  const res = await fetch(`${GRIND_URL}/api/posts/${postId}/commentaires`);
+  return res.json();
+}
+
+export function ajouterCommentaire(sessionToken, postId, contenu) {
+  return poster(`${GRIND_URL}/api/posts/${postId}/commentaires`, {
+    session_token: sessionToken,
+    contenu,
+  });
+}
+
+export function resoudrePost(sessionToken, postId) {
+  return poster(`${GRIND_URL}/api/posts/${postId}/resoudre`, { session_token: sessionToken });
+}
+
+// ---------- Notifications temps réel ----------
+
+export function urlNotifs(sessionToken) {
+  const base = GRIND_URL.replace(/^https/, "wss").replace(/^http/, "ws");
+  return `${base}/ws/notifs?session_token=${encodeURIComponent(sessionToken)}`;
+}

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { enregistrerProfil } from "../api.js";
 import FondAnime from "../components/FondAnime.jsx";
+import { PAYS } from "../paysListe.js";
 
 const ETAPES = [
   { cle: "age", icone: "fa-solid fa-cake-candles", question: "Quel âge as-tu ?", type: "number" },
-  { cle: "pays", icone: "fa-solid fa-earth-africa", question: "Dans quel pays étudies-tu ?", type: "text" },
+  { cle: "pays", icone: "fa-solid fa-earth-africa", question: "Dans quel pays étudies-tu ?", type: "pays" },
   { cle: "niveau", icone: "fa-solid fa-graduation-cap", question: "Quelle est ta classe ou ta filière ?", type: "text" },
   { cle: "difficultes", icone: "fa-solid fa-book-open", question: "Dans quelles matières as-tu des difficultés ?", type: "textarea" },
 ];
@@ -49,7 +50,7 @@ export default function Questionnaire({ sessionToken, onTermine }) {
 
       await enregistrerProfil(sessionToken, {
         age: Number(reponses.age),
-        pays: reponses.pays,
+        pays: reponses.pays, // code ISO (ex: "ne")
         niveau: reponses.niveau,
         difficultes: difficultesJson,
       });
@@ -79,14 +80,32 @@ export default function Questionnaire({ sessionToken, onTermine }) {
           <div className="etape-question">{etape.question}</div>
           <div className="sous-titre">Étape {etapeIndex + 1} sur {ETAPES.length}</div>
 
-          {etape.type === "textarea" ? (
+          {etape.type === "textarea" && (
             <textarea
               rows={3}
               value={reponses[etape.cle]}
               onChange={(e) => majReponse(e.target.value)}
               placeholder="ex: maths, physique"
             />
-          ) : (
+          )}
+
+          {etape.type === "pays" && (
+            <div className="grille-pays">
+              {PAYS.map((p) => (
+                <button
+                  key={p.code}
+                  type="button"
+                  className={`carte-pays ${reponses.pays === p.code ? "carte-pays-actif" : ""}`}
+                  onClick={() => majReponse(p.code)}
+                >
+                  <span className={`fi fi-${p.code} drapeau`}></span>
+                  <span>{p.nom}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {(etape.type === "number" || etape.type === "text") && (
             <input
               type={etape.type}
               value={reponses[etape.cle]}

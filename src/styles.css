@@ -299,3 +299,582 @@ button:disabled {
   box-shadow: none;
   border-color: var(--violet);
 }
+
+/* ==================== Coquille de l'app (après onboarding) ==================== */
+.app-shell {
+  position: relative;
+  min-height: 100vh;
+  z-index: 1;
+}
+
+.barre-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: rgba(10, 10, 15, 0.7);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+
+.logo-petit {
+  font-size: 20px;
+  margin-bottom: 0;
+}
+
+.logo-petit i {
+  font-size: 18px;
+}
+
+.barre-nav-droite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bouton-icone {
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bouton-icone:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--violet);
+  box-shadow: none;
+}
+
+/* ---------- Notifications ---------- */
+.notifs-conteneur {
+  position: relative;
+}
+
+.bouton-cloche {
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bouton-cloche:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--violet);
+  box-shadow: none;
+}
+
+.badge-notif {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: linear-gradient(135deg, var(--brown), var(--violet));
+  color: #0a0a0f;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  animation: apparition 0.2s ease both;
+}
+
+.panneau-notifs {
+  position: absolute;
+  right: 0;
+  top: 48px;
+  width: 280px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(16px);
+  border-radius: 12px;
+  padding: 8px;
+  animation: apparition 0.2s ease both;
+}
+
+.ligne-notif {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.ligne-notif:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ligne-notif i {
+  color: var(--violet);
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.notif-vide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+  justify-content: center;
+}
+
+/* ==================== Fil d'actu ==================== */
+.fil-actu {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20px 16px 100px;
+  position: relative;
+}
+
+.filtres-fil {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+}
+
+.filtre, .filtre-actif {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filtre-actif {
+  background: linear-gradient(90deg, var(--brown), var(--violet));
+  color: #0a0a0f;
+  border-color: transparent;
+}
+
+.filtre:hover:not(:disabled) {
+  box-shadow: none;
+  border-color: var(--violet);
+}
+
+/* ---------- Carte de post ---------- */
+.carte-post {
+  background: var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 14px;
+  animation: apparition 0.3s ease both;
+}
+
+.entete-post {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.avatar-mini {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brown), var(--violet));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0a0a0f;
+  flex-shrink: 0;
+}
+
+.auteur-post {
+  font-weight: 600;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 14px;
+}
+
+.badge-categorie {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.badge-categorie.probleme i { color: #e0b48a; }
+.badge-categorie.demonstration i { color: var(--violet); }
+
+.badge-statut {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.statut-ouverte { background: rgba(216, 191, 166, 0.12); color: var(--brown); }
+.statut-resolue { background: rgba(159, 216, 176, 0.12); color: var(--succes); }
+.statut-expiree { background: rgba(224, 138, 138, 0.12); color: var(--erreur); }
+
+.contenu-post {
+  font-size: 14.5px;
+  line-height: 1.55;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+}
+
+.delai-post {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.actions-post {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.action-post {
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+}
+
+.action-post:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
+  transform: none;
+}
+
+.action-post.actif {
+  color: #e08a8a;
+}
+
+.action-post.actif i {
+  animation: coeur-pulse 0.35s ease;
+}
+
+@keyframes coeur-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
+
+/* ---------- Commentaires ---------- */
+.bloc-commentaires {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  animation: apparition 0.2s ease both;
+}
+
+.ligne-commentaire {
+  font-size: 13px;
+  padding: 6px 0;
+  line-height: 1.5;
+}
+
+.auteur-commentaire {
+  font-weight: 600;
+  color: var(--violet);
+}
+
+.saisie-commentaire {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.saisie-commentaire input {
+  margin: 0;
+}
+
+.saisie-commentaire button {
+  width: 42px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+/* ---------- Formulaire de création ---------- */
+.formulaire-post {
+  border-color: var(--violet);
+}
+
+.choix-categorie {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.chip {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+}
+
+.chip-actif {
+  background: linear-gradient(90deg, var(--brown), var(--violet));
+  color: #0a0a0f;
+  border-color: transparent;
+}
+
+.chip:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+/* ---------- Bouton flottant ---------- */
+.bouton-flottant {
+  position: fixed;
+  bottom: 28px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 20px;
+  box-shadow: 0 8px 24px rgba(201, 182, 228, 0.35);
+  z-index: 5;
+}
+
+.bouton-flottant:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.05);
+}
+
+/* ==================== Sélecteur de pays (drapeaux dynamiques) ==================== */
+.grille-pays {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.carte-pays {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font-size: 13px;
+  font-family: "Inter", sans-serif;
+  margin: 0;
+}
+
+.carte-pays:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  border-color: var(--violet);
+}
+
+.carte-pays-actif {
+  border-color: var(--violet);
+  background: rgba(201, 182, 228, 0.1);
+}
+
+.drapeau {
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ==================== Onglets de navigation ==================== */
+.barre-onglets {
+  position: sticky;
+  top: 66px;
+  z-index: 9;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: rgba(10, 10, 15, 0.6);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.onglet {
+  width: auto;
+  margin: 0;
+  padding: 8px 18px;
+  border-radius: 20px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.onglet:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  color: var(--text);
+}
+
+.onglet-actif {
+  background: linear-gradient(90deg, var(--brown), var(--violet));
+  color: #0a0a0f;
+}
+
+/* ==================== Profil ==================== */
+.entete-profil {
+  text-align: center;
+}
+
+.avatar-profil {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brown), var(--violet));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  color: #0a0a0f;
+  margin: 0 auto 12px;
+}
+
+.ligne-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.ligne-info .drapeau {
+  width: 22px;
+  height: 16px;
+}
+
+.ligne-info i {
+  width: 20px;
+  color: var(--violet);
+}
+
+/* ==================== Réglages ==================== */
+.ligne-reglage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  font-size: 14px;
+}
+
+.interrupteur {
+  width: 44px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border-radius: 12px;
+  background: var(--border);
+  border: none;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.interrupteur:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+.curseur-interrupteur {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.interrupteur-actif {
+  background: linear-gradient(90deg, var(--brown), var(--violet));
+}
+
+.interrupteur-actif .curseur-interrupteur {
+  transform: translateX(20px);
+  background: #0a0a0f;
+}
+
+.bouton-danger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--erreur);
+  cursor: pointer;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+}
+
+.bouton-danger:hover {
+  border-color: var(--erreur);
+}
