@@ -2,16 +2,23 @@ import { useState, useEffect } from "react";
 import Connexion from "./pages/Connexion.jsx";
 import Questionnaire from "./pages/Questionnaire.jsx";
 import FilActu from "./pages/FilActu.jsx";
+import Classes from "./pages/Classes.jsx";
 import Profil from "./pages/Profil.jsx";
 import Reglages from "./pages/Reglages.jsx";
 import BarreNav from "./components/BarreNav.jsx";
 import FondAnime from "./components/FondAnime.jsx";
 
+function extraireCodeDepuisUrl() {
+  const correspondance = window.location.pathname.match(/^\/rejoindre\/(.+)$/);
+  return correspondance ? decodeURIComponent(correspondance[1]) : null;
+}
+
 export default function App() {
   const [sessionToken, setSessionToken] = useState(null);
   const [profilComplet, setProfilComplet] = useState(false);
   const [username, setUsername] = useState(null);
-  const [onglet, setOnglet] = useState("fil");
+  const [codeAttente, setCodeAttente] = useState(extraireCodeDepuisUrl());
+  const [onglet, setOnglet] = useState(codeAttente ? "classes" : "fil");
 
   useEffect(() => {
     const tokenSauvegarde = localStorage.getItem("grind_session_token");
@@ -32,6 +39,11 @@ export default function App() {
     setOnglet("fil");
   }
 
+  function consommerCode() {
+    setCodeAttente(null);
+    window.history.replaceState({}, "", "/");
+  }
+
   if (!sessionToken) {
     return (
       <Connexion
@@ -50,6 +62,7 @@ export default function App() {
         onTermine={() => {
           localStorage.setItem("grind_profil_complet", "1");
           setProfilComplet(true);
+          if (codeAttente) setOnglet("classes");
         }}
       />
     );
@@ -61,6 +74,9 @@ export default function App() {
       <BarreNav sessionToken={sessionToken} ongletActif={onglet} onChangerOnglet={setOnglet} />
 
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} />}
+      {onglet === "classes" && (
+        <Classes sessionToken={sessionToken} codeAttente={codeAttente} onCodeConsomme={consommerCode} />
+      )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
       {onglet === "reglages" && <Reglages sessionToken={sessionToken} onDeconnexion={deconnecter} />}
     </div>

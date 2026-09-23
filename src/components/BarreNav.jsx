@@ -2,6 +2,7 @@ import Notifications from "./Notifications.jsx";
 
 const ONGLETS = [
   { cle: "fil", icone: "fa-solid fa-house", label: "Fil" },
+  { cle: "classes", icone: "fa-solid fa-chalkboard", label: "Classes" },
   { cle: "profil", icone: "fa-solid fa-user", label: "Profil" },
   { cle: "reglages", icone: "fa-solid fa-gear", label: "Réglages" },
 ];

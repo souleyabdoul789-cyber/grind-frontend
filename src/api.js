@@ -82,6 +82,21 @@ export function resoudrePost(sessionToken, postId) {
   return poster(`${GRIND_URL}/api/posts/${postId}/resoudre`, { session_token: sessionToken });
 }
 
+// ---------- Classes ----------
+
+export function creerClasse(sessionToken, nom) {
+  return poster(`${GRIND_URL}/api/classes`, { session_token: sessionToken, nom });
+}
+
+export function rejoindreClasse(sessionToken, codeInvitation) {
+  return poster(`${GRIND_URL}/api/classes/rejoindre`, { session_token: sessionToken, code_invitation: codeInvitation });
+}
+
+export async function listerMesClasses(sessionToken) {
+  const res = await fetch(`${GRIND_URL}/api/classes/mes-classes?session_token=${encodeURIComponent(sessionToken)}`);
+  return res.json();
+}
+
 // ---------- Notifications temps réel ----------
 
 export function urlNotifs(sessionToken) {
