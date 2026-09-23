@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost } from "../api.js";
+import LecteurMedia from "./LecteurMedia.jsx";
+import TexteExtensible from "./TexteExtensible.jsx";
 
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();
@@ -81,7 +83,9 @@ export default function CartePost({ post, sessionToken, monUsername }) {
         )}
       </div>
 
-      <div className="contenu-post">{post.contenu}</div>
+      {post.media_url && <LecteurMedia url={post.media_url} type={post.media_type} />}
+
+      <TexteExtensible texte={post.contenu} />
 
       {post.categorie === "probleme" && statutActuel === "ouverte" && post.date_limite && (
         <div className="delai-post">

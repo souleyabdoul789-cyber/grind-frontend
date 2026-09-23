@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
-import { listerPosts, creerPost } from "../api.js";
+import { listerPosts, creerPost, uploaderMedia } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
+import SelecteurDate from "../components/SelecteurDate.jsx";
+
+const LIMITE_LEGENDE = 500;
 
 export default function FilActu({ sessionToken, monUsername }) {
   const [posts, setPosts] = useState([]);
@@ -10,7 +13,10 @@ export default function FilActu({ sessionToken, monUsername }) {
 
   const [categorie, setCategorie] = useState("demonstration");
   const [contenu, setContenu] = useState("");
-  const [dateLimite, setDateLimite] = useState("");
+  const [dateLimite, setDateLimite] = useState(null); // objet Date, plus une string de champ natif
+  const [fichierMedia, setFichierMedia] = useState(null);
+  const [apercuMedia, setApercuMedia] = useState(null);
+  const [uploadEnCours, setUploadEnCours] = useState(false);
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
 
@@ -25,6 +31,18 @@ export default function FilActu({ sessionToken, monUsername }) {
     charger();
   }, [filtre]);
 
+  function gererChoixFichier(e) {
+    const fichier = e.target.files[0];
+    if (!fichier) return;
+    setFichierMedia(fichier);
+    setApercuMedia({ url: URL.createObjectURL(fichier), estVideo: fichier.type.startsWith("video/") });
+  }
+
+  function retirerMedia() {
+    setFichierMedia(null);
+    setApercuMedia(null);
+  }
+
   async function gererCreation(e) {
     e.preventDefault();
     setErreur(null);
@@ -36,16 +54,32 @@ export default function FilActu({ sessionToken, monUsername }) {
 
     setEnvoiEnCours(true);
     try {
-      const dateLimiteIso = categorie === "probleme" ? new Date(dateLimite).toISOString() : null;
-      await creerPost(sessionToken, { categorie, contenu, date_limite: dateLimiteIso });
+      let media = {};
+      if (fichierMedia) {
+        setUploadEnCours(true);
+        media = await uploaderMedia(sessionToken, fichierMedia);
+        setUploadEnCours(false);
+      }
+
+      const dateLimiteIso = categorie === "probleme" ? dateLimite.toISOString() : null;
+      await creerPost(sessionToken, {
+        categorie,
+        contenu,
+        date_limite: dateLimiteIso,
+        media_url: media.media_url,
+        media_type: media.media_type,
+      });
+
       setContenu("");
-      setDateLimite("");
+      setDateLimite(null);
+      retirerMedia();
       setFormulaireOuvert(false);
       charger();
     } catch (err) {
       setErreur(err.message);
     } finally {
       setEnvoiEnCours(false);
+      setUploadEnCours(false);
     }
   }
 
@@ -84,21 +118,37 @@ export default function FilActu({ sessionToken, monUsername }) {
 
           <textarea
             rows={3}
+            maxLength={LIMITE_LEGENDE}
             value={contenu}
             onChange={(e) => setContenu(e.target.value)}
             placeholder={categorie === "probleme" ? "Décris ce que tu n'arrives pas à résoudre..." : "Partage quelque chose..."}
             required
           />
+          <div className="compteur-caracteres">{contenu.length} / {LIMITE_LEGENDE}</div>
+
+          {apercuMedia ? (
+            <div className="apercu-media-form">
+              {apercuMedia.estVideo ? (
+                <video src={apercuMedia.url} muted playsInline />
+              ) : (
+                <img src={apercuMedia.url} alt="" />
+              )}
+              <button type="button" className="bouton-retirer-media" onClick={retirerMedia}>
+                <i className="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+          ) : (
+            <label className="bouton-ajouter-media">
+              <i className="fa-solid fa-paperclip"></i>
+              Ajouter une photo ou vidéo
+              <input type="file" accept="image/*,video/*" onChange={gererChoixFichier} hidden />
+            </label>
+          )}
 
           {categorie === "probleme" && (
             <>
               <label><i className="fa-solid fa-stopwatch"></i> Date limite pour être aidé</label>
-              <input
-                type="datetime-local"
-                value={dateLimite}
-                onChange={(e) => setDateLimite(e.target.value)}
-                required
-              />
+              <SelecteurDate valeur={dateLimite} onChange={setDateLimite} />
             </>
           )}
 
@@ -107,7 +157,7 @@ export default function FilActu({ sessionToken, monUsername }) {
               Annuler
             </button>
             <button type="submit" disabled={envoiEnCours}>
-              {envoiEnCours ? "..." : "Publier"}
+              {uploadEnCours ? "Envoi du média..." : envoiEnCours ? "..." : "Publier"}
             </button>
           </div>
 

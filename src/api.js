@@ -53,13 +53,47 @@ export async function listerPosts(categorie) {
   return res.json();
 }
 
-export function creerPost(sessionToken, { categorie, contenu, date_limite }) {
+export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type }) {
   return poster(`${GRIND_URL}/api/posts`, {
     session_token: sessionToken,
     categorie,
     contenu,
     date_limite,
+    media_url,
+    media_type,
   });
+}
+
+// ---------- Média (upload direct vers Cloudinary) ----------
+
+export async function uploaderMedia(sessionToken, fichier) {
+  const sigRes = await fetch(`${GRIND_URL}/api/media/signature-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken }),
+  });
+  const sig = await sigRes.json();
+  if (!sigRes.ok) throw new Error(sig.detail || "Impossible de préparer l'upload");
+
+  if (fichier.size > sig.poids_max_mo * 1024 * 1024) {
+    throw new Error(`Fichier trop lourd (max ${sig.poids_max_mo} Mo)`);
+  }
+
+  const estVideo = fichier.type.startsWith("video/");
+  const formData = new FormData();
+  formData.append("file", fichier);
+  formData.append("api_key", sig.api_key);
+  formData.append("timestamp", sig.timestamp);
+  formData.append("signature", sig.signature);
+  formData.append("folder", sig.folder);
+  formData.append("eager", sig.eager);
+
+  const urlCloudinary = `https://api.cloudinary.com/v1_1/${sig.cloud_name}/${estVideo ? "video" : "image"}/upload`;
+  const uploadRes = await fetch(urlCloudinary, { method: "POST", body: formData });
+  const resultat = await uploadRes.json();
+  if (!uploadRes.ok) throw new Error(resultat.error?.message || "Échec de l'upload");
+
+  return { media_url: resultat.secure_url, media_type: estVideo ? "video" : "image" };
 }
 
 export function togglerLike(sessionToken, postId) {
