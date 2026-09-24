@@ -1154,3 +1154,37 @@ button:disabled {
 .bouton-valider-date {
   margin-top: 0;
 }
+
+/* ==================== Éditeurs média ==================== */
+.editeur-media {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.canvas-editeur {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.video-editeur {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #000;
+  max-height: 260px;
+}
+
+.editeur-media label, .editeur-media input, .editeur-media .rangee-boutons {
+  width: 100%;
+}
+
+.editeur-media input[type="range"] {
+  padding: 0;
+  accent-color: var(--violet);
+}

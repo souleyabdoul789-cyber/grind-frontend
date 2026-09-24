@@ -2,20 +2,27 @@ import { useState, useEffect } from "react";
 import { listerPosts, creerPost, uploaderMedia } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
+import EditeurPhoto from "../components/EditeurPhoto.jsx";
+import EditeurVideo from "../components/EditeurVideo.jsx";
 
 const LIMITE_LEGENDE = 500;
 
 export default function FilActu({ sessionToken, monUsername }) {
   const [posts, setPosts] = useState([]);
-  const [filtre, setFiltre] = useState(null); // null = tout
+  const [filtre, setFiltre] = useState(null);
   const [chargement, setChargement] = useState(true);
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
 
   const [categorie, setCategorie] = useState("demonstration");
   const [contenu, setContenu] = useState("");
-  const [dateLimite, setDateLimite] = useState(null); // objet Date, plus une string de champ natif
-  const [fichierMedia, setFichierMedia] = useState(null);
+  const [dateLimite, setDateLimite] = useState(null);
+
+  const [fichierBrut, setFichierBrut] = useState(null);
+  const [editeurOuvert, setEditeurOuvert] = useState(null); // "photo" | "video" | null
+  const [fichierFinal, setFichierFinal] = useState(null); // Blob (photo) ou File original (video)
+  const [decoupeVideo, setDecoupeVideo] = useState(null);
   const [apercuMedia, setApercuMedia] = useState(null);
+
   const [uploadEnCours, setUploadEnCours] = useState(false);
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
@@ -34,12 +41,32 @@ export default function FilActu({ sessionToken, monUsername }) {
   function gererChoixFichier(e) {
     const fichier = e.target.files[0];
     if (!fichier) return;
-    setFichierMedia(fichier);
-    setApercuMedia({ url: URL.createObjectURL(fichier), estVideo: fichier.type.startsWith("video/") });
+    setFichierBrut(fichier);
+    setEditeurOuvert(fichier.type.startsWith("video/") ? "video" : "photo");
+  }
+
+  function validerEditionPhoto(blob) {
+    setFichierFinal(blob);
+    setApercuMedia({ url: URL.createObjectURL(blob), estVideo: false });
+    setEditeurOuvert(null);
+  }
+
+  function validerEditionVideo({ debut, fin }) {
+    setFichierFinal(fichierBrut);
+    setDecoupeVideo({ debut, fin });
+    setApercuMedia({ url: URL.createObjectURL(fichierBrut), estVideo: true });
+    setEditeurOuvert(null);
+  }
+
+  function annulerEdition() {
+    setFichierBrut(null);
+    setEditeurOuvert(null);
   }
 
   function retirerMedia() {
-    setFichierMedia(null);
+    setFichierBrut(null);
+    setFichierFinal(null);
+    setDecoupeVideo(null);
     setApercuMedia(null);
   }
 
@@ -55,9 +82,9 @@ export default function FilActu({ sessionToken, monUsername }) {
     setEnvoiEnCours(true);
     try {
       let media = {};
-      if (fichierMedia) {
+      if (fichierFinal) {
         setUploadEnCours(true);
-        media = await uploaderMedia(sessionToken, fichierMedia);
+        media = await uploaderMedia(sessionToken, fichierFinal, decoupeVideo);
         setUploadEnCours(false);
       }
 
@@ -97,7 +124,19 @@ export default function FilActu({ sessionToken, monUsername }) {
         </button>
       </div>
 
-      {formulaireOuvert && (
+      {editeurOuvert === "photo" && (
+        <div className="carte-post formulaire-post">
+          <EditeurPhoto fichier={fichierBrut} onValider={validerEditionPhoto} onAnnuler={annulerEdition} />
+        </div>
+      )}
+
+      {editeurOuvert === "video" && (
+        <div className="carte-post formulaire-post">
+          <EditeurVideo fichier={fichierBrut} onValider={validerEditionVideo} onAnnuler={annulerEdition} />
+        </div>
+      )}
+
+      {formulaireOuvert && !editeurOuvert && (
         <form className="carte-post formulaire-post" onSubmit={gererCreation}>
           <div className="choix-categorie">
             <button

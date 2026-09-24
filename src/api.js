@@ -66,11 +66,15 @@ export function creerPost(sessionToken, { categorie, contenu, date_limite, media
 
 // ---------- Média (upload direct vers Cloudinary) ----------
 
-export async function uploaderMedia(sessionToken, fichier) {
+export async function uploaderMedia(sessionToken, fichier, decoupeVideo) {
   const sigRes = await fetch(`${GRIND_URL}/api/media/signature-upload`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_token: sessionToken }),
+    body: JSON.stringify({
+      session_token: sessionToken,
+      debut_video: decoupeVideo?.debut,
+      fin_video: decoupeVideo?.fin,
+    }),
   });
   const sig = await sigRes.json();
   if (!sigRes.ok) throw new Error(sig.detail || "Impossible de préparer l'upload");
@@ -81,7 +85,7 @@ export async function uploaderMedia(sessionToken, fichier) {
 
   const estVideo = fichier.type.startsWith("video/");
   const formData = new FormData();
-  formData.append("file", fichier);
+  formData.append("file", fichier, fichier.name || (estVideo ? "video.mp4" : "photo.jpg"));
   formData.append("api_key", sig.api_key);
   formData.append("timestamp", sig.timestamp);
   formData.append("signature", sig.signature);
@@ -93,7 +97,12 @@ export async function uploaderMedia(sessionToken, fichier) {
   const resultat = await uploadRes.json();
   if (!uploadRes.ok) throw new Error(resultat.error?.message || "Échec de l'upload");
 
-  return { media_url: resultat.secure_url, media_type: estVideo ? "video" : "image" };
+  // resultat.secure_url = fichier original brut, sans watermark.
+  // resultat.eager[0].secure_url = version transformée (compressée +
+  // watermark incrusté) — c'est celle-là qu'on veut afficher.
+  const urlFinale = resultat.eager?.[0]?.secure_url || resultat.secure_url;
+
+  return { media_url: urlFinale, media_type: estVideo ? "video" : "image" };
 }
 
 export function togglerLike(sessionToken, postId) {
