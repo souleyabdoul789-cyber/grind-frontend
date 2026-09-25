@@ -1188,3 +1188,56 @@ button:disabled {
   padding: 0;
   accent-color: var(--violet);
 }
+
+/* ==================== Salle audio ==================== */
+.salle-audio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  gap: 32px;
+}
+
+.statut-appel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text-dim);
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.controles-appel {
+  display: flex;
+  gap: 16px;
+}
+
+.bouton-appel {
+  width: 60px;
+  height: 60px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 20px;
+}
+
+.bouton-appel:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+}
+
+.bouton-appel-actif {
+  background: rgba(224, 138, 138, 0.15);
+  border-color: var(--erreur);
+  color: var(--erreur);
+}
+
+.bouton-raccrocher {
+  background: var(--erreur);
+  border-color: var(--erreur);
+  color: #1a0a0a;
+}

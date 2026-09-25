@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { creerClasse, rejoindreClasse, listerMesClasses, GRIND_URL } from "../api.js";
+import SalleAudio from "../components/SalleAudio.jsx";
 
-export default function Classes({ sessionToken, codeAttente, onCodeConsomme }) {
+export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme }) {
   const [classes, setClasses] = useState([]);
   const [chargement, setChargement] = useState(true);
+  const [salleActive, setSalleActive] = useState(null); // classe_id ou null
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
   const [nomClasse, setNomClasse] = useState("");
@@ -61,6 +63,23 @@ export default function Classes({ sessionToken, codeAttente, onCodeConsomme }) {
     navigator.clipboard.writeText(lien);
     setLienCopie(code);
     setTimeout(() => setLienCopie(null), 2000);
+  }
+
+  if (salleActive) {
+    const classeOuverte = classes.find((c) => c.classe_id === salleActive);
+    return (
+      <div className="fil-actu">
+        <div className="sous-titre" style={{ marginBottom: 12 }}>
+          <i className="fa-solid fa-chalkboard"></i> {classeOuverte?.nom}
+        </div>
+        <SalleAudio
+          sessionToken={sessionToken}
+          demandeId={salleActive}
+          monUsername={monUsername}
+          onQuitter={() => setSalleActive(null)}
+        />
+      </div>
+    );
   }
 
   return (
@@ -128,6 +147,10 @@ export default function Classes({ sessionToken, codeAttente, onCodeConsomme }) {
                 {lienCopie === c.code_invitation ? "Lien copié" : "Copier le lien d'invitation"}
               </button>
             )}
+
+            <button className="action-post" onClick={() => setSalleActive(c.classe_id)} type="button">
+              <i className="fa-solid fa-phone"></i> Rejoindre l'audio de la classe
+            </button>
           </div>
         ))
       )}

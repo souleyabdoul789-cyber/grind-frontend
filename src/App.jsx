@@ -75,7 +75,7 @@ export default function App() {
 
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} />}
       {onglet === "classes" && (
-        <Classes sessionToken={sessionToken} codeAttente={codeAttente} onCodeConsomme={consommerCode} />
+        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} />
       )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
       {onglet === "reglages" && <Reglages sessionToken={sessionToken} onDeconnexion={deconnecter} />}

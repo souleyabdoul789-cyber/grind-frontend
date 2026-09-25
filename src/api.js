@@ -140,6 +140,35 @@ export async function listerMesClasses(sessionToken) {
   return res.json();
 }
 
+// ---------- Aide ----------
+
+export function demanderAide(sessionToken, sujet, description) {
+  return poster(`${GRIND_URL}/api/aide/demander`, { session_token: sessionToken, sujet, description });
+}
+
+export async function listerDemandesOuvertes() {
+  const res = await fetch(`${GRIND_URL}/api/aide/ouvertes`);
+  return res.json();
+}
+
+export function accepterDemande(sessionToken, demandeId) {
+  return poster(`${GRIND_URL}/api/aide/accepter`, { session_token: sessionToken, demande_id: demandeId });
+}
+
+export async function obtenirIdentifiantsTurn(sessionToken) {
+  const res = await fetch(`${GRIND_URL}/api/turn-credentials`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken }),
+  });
+  return res.json();
+}
+
+export function urlSession(sessionToken, demandeId) {
+  const base = GRIND_URL.replace(/^https/, "wss").replace(/^http/, "ws");
+  return `${base}/ws/session/${demandeId}?session_token=${encodeURIComponent(sessionToken)}`;
+}
+
 // ---------- Notifications temps réel ----------
 
 export function urlNotifs(sessionToken) {
