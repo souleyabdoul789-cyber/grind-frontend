@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { creerClasse, rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
-import SalleAudio from "../components/SalleAudio.jsx";
+import SalleClasse from "../components/SalleClasse.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
+import EtatVide from "../components/EtatVide.jsx";
 
 export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme }) {
   const [classes, setClasses] = useState([]);
@@ -14,8 +16,9 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
   const [lienCopie, setLienCopie] = useState(null);
 
-  const [classeEnEdition, setClasseEnEdition] = useState(null); // classe_id en cours de renommage
+  const [classeEnEdition, setClasseEnEdition] = useState(null);
   const [nomEdition, setNomEdition] = useState("");
+  const [classeASupprimer, setClasseASupprimer] = useState(null);
 
   async function charger() {
     setChargement(true);
@@ -62,8 +65,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   }
 
   function copierLien(code) {
-    const lien = `${window.location.origin}/rejoindre/${code}`;
-    navigator.clipboard.writeText(lien);
+    navigator.clipboard.writeText(code);
     setLienCopie(code);
     setTimeout(() => setLienCopie(null), 2000);
   }
@@ -84,8 +86,13 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     }
   }
 
-  async function gererSuppression(classeId) {
-    if (!window.confirm("Supprimer définitivement cette classe ?")) return;
+  function gererSuppression(classeId) {
+    setClasseASupprimer(classeId);
+  }
+
+  async function confirmerSuppression() {
+    const classeId = classeASupprimer;
+    setClasseASupprimer(null);
     try {
       await supprimerClasse(sessionToken, classeId);
       setClasses((prev) => prev.filter((c) => c.classe_id !== classeId));
@@ -101,7 +108,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
         <div className="sous-titre" style={{ marginBottom: 12 }}>
           <i className="fa-solid fa-chalkboard"></i> {classeOuverte?.nom}
         </div>
-        <SalleAudio
+        <SalleClasse
           sessionToken={sessionToken}
           demandeId={salleActive}
           monUsername={monUsername}
@@ -156,7 +163,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       {chargement ? (
         <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement...</div>
       ) : classes.length === 0 ? (
-        <div className="info"><i className="fa-solid fa-chalkboard"></i> Aucune classe pour l'instant.</div>
+        <EtatVide texte="Aucune classe pour l'instant" />
       ) : (
         classes.map((c) => (
           <div key={c.classe_id} className="carte-post carte-classe">
@@ -192,7 +199,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
               <>
                 <button className="action-post" onClick={() => copierLien(c.code_invitation)} type="button">
                   <i className={lienCopie === c.code_invitation ? "fa-solid fa-check" : "fa-solid fa-link"}></i>
-                  {lienCopie === c.code_invitation ? "Lien copié" : "Copier le lien d'invitation"}
+                  {lienCopie === c.code_invitation ? "Code copié" : "Copier le code d'invitation"}
                 </button>
                 <button className="action-post" onClick={() => commencerEdition(c)} type="button">
                   <i className="fa-solid fa-pen"></i> Renommer
@@ -204,10 +211,17 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
             )}
 
             <button className="action-post" onClick={() => setSalleActive(c.classe_id)} type="button">
-              <i className="fa-solid fa-phone"></i> Rejoindre l'audio de la classe
+              <i className="fa-solid fa-phone"></i> Entrer dans la classe
             </button>
           </div>
         ))
+      )}
+      {classeASupprimer && (
+        <ConfirmModal
+          message="Supprimer définitivement cette classe ? Tous ses membres seront retirés."
+          onConfirmer={confirmerSuppression}
+          onAnnuler={() => setClasseASupprimer(null)}
+        />
       )}
     </div>
   );

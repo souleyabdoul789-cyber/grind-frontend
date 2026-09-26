@@ -1189,14 +1189,13 @@ button:disabled {
   accent-color: var(--violet);
 }
 
-/* ==================== Salle audio ==================== */
-.salle-audio {
+/* ==================== Salle de classe (audio + feuille) ==================== */
+.salle-classe {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  min-height: 50vh;
-  gap: 32px;
+  gap: 24px;
+  padding-bottom: 24px;
 }
 
 .statut-appel {
@@ -1363,4 +1362,140 @@ button:disabled {
   margin: 0;
   padding: 0;
   flex-shrink: 0;
+}
+
+/* ==================== Feuille collaborative ==================== */
+.bloc-feuille {
+  width: 100%;
+  max-width: 480px;
+}
+
+.onglets-feuille {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.onglet-feuille {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.onglet-feuille:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+.onglet-feuille-actif {
+  background: linear-gradient(90deg, var(--brown), var(--violet));
+  color: #0a0a0f;
+  border-color: transparent;
+}
+
+.feuille-textarea {
+  width: 100%;
+  font-family: "Inter", monospace;
+  resize: vertical;
+  min-height: 160px;
+}
+
+.banniere-demande {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(216, 191, 166, 0.1);
+  border: 1px solid var(--brown);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.banniere-demande button {
+  width: auto;
+  margin: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+/* ==================== Mascotte GRIND (états vide/erreur) ==================== */
+.etat-vide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 20px;
+  color: var(--text-dim);
+  font-size: 14px;
+  text-align: center;
+}
+
+.mascotte-flotte {
+  animation: flotter-mascotte 3s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes flotter-mascotte {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(-2deg); }
+}
+
+.mascotte-secoue {
+  animation: secouer-mascotte 2.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes secouer-mascotte {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-4deg); }
+  40% { transform: rotate(3deg); }
+  60% { transform: rotate(-3deg); }
+  80% { transform: rotate(2deg); }
+}
+
+/* ==================== Modale de confirmation maison ==================== */
+.voile-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  animation: apparition 0.15s ease both;
+}
+
+.carte-modal {
+  background: #111118;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  width: 90%;
+  max-width: 340px;
+  animation: apparition 0.2s ease both;
+}
+
+.message-modal {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.bouton-danger-plein {
+  background: var(--erreur);
+  color: #1a0a0a;
 }

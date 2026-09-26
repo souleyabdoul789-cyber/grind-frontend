@@ -4,6 +4,7 @@ import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
 import EditeurPhoto from "../components/EditeurPhoto.jsx";
 import EditeurVideo from "../components/EditeurVideo.jsx";
+import EtatVide from "../components/EtatVide.jsx";
 
 const LIMITE_LEGENDE = 500;
 
@@ -212,7 +213,7 @@ export default function FilActu({ sessionToken, monUsername }) {
       {chargement ? (
         <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement...</div>
       ) : posts.length === 0 ? (
-        <div className="info">Rien ici pour le moment.</div>
+        <EtatVide texte="Rien à voir pour l'instant" />
       ) : (
         posts.map((post) => (
           <CartePost

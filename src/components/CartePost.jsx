@@ -2,6 +2,7 @@ import { useState } from "react";
 import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost, supprimerPost } from "../api.js";
 import LecteurMedia from "./LecteurMedia.jsx";
 import TexteExtensible from "./TexteExtensible.jsx";
+import ConfirmModal from "./ConfirmModal.jsx";
 
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();
@@ -27,6 +28,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime 
   const [nouveauCommentaire, setNouveauCommentaire] = useState("");
   const [statutActuel, setStatutActuel] = useState(post.statut);
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
+  const [confirmationOuverte, setConfirmationOuverte] = useState(false);
 
   async function gererLike() {
     setAime(!aime);
@@ -61,7 +63,11 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime 
   }
 
   async function gererSuppression() {
-    if (!window.confirm("Supprimer ce post ?")) return;
+    setConfirmationOuverte(true);
+  }
+
+  async function confirmerSuppression() {
+    setConfirmationOuverte(false);
     setSuppressionEnCours(true);
     try {
       await supprimerPost(sessionToken, post.id);
@@ -154,6 +160,13 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime 
             </button>
           </div>
         </div>
+      )}
+      {confirmationOuverte && (
+        <ConfirmModal
+          message="Supprimer ce post définitivement ?"
+          onConfirmer={confirmerSuppression}
+          onAnnuler={() => setConfirmationOuverte(false)}
+        />
       )}
     </div>
   );
