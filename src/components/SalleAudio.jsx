@@ -30,6 +30,32 @@ export default function SalleAudio({ sessionToken, demandeId, monUsername, onQui
   const arreterDetecteurLocalRef = useRef(null);
   const arreterDetecteurDistantRef = useRef(null);
 
+  async function demanderMicro() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamLocalRef.current = stream;
+      setPermission("accordee");
+      setMicroActif(true);
+
+      arreterDetecteurLocalRef.current = creerDetecteurParole(stream, setJeParle);
+
+      // Si on avait déjà une connexion en réception seule (permission
+      // refusée au départ), on ajoute la piste maintenant et on relance
+      // une offre pour que l'autre reçoive enfin notre audio.
+      const pc = pcRef.current;
+      if (pc) {
+        stream.getTracks().forEach((piste) => pc.addTrack(piste, stream));
+        if (autreUsernameRef.current && socketRef.current?.readyState === WebSocket.OPEN) {
+          const offre = await pc.createOffer();
+          await pc.setLocalDescription(offre);
+          socketRef.current.send(JSON.stringify({ type: "webrtc-offer", cible: autreUsernameRef.current, sdp: offre }));
+        }
+      }
+    } catch {
+      setPermission("refusee");
+    }
+  }
+
   useEffect(() => {
     let arrete = false;
 
@@ -102,12 +128,12 @@ export default function SalleAudio({ sessionToken, demandeId, monUsername, onQui
           setAutreMicroActif(true); // hypothèse par défaut tant qu'aucun signal contraire
 
           if (monUsername < msg.sender) {
-            await creerConnexionPair(identifiantsTurn.iceServers, stream, socket, msg.sender);
+            await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
             const offre = await pcRef.current.createOffer();
             await pcRef.current.setLocalDescription(offre);
             socket.send(JSON.stringify({ type: "webrtc-offer", cible: msg.sender, sdp: offre }));
           } else {
-            await creerConnexionPair(identifiantsTurn.iceServers, stream, socket, msg.sender);
+            await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
           }
         }
 
@@ -115,7 +141,7 @@ export default function SalleAudio({ sessionToken, demandeId, monUsername, onQui
           autreUsernameRef.current = msg.sender;
           setAutreUsername(msg.sender);
           setAutreMicroActif((v) => v ?? true);
-          if (!pcRef.current) await creerConnexionPair(identifiantsTurn.iceServers, stream, socket, msg.sender);
+          if (!pcRef.current) await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
           await pcRef.current.setRemoteDescription(msg.sdp);
           const reponse = await pcRef.current.createAnswer();
           await pcRef.current.setLocalDescription(reponse);
@@ -234,6 +260,7 @@ export default function SalleAudio({ sessionToken, demandeId, monUsername, onQui
         <div className="info">
           <i className="fa-solid fa-circle-info"></i>
           Micro refusé — tu peux quand même écouter, mais pas parler.
+          <button type="button" className="lien" onClick={demanderMicro}>Autoriser le micro</button>
         </div>
       )}
 

@@ -125,6 +125,15 @@ export function resoudrePost(sessionToken, postId) {
   return poster(`${GRIND_URL}/api/posts/${postId}/resoudre`, { session_token: sessionToken });
 }
 
+export async function supprimerPost(sessionToken, postId) {
+  const res = await fetch(`${GRIND_URL}/api/posts/${postId}?session_token=${encodeURIComponent(sessionToken)}`, {
+    method: "DELETE",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Suppression impossible");
+  return data;
+}
+
 // ---------- Classes ----------
 
 export function creerClasse(sessionToken, nom) {
@@ -138,6 +147,35 @@ export function rejoindreClasse(sessionToken, codeInvitation) {
 export async function listerMesClasses(sessionToken) {
   const res = await fetch(`${GRIND_URL}/api/classes/mes-classes?session_token=${encodeURIComponent(sessionToken)}`);
   return res.json();
+}
+
+export async function renommerClasse(sessionToken, classeId, nom) {
+  const res = await fetch(`${GRIND_URL}/api/classes/${classeId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, nom }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Renommage impossible");
+  return data;
+}
+
+export async function supprimerClasse(sessionToken, classeId) {
+  const res = await fetch(`${GRIND_URL}/api/classes/${classeId}?session_token=${encodeURIComponent(sessionToken)}`, {
+    method: "DELETE",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Suppression impossible");
+  return data;
+}
+
+// Tolère qu'on colle le lien complet au lieu du code seul —
+// extrait automatiquement la dernière partie de l'URL.
+export function extraireCode(saisie) {
+  const propre = saisie.trim();
+  const correspondance = propre.match(/\/rejoindre\/([^/?#]+)/);
+  if (correspondance) return decodeURIComponent(correspondance[1]);
+  return propre;
 }
 
 // ---------- Aide ----------

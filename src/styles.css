@@ -1338,3 +1338,29 @@ button:disabled {
   gap: 5px;
   margin-top: 2px;
 }
+
+/* ==================== Suppression / édition ==================== */
+.action-danger {
+  color: var(--erreur);
+  margin-left: auto;
+}
+
+.edition-nom-classe {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.edition-nom-classe input {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+
+.edition-nom-classe button {
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+}

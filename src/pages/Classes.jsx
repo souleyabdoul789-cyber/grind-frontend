@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { creerClasse, rejoindreClasse, listerMesClasses, GRIND_URL } from "../api.js";
+import { creerClasse, rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
 import SalleAudio from "../components/SalleAudio.jsx";
 
 export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme }) {
@@ -13,6 +13,9 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
   const [lienCopie, setLienCopie] = useState(null);
+
+  const [classeEnEdition, setClasseEnEdition] = useState(null); // classe_id en cours de renommage
+  const [nomEdition, setNomEdition] = useState("");
 
   async function charger() {
     setChargement(true);
@@ -46,7 +49,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     setErreur(null);
     setEnvoiEnCours(true);
     try {
-      await rejoindreClasse(sessionToken, codeInvitation.trim());
+      await rejoindreClasse(sessionToken, extraireCode(codeInvitation));
       setCodeInvitation("");
       setFormulaireOuvert(null);
       if (onCodeConsomme) onCodeConsomme();
@@ -63,6 +66,32 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     navigator.clipboard.writeText(lien);
     setLienCopie(code);
     setTimeout(() => setLienCopie(null), 2000);
+  }
+
+  function commencerEdition(c) {
+    setClasseEnEdition(c.classe_id);
+    setNomEdition(c.nom);
+  }
+
+  async function validerRenommage(classeId) {
+    if (!nomEdition.trim()) return;
+    try {
+      await renommerClasse(sessionToken, classeId, nomEdition.trim());
+      setClasses((prev) => prev.map((c) => (c.classe_id === classeId ? { ...c, nom: nomEdition.trim() } : c)));
+      setClasseEnEdition(null);
+    } catch (err) {
+      setErreur(err.message);
+    }
+  }
+
+  async function gererSuppression(classeId) {
+    if (!window.confirm("Supprimer définitivement cette classe ?")) return;
+    try {
+      await supprimerClasse(sessionToken, classeId);
+      setClasses((prev) => prev.filter((c) => c.classe_id !== classeId));
+    } catch (err) {
+      setErreur(err.message);
+    }
   }
 
   if (salleActive) {
@@ -113,7 +142,12 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       {formulaireOuvert === "rejoindre" && (
         <form className="carte-post formulaire-post" onSubmit={gererAdhesion}>
           <label><i className="fa-solid fa-key"></i> Code d'invitation</label>
-          <input value={codeInvitation} onChange={(e) => setCodeInvitation(e.target.value)} placeholder="collé depuis le lien reçu" required />
+          <input
+            value={codeInvitation}
+            onChange={(e) => setCodeInvitation(e.target.value)}
+            placeholder="colle juste le code (pas besoin du lien entier)"
+            required
+          />
           <button type="submit" disabled={envoiEnCours}>{envoiEnCours ? "..." : "Rejoindre"}</button>
           {erreur && <div className="erreur"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
         </form>
@@ -128,8 +162,21 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
           <div key={c.classe_id} className="carte-post carte-classe">
             <div className="entete-post">
               <div className="avatar-mini"><i className="fa-solid fa-chalkboard-user"></i></div>
-              <div>
-                <div className="auteur-post">{c.nom}</div>
+              <div style={{ flex: 1 }}>
+                {classeEnEdition === c.classe_id ? (
+                  <div className="edition-nom-classe">
+                    <input
+                      value={nomEdition}
+                      onChange={(e) => setNomEdition(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && validerRenommage(c.classe_id)}
+                      autoFocus
+                    />
+                    <button type="button" onClick={() => validerRenommage(c.classe_id)}><i className="fa-solid fa-check"></i></button>
+                    <button type="button" className="bouton-retour" onClick={() => setClasseEnEdition(null)}><i className="fa-solid fa-xmark"></i></button>
+                  </div>
+                ) : (
+                  <div className="auteur-post">{c.nom}</div>
+                )}
                 <div className="badge-categorie demonstration">
                   <i className="fa-solid fa-users"></i> {c.nb_membres} {c.nb_membres > 1 ? "membres" : "membre"}
                 </div>
@@ -141,11 +188,19 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
               )}
             </div>
 
-            {c.role === "prof" && (
-              <button className="action-post" onClick={() => copierLien(c.code_invitation)} type="button">
-                <i className={lienCopie === c.code_invitation ? "fa-solid fa-check" : "fa-solid fa-link"}></i>
-                {lienCopie === c.code_invitation ? "Lien copié" : "Copier le lien d'invitation"}
-              </button>
+            {c.role === "prof" && classeEnEdition !== c.classe_id && (
+              <>
+                <button className="action-post" onClick={() => copierLien(c.code_invitation)} type="button">
+                  <i className={lienCopie === c.code_invitation ? "fa-solid fa-check" : "fa-solid fa-link"}></i>
+                  {lienCopie === c.code_invitation ? "Lien copié" : "Copier le lien d'invitation"}
+                </button>
+                <button className="action-post" onClick={() => commencerEdition(c)} type="button">
+                  <i className="fa-solid fa-pen"></i> Renommer
+                </button>
+                <button className="action-post action-danger" onClick={() => gererSuppression(c.classe_id)} type="button">
+                  <i className="fa-solid fa-trash"></i> Supprimer la classe
+                </button>
+              </>
             )}
 
             <button className="action-post" onClick={() => setSalleActive(c.classe_id)} type="button">

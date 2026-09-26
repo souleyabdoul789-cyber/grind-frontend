@@ -215,7 +215,13 @@ export default function FilActu({ sessionToken, monUsername }) {
         <div className="info">Rien ici pour le moment.</div>
       ) : (
         posts.map((post) => (
-          <CartePost key={post.id} post={post} sessionToken={sessionToken} monUsername={monUsername} />
+          <CartePost
+            key={post.id}
+            post={post}
+            sessionToken={sessionToken}
+            monUsername={monUsername}
+            onSupprime={(id) => setPosts((prev) => prev.filter((p) => p.id !== id))}
+          />
         ))
       )}
 

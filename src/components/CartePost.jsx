@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost } from "../api.js";
+import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost, supprimerPost } from "../api.js";
 import LecteurMedia from "./LecteurMedia.jsx";
 import TexteExtensible from "./TexteExtensible.jsx";
 
@@ -19,13 +19,14 @@ const STATUT_STYLE = {
   publiee: null,
 };
 
-export default function CartePost({ post, sessionToken, monUsername }) {
+export default function CartePost({ post, sessionToken, monUsername, onSupprime }) {
   const [aime, setAime] = useState(false);
   const [nbLikes, setNbLikes] = useState(post.likes);
   const [commentairesOuverts, setCommentairesOuverts] = useState(false);
   const [commentaires, setCommentaires] = useState([]);
   const [nouveauCommentaire, setNouveauCommentaire] = useState("");
   const [statutActuel, setStatutActuel] = useState(post.statut);
+  const [suppressionEnCours, setSuppressionEnCours] = useState(false);
 
   async function gererLike() {
     setAime(!aime);
@@ -57,6 +58,17 @@ export default function CartePost({ post, sessionToken, monUsername }) {
   async function marquerResolu() {
     await resoudrePost(sessionToken, post.id);
     setStatutActuel("resolue");
+  }
+
+  async function gererSuppression() {
+    if (!window.confirm("Supprimer ce post ?")) return;
+    setSuppressionEnCours(true);
+    try {
+      await supprimerPost(sessionToken, post.id);
+      if (onSupprime) onSupprime(post.id);
+    } catch {
+      setSuppressionEnCours(false);
+    }
   }
 
   const statut = STATUT_STYLE[statutActuel];
@@ -114,6 +126,11 @@ export default function CartePost({ post, sessionToken, monUsername }) {
           <button className="action-post" onClick={marquerResolu} type="button">
             <i className="fa-solid fa-check"></i>
             Marquer résolu
+          </button>
+        )}
+        {estAuteur && (
+          <button className="action-post action-danger" onClick={gererSuppression} disabled={suppressionEnCours} type="button">
+            <i className="fa-solid fa-trash"></i>
           </button>
         )}
       </div>
