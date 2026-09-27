@@ -1499,3 +1499,105 @@ button:disabled {
   background: var(--erreur);
   color: #1a0a0a;
 }
+
+/* ==================== Avatar personnage (idle + aura) ==================== */
+.avatar-respire {
+  animation: respirer-avatar 4s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+
+@keyframes respirer-avatar {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+}
+
+.avatar-oeil {
+  animation: cligner-avatar 5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes cligner-avatar {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+.aura-personnage {
+  animation: pulse-aura-personnage 1.3s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes pulse-aura-personnage {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+/* ==================== Écran de personnalisation ==================== */
+.apercu-avatar {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+  background: radial-gradient(circle at 50% 30%, rgba(201,182,228,0.08), transparent 70%);
+  border-radius: 16px;
+  margin-bottom: 16px;
+}
+
+.onglets-categories {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 14px;
+  padding-bottom: 4px;
+}
+
+.grille-items {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.carte-item-avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  font-size: 11px;
+  color: var(--text-dim);
+  position: relative;
+  margin: 0;
+}
+
+.carte-item-avatar:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  border-color: var(--violet);
+}
+
+.carte-item-avatar-actif {
+  border-color: var(--violet);
+  background: rgba(201,182,228,0.1);
+  color: var(--text);
+}
+
+.carte-item-avatar-verrouille {
+  opacity: 0.55;
+}
+
+.badge-prix-g {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--brown);
+}
+
+.icone-cadenas {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}

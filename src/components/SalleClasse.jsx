@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { obtenirIdentifiantsTurn, urlSession } from "../api.js";
+import { obtenirIdentifiantsTurn, urlSession, obtenirAvatarDe } from "../api.js";
 import { creerDetecteurParole } from "../lib/detecteurParole.js";
+import AvatarPersonnage from "./AvatarPersonnage.jsx";
 
 /**
  * SalleClasse — une seule connexion WebSocket pour toute la salle, qui
@@ -26,6 +27,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
   const [jeParle, setJeParle] = useState(false);
   const [connexion, setConnexion] = useState("connexion");
   const [autreUsername, setAutreUsername] = useState(null);
+  const [autreAvatarConfig, setAutreAvatarConfig] = useState(null);
   const [autreMicroActif, setAutreMicroActif] = useState(null);
   const [autreParle, setAutreParle] = useState(false);
   const [erreur, setErreur] = useState(null);
@@ -118,6 +120,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
         // ---- Départ du pair : on efface tout son état, audio et feuille ----
         if (msg.type === "peer-parti" && msg.sender === autreUsernameRef.current) {
           setAutreUsername(null);
+          setAutreAvatarConfig(null);
           setAutreMicroActif(null);
           setAutreParle(false);
           setConnexion("attente_pair");
@@ -163,6 +166,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
           autreUsernameRef.current = msg.sender;
           setAutreUsername(msg.sender);
           setAutreMicroActif(true);
+          obtenirAvatarDe(msg.sender).then((res) => setAutreAvatarConfig(res.config));
 
           if (monUsername < msg.sender) {
             await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
@@ -178,6 +182,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
           autreUsernameRef.current = msg.sender;
           setAutreUsername(msg.sender);
           setAutreMicroActif((v) => v ?? true);
+          obtenirAvatarDe(msg.sender).then((res) => setAutreAvatarConfig(res.config));
           if (!pcRef.current) await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
           await pcRef.current.setRemoteDescription(msg.sdp);
           const reponse = await pcRef.current.createAnswer();
@@ -318,9 +323,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
 
       {autreUsername && (
         <div className="carte-participant">
-          <div className={`avatar-participant ${autreParle ? "avatar-parle" : ""}`}>
-            <i className="fa-solid fa-user"></i>
-          </div>
+          <AvatarPersonnage config={autreAvatarConfig} parle={autreParle} taille={64} />
           <div>
             <div className="auteur-post">{autreUsername}</div>
             <div className="etat-micro-participant">

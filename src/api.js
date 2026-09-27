@@ -207,6 +207,34 @@ export function urlSession(sessionToken, demandeId) {
   return `${base}/ws/session/${demandeId}?session_token=${encodeURIComponent(sessionToken)}`;
 }
 
+// ---------- Avatar ----------
+
+export async function obtenirCatalogueAvatar() {
+  const res = await fetch(`${GRIND_URL}/api/avatar/catalogue`);
+  return res.json();
+}
+
+export async function obtenirMonAvatar(sessionToken) {
+  const res = await fetch(`${GRIND_URL}/api/avatar/moi?session_token=${encodeURIComponent(sessionToken)}`);
+  return res.json();
+}
+
+export async function obtenirAvatarDe(username) {
+  const res = await fetch(`${GRIND_URL}/api/avatar/de/${encodeURIComponent(username)}`);
+  return res.json();
+}
+
+export async function enregistrerAvatar(sessionToken, config) {
+  const res = await fetch(`${GRIND_URL}/api/avatar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, ...config }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Enregistrement impossible");
+  return data;
+}
+
 // ---------- Notifications temps réel ----------
 
 export function urlNotifs(sessionToken) {
