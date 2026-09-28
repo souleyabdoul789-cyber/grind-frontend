@@ -1601,3 +1601,23 @@ button:disabled {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/* ==================== Gestes des bras (avatar qui parle) ==================== */
+.bras-anime.bras-gauche {
+  animation: geste-bras-gauche 0.9s ease-in-out infinite;
+}
+
+.bras-anime.bras-droit {
+  animation: geste-bras-droit 0.9s ease-in-out infinite;
+  animation-delay: 0.15s;
+}
+
+@keyframes geste-bras-gauche {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-8deg); }
+}
+
+@keyframes geste-bras-droit {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(8deg); }
+}

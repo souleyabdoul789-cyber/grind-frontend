@@ -26,6 +26,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
   const [microActif, setMicroActif] = useState(true);
   const [jeParle, setJeParle] = useState(false);
   const [connexion, setConnexion] = useState("connexion");
+  const [tentative, setTentative] = useState(0);
   const [autreUsername, setAutreUsername] = useState(null);
   const [autreAvatarConfig, setAutreAvatarConfig] = useState(null);
   const [autreMicroActif, setAutreMicroActif] = useState(null);
@@ -51,6 +52,8 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
   const arreterDetecteurDistantRef = useRef(null);
   const viewerAutoriseRef = useRef(null);
   const delaiEnvoiRef = useRef(null);
+  const candidatsEnAttenteRef = useRef([]);
+  const descriptionDistanteDefinieRef = useRef(false);
 
   function envoyer(msg) {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -82,6 +85,10 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
 
   useEffect(() => {
     let arrete = false;
+    setConnexion("connexion");
+    setErreur(null);
+    candidatsEnAttenteRef.current = [];
+    descriptionDistanteDefinieRef.current = false;
 
     async function demarrer() {
       try {
@@ -134,6 +141,8 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
           pcRef.current = null;
           autreUsernameRef.current = null;
           viewerAutoriseRef.current = null;
+          candidatsEnAttenteRef.current = [];
+          descriptionDistanteDefinieRef.current = false;
           return;
         }
 
@@ -185,6 +194,11 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
           obtenirAvatarDe(msg.sender).then((res) => setAutreAvatarConfig(res.config));
           if (!pcRef.current) await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
           await pcRef.current.setRemoteDescription(msg.sdp);
+          descriptionDistanteDefinieRef.current = true;
+          for (const candidat of candidatsEnAttenteRef.current) {
+            try { await pcRef.current.addIceCandidate(candidat); } catch {}
+          }
+          candidatsEnAttenteRef.current = [];
           const reponse = await pcRef.current.createAnswer();
           await pcRef.current.setLocalDescription(reponse);
           socket.send(JSON.stringify({ type: "webrtc-answer", cible: msg.sender, sdp: reponse }));
@@ -192,10 +206,21 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
 
         if (msg.type === "webrtc-answer" && pcRef.current) {
           await pcRef.current.setRemoteDescription(msg.sdp);
+          descriptionDistanteDefinieRef.current = true;
+          for (const candidat of candidatsEnAttenteRef.current) {
+            try { await pcRef.current.addIceCandidate(candidat); } catch {}
+          }
+          candidatsEnAttenteRef.current = [];
         }
 
-        if (msg.type === "webrtc-ice" && pcRef.current && msg.candidate) {
-          try { await pcRef.current.addIceCandidate(msg.candidate); } catch {}
+        if (msg.type === "webrtc-ice" && msg.candidate) {
+          if (pcRef.current && descriptionDistanteDefinieRef.current) {
+            try { await pcRef.current.addIceCandidate(msg.candidate); } catch {}
+          } else {
+            // Description distante pas encore posée — on garde le
+            // candidat de côté, appliqué juste après (voir plus haut).
+            candidatsEnAttenteRef.current.push(msg.candidate);
+          }
         }
       };
     }
@@ -240,7 +265,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
       arreterDetecteurDistantRef.current?.();
       clearTimeout(delaiEnvoiRef.current);
     };
-  }, []);
+  }, [tentative]);
 
   function basculerMicro() {
     if (permission !== "accordee") return;
@@ -311,7 +336,12 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
         {connexion === "attente_pair" && <><i className="fa-solid fa-ellipsis"></i> En attente d'un autre membre...</>}
         {connexion === "connecte" && <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 10 }}></i> Connecté{autreUsername ? ` avec ${autreUsername}` : ""}</>}
         {connexion === "reconnexion" && <><i className="fa-solid fa-rotate fa-spin"></i> Reconnexion...</>}
-        {connexion === "echec" && <><i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}</>}
+        {connexion === "echec" && (
+          <>
+            <i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}
+            <button type="button" className="lien" onClick={() => setTentative((t) => t + 1)}>Réessayer</button>
+          </>
+        )}
       </div>
 
       {permission === "refusee" && (

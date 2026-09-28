@@ -6,6 +6,8 @@ const CATEGORIES = [
   { cle: "genre", label: "Genre", icone: "fa-solid fa-venus-mars" },
   { cle: "cheveux", label: "Cheveux", icone: "fa-solid fa-scissors" },
   { cle: "vetement", label: "Tenue", icone: "fa-solid fa-shirt" },
+  { cle: "chaussures", label: "Chaussures", icone: "fa-solid fa-shoe-prints" },
+  { cle: "gants", label: "Gants", icone: "fa-solid fa-hand" },
   { cle: "chapeau", label: "Chapeau", icone: "fa-solid fa-hat-cowboy" },
   { cle: "lunettes", label: "Lunettes", icone: "fa-solid fa-glasses" },
   { cle: "couleur_aura", label: "Aura", icone: "fa-solid fa-sparkles" },
@@ -58,7 +60,7 @@ export default function Personnalisation({ sessionToken, onRetour }) {
   }
 
   const itemsCategorie = catalogue.filter((i) => i.categorie === categorieActive);
-  const estOptionnelle = categorieActive === "chapeau" || categorieActive === "lunettes";
+  const estOptionnelle = ["chapeau", "lunettes", "gants"].includes(categorieActive);
 
   return (
     <div className="fil-actu">

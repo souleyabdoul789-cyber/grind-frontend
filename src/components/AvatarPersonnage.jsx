@@ -4,22 +4,45 @@ const COULEURS_AURA = {
 };
 
 /**
- * AvatarPersonnage — rendu en couches façon Picrew/VRoid : un corps de
- * base, puis cheveux/vêtements/chapeau/lunettes superposés selon la
- * config. Un seul jeu de formes pour l'instant (le personnage de
- * validation) — le catalogue s'enrichira avec d'autres silhouettes/
- * coiffures une fois le système lui-même validé.
+ * AvatarPersonnage — personnage complet en pied, en couches SVG.
  *
- * `parle` déclenche l'aura — jamais décorative en continu, branchée
- * sur la vraie détection de parole (Web Audio) utilisée dans la salle.
+ * Le genre change vraiment la silhouette :
+ * - fille   : épaules fines, jupe, cheveux mi-longs avec mèches, cils, petit nœud
+ * - garçon  : épaules larges, pantalon, cheveux en pics, sourcils plus marqués
+ * - neutre  : entre les deux, cheveux courts arrondis
+ *
+ * Les bras bougent uniquement quand `parle` est vrai — même booléen que
+ * l'aura, dérivé de la vraie détection audio, jamais une boucle décorative.
  */
 export default function AvatarPersonnage({ config, parle = false, taille = 140 }) {
   const [auraA, auraB] = COULEURS_AURA[config?.couleur_aura] || COULEURS_AURA.brand;
-  const couleurCheveux = config?.genre === "fille" ? "#3a2a2f" : "#2a2a35";
+
+  // Tolère "genre_fille" (catalogue) comme "fille" (anciennes valeurs)
+  const genre = (config?.genre || "genre_neutre").replace("genre_", "");
+  const estFille = genre === "fille";
+  const estGarcon = genre === "garcon";
+
+  const couleurCheveux = estFille ? "#4a2a35" : estGarcon ? "#1f1f28" : "#2a2a35";
   const couleurPeau = "#e8c4a0";
+  const couleurGants = config?.gants === "gants_sport" ? "#c9b6e4" : "#5a4a3a";
+  const couleurChaussures = config?.chaussures === "chaussures_montantes" ? "#3a2a2f" : "#d8bfa6";
+
+  // ---- Morphologie selon le genre ----
+  const demiTorse = estGarcon ? 44 : estFille ? 34 : 40;
+  const decalageBras = demiTorse - 7;
+  const basTorse = estFille ? 172 : 200;
+  const epaisseurSourcil = estGarcon ? 3.4 : 2.4;
+  const intensiteJoues = estFille ? 0.55 : 0.3;
+
+  // ---- Coiffure : longueur (item cheveux) + style (genre) ----
+  const longueur = config?.cheveux === "cheveux_long" ? "long" : estFille ? "mi" : "court";
+  const aMechesEtNoeud = longueur !== "court" && (estFille || config?.cheveux === "cheveux_long");
+
+  const gaucheX = 80 - demiTorse;
+  const droiteX = 80 + demiTorse;
 
   return (
-    <svg width={taille} height={taille} viewBox="0 0 160 160" xmlns="http://www.w3.org/2000/svg" className="avatar-respire">
+    <svg width={taille} height={taille * 1.5} viewBox="0 0 160 240" xmlns="http://www.w3.org/2000/svg" className="avatar-respire">
       <defs>
         <radialGradient id="auraGlow">
           <stop offset="0%" stopColor={auraA} stopOpacity="0.55" />
@@ -31,58 +54,115 @@ export default function AvatarPersonnage({ config, parle = false, taille = 140 }
         </linearGradient>
       </defs>
 
-      {/* Aura — visible uniquement quand parle=true, jamais figée */}
-      {parle && <circle cx="80" cy="90" r="72" fill="url(#auraGlow)" className="aura-personnage" />}
+      {/* Aura — visible uniquement quand parle=true */}
+      {parle && <circle cx="80" cy="120" r="90" fill="url(#auraGlow)" className="aura-personnage" />}
 
-      {/* ---- Corps / buste ---- */}
-      <path d="M40 158 Q40 110 80 108 Q120 110 120 158 Z" fill="url(#vetementDegrade)" />
-      {/* col */}
-      <path d="M65 112 L80 128 L95 112" stroke="#0a0a0f" strokeWidth="3" fill="none" strokeLinecap="round" />
+      {/* ---- Cheveux : panneau arrière (mi-longs / longs) ---- */}
+      {longueur === "mi" && (
+        <path d="M38 74 Q30 30 80 28 Q130 30 122 74 L128 138 Q104 126 80 128 Q56 126 32 138 Z" fill={couleurCheveux} />
+      )}
+      {longueur === "long" && (
+        <path d="M38 74 Q30 30 80 28 Q130 30 122 74 L130 196 Q104 184 80 186 Q56 184 30 196 Z" fill={couleurCheveux} />
+      )}
 
-      {/* ---- Cou ---- */}
-      <rect x="70" y="92" width="20" height="20" fill={couleurPeau} />
+      {/* ---- Jambes ---- */}
+      <rect x="58" y="192" width="18" height="38" rx="6" fill="#2a2a35" />
+      <rect x="84" y="192" width="18" height="38" rx="6" fill="#2a2a35" />
 
-      {/* ---- Tête ---- */}
-      <ellipse cx="80" cy="66" rx="38" ry="40" fill={couleurPeau} />
+      {/* ---- Chaussures ---- */}
+      <ellipse cx="67" cy="232" rx="14" ry="7" fill={couleurChaussures} />
+      <ellipse cx="93" cy="232" rx="14" ry="7" fill={couleurChaussures} />
 
-      {/* ---- Cheveux (arrière, sous le visage) ---- */}
-      <path d="M42 60 Q38 20 80 18 Q122 20 118 60 Q118 40 80 38 Q42 40 42 60 Z" fill={couleurCheveux} />
+      {/* ---- Bras (pivot à l'épaule) ---- */}
+      <g className={parle ? "bras-gauche bras-anime" : "bras-gauche"} style={{ transformOrigin: `${80 - decalageBras}px 128px` }}>
+        <path d={`M${80 - decalageBras} 128 Q${80 - decalageBras - 20} 145 ${80 - decalageBras - 18} 172`} stroke={couleurPeau} strokeWidth="14" strokeLinecap="round" fill="none" />
+        <circle cx={80 - decalageBras - 18} cy="174" r="9" fill={config?.gants ? couleurGants : couleurPeau} />
+      </g>
+      <g className={parle ? "bras-droit bras-anime" : "bras-droit"} style={{ transformOrigin: `${80 + decalageBras}px 128px` }}>
+        <path d={`M${80 + decalageBras} 128 Q${80 + decalageBras + 20} 145 ${80 + decalageBras + 18} 172`} stroke={couleurPeau} strokeWidth="14" strokeLinecap="round" fill="none" />
+        <circle cx={80 + decalageBras + 18} cy="174" r="9" fill={config?.gants ? couleurGants : couleurPeau} />
+      </g>
 
-      {/* ---- Grands yeux façon anime ---- */}
-      <ellipse cx="63" cy="70" rx="8" ry="11" fill="#1a1a22" className="avatar-oeil" />
-      <ellipse cx="97" cy="70" rx="8" ry="11" fill="#1a1a22" className="avatar-oeil" style={{ animationDelay: "0.05s" }} />
-      <circle cx="65" cy="66" r="2.6" fill="#ffffff" />
-      <circle cx="99" cy="66" r="2.6" fill="#ffffff" />
+      {/* ---- Buste ---- */}
+      <path d={`M${gaucheX} ${basTorse} Q${gaucheX} 122 80 120 Q${droiteX} 122 ${droiteX} ${basTorse} Z`} fill="url(#vetementDegrade)" />
+      {/* Jupe (fille) */}
+      {estFille && (
+        <path d={`M${gaucheX} 166 L${gaucheX - 14} 204 L${droiteX + 14} 204 L${droiteX} 166 Z`} fill="url(#vetementDegrade)" opacity="0.92" />
+      )}
+      {/* Veste (objet optionnel) */}
+      {config?.vetement === "vetement_veste" && (
+        <>
+          <path d={`M${gaucheX} ${basTorse} Q${gaucheX} 124 74 122 L72 ${basTorse} Z`} fill="#2a2a35" />
+          <path d={`M${droiteX} ${basTorse} Q${droiteX} 124 86 122 L88 ${basTorse} Z`} fill="#2a2a35" />
+        </>
+      )}
+      <path d="M65 124 L80 140 L95 124" stroke="#0a0a0f" strokeWidth="3" fill="none" strokeLinecap="round" />
 
-      {/* sourcils */}
-      <path d="M55 56 Q63 52 71 56" stroke={couleurCheveux} strokeWidth="2.4" fill="none" strokeLinecap="round" />
-      <path d="M89 56 Q97 52 105 56" stroke={couleurCheveux} strokeWidth="2.4" fill="none" strokeLinecap="round" />
+      {/* ---- Cou et tête ---- */}
+      <rect x="70" y="104" width="20" height="20" fill={couleurPeau} />
+      <ellipse cx="80" cy="78" rx="38" ry="40" fill={couleurPeau} />
 
-      {/* petit nez et sourire */}
-      <path d="M80 76 L78 82 L82 82" stroke="#c99a76" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-      <path d="M70 88 Q80 94 90 88" stroke="#8a5a45" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+      {/* ---- Cheveux : arrière de la tête ---- */}
+      <path d="M42 72 Q38 32 80 30 Q122 32 118 72 Q118 52 80 50 Q42 52 42 72 Z" fill={couleurCheveux} />
 
-      {/* joues */}
-      <ellipse cx="58" cy="80" rx="6" ry="4" fill="#e59a8a" opacity="0.35" />
-      <ellipse cx="102" cy="80" rx="6" ry="4" fill="#e59a8a" opacity="0.35" />
+      {/* ---- Yeux ---- */}
+      <ellipse cx="63" cy="82" rx="8" ry="11" fill="#1a1a22" className="avatar-oeil" />
+      <ellipse cx="97" cy="82" rx="8" ry="11" fill="#1a1a22" className="avatar-oeil" style={{ animationDelay: "0.05s" }} />
+      <circle cx="65" cy="78" r="2.6" fill="#ffffff" />
+      <circle cx="99" cy="78" r="2.6" fill="#ffffff" />
 
-      {/* ---- Cheveux (frange, par-dessus le front) ---- */}
-      <path d="M44 46 Q50 24 80 22 Q110 24 116 46 Q100 32 80 32 Q60 32 44 46 Z" fill={couleurCheveux} />
-
-      {/* ---- Chapeau (optionnel) ---- */}
-      {config?.chapeau === "chapeau_casquette" && (
-        <g>
-          <path d="M46 34 Q80 8 114 34 L114 26 Q80 4 46 26 Z" fill="#7a5a45" />
-          <path d="M108 30 Q128 30 132 40 L112 40 Z" fill="#7a5a45" />
+      {/* Cils (fille) */}
+      {estFille && (
+        <g stroke="#1a1a22" strokeWidth="2" strokeLinecap="round" fill="none">
+          <path d="M56 74 L49 70 M58 72 L54 65" />
+          <path d="M104 74 L111 70 M102 72 L106 65" />
         </g>
       )}
 
-      {/* ---- Lunettes (optionnel) ---- */}
+      {/* Sourcils */}
+      <path d="M55 68 Q63 64 71 68" stroke={couleurCheveux} strokeWidth={epaisseurSourcil} fill="none" strokeLinecap="round" />
+      <path d="M89 68 Q97 64 105 68" stroke={couleurCheveux} strokeWidth={epaisseurSourcil} fill="none" strokeLinecap="round" />
+
+      <path d="M80 88 L78 94 L82 94" stroke="#c99a76" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <path d="M70 100 Q80 106 90 100" stroke="#8a5a45" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+
+      <ellipse cx="58" cy="92" rx="6" ry="4" fill="#e59a8a" opacity={intensiteJoues} />
+      <ellipse cx="102" cy="92" rx="6" ry="4" fill="#e59a8a" opacity={intensiteJoues} />
+
+      {/* ---- Cheveux : frange ---- */}
+      {estGarcon && longueur === "court" ? (
+        <path d="M44 58 L52 34 L62 46 L72 28 L82 44 L94 28 L102 46 L110 34 L116 58 Q100 44 80 44 Q60 44 44 58 Z" fill={couleurCheveux} />
+      ) : (
+        <path d="M44 58 Q50 36 80 34 Q110 36 116 58 Q100 44 80 44 Q60 44 44 58 Z" fill={couleurCheveux} />
+      )}
+
+      {/* Mèches qui encadrent le visage + petit nœud */}
+      {aMechesEtNoeud && (
+        <>
+          <path d="M42 64 Q36 92 44 120 Q54 100 52 68 Z" fill={couleurCheveux} />
+          <path d="M118 64 Q124 92 116 120 Q106 100 108 68 Z" fill={couleurCheveux} />
+          <g transform="translate(108 46)">
+            <path d="M0 0 L-12 -7 L-12 7 Z" fill="#c9b6e4" />
+            <path d="M0 0 L12 -7 L12 7 Z" fill="#c9b6e4" />
+            <circle r="3.5" fill="#d8bfa6" />
+          </g>
+        </>
+      )}
+
+      {/* ---- Chapeau ---- */}
+      {config?.chapeau === "chapeau_casquette" && (
+        <g>
+          <path d="M46 46 Q80 20 114 46 L114 38 Q80 16 46 38 Z" fill="#7a5a45" />
+          <path d="M108 42 Q128 42 132 52 L112 52 Z" fill="#7a5a45" />
+        </g>
+      )}
+
+      {/* ---- Lunettes ---- */}
       {config?.lunettes === "lunettes_rondes" && (
         <g stroke="#2a2a35" strokeWidth="2.4" fill="none">
-          <circle cx="63" cy="70" r="12" />
-          <circle cx="97" cy="70" r="12" />
-          <line x1="75" y1="70" x2="85" y2="70" />
+          <circle cx="63" cy="82" r="12" />
+          <circle cx="97" cy="82" r="12" />
+          <line x1="75" y1="82" x2="85" y2="82" />
         </g>
       )}
     </svg>
