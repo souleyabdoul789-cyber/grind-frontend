@@ -1621,3 +1621,29 @@ button:disabled {
   0%, 100% { transform: rotate(0deg); }
   50% { transform: rotate(8deg); }
 }
+
+/* ==================== Palette de couleurs libres (peau/cheveux) ==================== */
+.grille-couleurs {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+
+.pastille-couleur {
+  width: 100%;
+  aspect-ratio: 1;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+}
+
+.pastille-couleur:hover:not(:disabled) {
+  box-shadow: none;
+  transform: scale(1.08);
+}
+
+.pastille-couleur-active {
+  border-color: var(--violet);
+  box-shadow: 0 0 0 3px rgba(201,182,228,0.3);
+}
