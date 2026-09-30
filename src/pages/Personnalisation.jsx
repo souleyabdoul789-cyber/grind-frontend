@@ -4,9 +4,7 @@ import AvatarPersonnage from "../components/AvatarPersonnage.jsx";
 
 const CATEGORIES = [
   { cle: "genre", label: "Genre", icone: "fa-solid fa-venus-mars" },
-  { cle: "peau", label: "Peau", icone: "fa-solid fa-hand", libre: true },
-  { cle: "couleur_cheveux", label: "Couleur cheveux", icone: "fa-solid fa-palette", libre: true },
-  { cle: "cheveux", label: "Coupe", icone: "fa-solid fa-scissors" },
+  { cle: "cheveux", label: "Cheveux", icone: "fa-solid fa-scissors" },
   { cle: "vetement", label: "Tenue", icone: "fa-solid fa-shirt" },
   { cle: "chaussures", label: "Chaussures", icone: "fa-solid fa-shoe-prints" },
   { cle: "gants", label: "Gants", icone: "fa-solid fa-hand" },
@@ -14,9 +12,6 @@ const CATEGORIES = [
   { cle: "lunettes", label: "Lunettes", icone: "fa-solid fa-glasses" },
   { cle: "couleur_aura", label: "Aura", icone: "fa-solid fa-sparkles" },
 ];
-
-const PALETTE_PEAU = ["#f5d5b8", "#e8c4a0", "#d9a878", "#c48a5a", "#9c6a42", "#6e4a30"];
-const PALETTE_CHEVEUX = ["#2a2a35", "#3a2a2f", "#5a4a3a", "#8a5a2a", "#e8d068", "#c94a4a", "#6a4ac9", "#e0e0e0"];
 
 export default function Personnalisation({ sessionToken, onRetour }) {
   const [catalogue, setCatalogue] = useState([]);
@@ -67,7 +62,7 @@ export default function Personnalisation({ sessionToken, onRetour }) {
   const categorieInfo = CATEGORIES.find((c) => c.cle === categorieActive);
   const itemsCategorie = catalogue.filter((i) => i.categorie === categorieActive);
   const estOptionnelle = ["chapeau", "lunettes", "gants"].includes(categorieActive);
-  const palette = categorieActive === "peau" ? PALETTE_PEAU : categorieActive === "couleur_cheveux" ? PALETTE_CHEVEUX : null;
+  const palette = null;
 
   return (
     <div className="fil-actu">
