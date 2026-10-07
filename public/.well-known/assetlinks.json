@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.onrender.grind_school_7agz.twa",
+        "sha256_cert_fingerprints": ["7D:5B:53:58:85:E6:19:72:3C:28:4A:BA:00:1F:ED:8F:93:05:A9:9C:31:AC:3F:FF:10:10:F7:90:44:B0:49:BD"]
+      }
+    }]
