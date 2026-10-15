@@ -1,59 +1,47 @@
 import { useEffect, useRef, useState } from "react";
-import { obtenirIdentifiantsTurn, urlSession, obtenirAvatarDe } from "../api.js";
-import { creerDetecteurParole } from "../lib/detecteurParole.js";
+import { Room, RoomEvent, Track } from "livekit-client";
+import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf } from "../api.js";
 import AvatarPersonnage from "./AvatarPersonnage.jsx";
 
 /**
- * SalleClasse — une seule connexion WebSocket pour toute la salle, qui
- * porte à la fois la signalisation audio (WebRTC) et la synchronisation
- * de la feuille. Deux sockets séparées sur le même {classe_id} pour le
- * même utilisateur se marcheraient dessus côté serveur (une seule entrée
- * par username dans la salle) — d'où la fusion en un seul composant.
+ * SalleClasse — audio à N personnes via LiveKit (notre WebRTC fait
+ * main de l'étape précédente ne tenait qu'à deux). LiveKit gère pour
+ * nous : la connexion, la détection de qui parle réellement (pas
+ * juste le volume brut), l'état micro de chacun, les arrivées/départs.
  *
- * Confidentialité des feuilles : chacun voit la sienne par défaut. Pour
- * voir celle d'un autre, il faut lui envoyer une demande — cette
- * personne doit l'autoriser explicitement avant que son contenu ne soit
- * partagé, en direct, tant que l'autorisation n'est pas retirée.
- *
- * Limite assumée pour l'instant : avec plus de deux personnes dans une
- * salle, l'autorisation est donnée par le propriétaire de la feuille
- * lui-même, pas par le "chef de classe" comme prévu à terme — à revoir
- * quand la salle gérera vraiment plus de deux participants.
+ * Notre propre canal WebSocket (/ws/session/{classe_id}) reste utilisé,
+ * mais seulement pour ce que LiveKit ne fait pas : la feuille
+ * collaborative et la demande/transfert du rôle de prof.
  */
-export default function SalleClasse({ sessionToken, demandeId, monUsername, onQuitter }) {
-  // ---- États audio, séparés comme validé à l'étape précédente ----
+export default function SalleClasse({ sessionToken, demandeId, monUsername, profInitial, onQuitter }) {
   const [permission, setPermission] = useState("attente");
   const [microActif, setMicroActif] = useState(true);
-  const [jeParle, setJeParle] = useState(false);
   const [connexion, setConnexion] = useState("connexion");
-  const [tentative, setTentative] = useState(0);
-  const [autreUsername, setAutreUsername] = useState(null);
-  const [autreAvatarConfig, setAutreAvatarConfig] = useState(null);
-  const [autreMicroActif, setAutreMicroActif] = useState(null);
-  const [autreParle, setAutreParle] = useState(false);
   const [erreur, setErreur] = useState(null);
 
-  // ---- États feuille ----
-  const [monTexte, setMonTexte] = useState("");
-  const [viewerAutorise, setViewerAutorise] = useState(null); // qui peut voir MA feuille
-  const [demandeRecue, setDemandeRecue] = useState(null); // qui me demande de voir la sienne
-  const [autorisationObtenue, setAutorisationObtenue] = useState(false); // je peux voir la SIENNE
-  const [autorisationRefusee, setAutorisationRefusee] = useState(false);
-  const [demandeEnvoyee, setDemandeEnvoyee] = useState(false);
-  const [texteDistant, setTexteDistant] = useState("");
-  const [ongletFeuille, setOngletFeuille] = useState("moi"); // "moi" | "autre"
+  const [participants, setParticipants] = useState([]); // [{identity, avatarConfig, micActif}]
+  const [parlants, setParlants] = useState(new Set());
 
+  const [profActuel, setProfActuel] = useState(profInitial);
+  const [demandeProfRecue, setDemandeProfRecue] = useState(null);
+  const [demandeProfEnvoyee, setDemandeProfEnvoyee] = useState(false);
+
+  const [ongletFeuille, setOngletFeuille] = useState("moi");
+  const [monTexte, setMonTexte] = useState("");
+  const [mesViewers, setMesViewers] = useState(new Set());
+  const [demandesRecues, setDemandesRecues] = useState([]);
+  const [demandesEnvoyees, setDemandesEnvoyees] = useState(new Set());
+  const [feuillesAutorisees, setFeuillesAutorisees] = useState({}); // { username: texte }
+  const [participantSelectionne, setParticipantSelectionne] = useState(null);
+
+  const roomRef = useRef(null);
   const socketRef = useRef(null);
-  const pcRef = useRef(null);
-  const streamLocalRef = useRef(null);
-  const audioDistantRef = useRef(null);
-  const autreUsernameRef = useRef(null);
-  const arreterDetecteurLocalRef = useRef(null);
-  const arreterDetecteurDistantRef = useRef(null);
-  const viewerAutoriseRef = useRef(null);
+  const avatarsCacheRef = useRef({});
+  const mesViewersRef = useRef(new Set());
+  const elementsAudioRef = useRef({});
   const delaiEnvoiRef = useRef(null);
-  const candidatsEnAttenteRef = useRef([]);
-  const descriptionDistanteDefinieRef = useRef(false);
+
+  const estProf = profActuel === monUsername;
 
   function envoyer(msg) {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -61,197 +49,144 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
     }
   }
 
-  async function demanderMicro() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamLocalRef.current = stream;
-      setPermission("accordee");
-      setMicroActif(true);
-      arreterDetecteurLocalRef.current = creerDetecteurParole(stream, setJeParle);
+  async function chargerAvatar(identity) {
+    if (avatarsCacheRef.current[identity]) return avatarsCacheRef.current[identity];
+    const res = await obtenirAvatarDe(identity);
+    avatarsCacheRef.current[identity] = res.config;
+    return res.config;
+  }
 
-      const pc = pcRef.current;
-      if (pc) {
-        stream.getTracks().forEach((piste) => pc.addTrack(piste, stream));
-        if (autreUsernameRef.current) {
-          const offre = await pc.createOffer();
-          await pc.setLocalDescription(offre);
-          envoyer({ type: "webrtc-offer", cible: autreUsernameRef.current, sdp: offre });
-        }
-      }
-    } catch {
-      setPermission("refusee");
-    }
+  async function ajouterParticipant(identity) {
+    const avatarConfig = await chargerAvatar(identity);
+    setParticipants((prev) => {
+      if (prev.some((p) => p.identity === identity)) return prev;
+      return [...prev, { identity, avatarConfig, micActif: true }];
+    });
+  }
+
+  function retirerParticipant(identity) {
+    setParticipants((prev) => prev.filter((p) => p.identity !== identity));
+    setParlants((prev) => {
+      const s = new Set(prev);
+      s.delete(identity);
+      return s;
+    });
+    setFeuillesAutorisees((prev) => {
+      const { [identity]: _retire, ...reste } = prev;
+      return reste;
+    });
+    setDemandesRecues((prev) => prev.filter((u) => u !== identity));
+    mesViewersRef.current.delete(identity);
+    setMesViewers(new Set(mesViewersRef.current));
   }
 
   useEffect(() => {
     let arrete = false;
-    setConnexion("connexion");
-    setErreur(null);
-    candidatsEnAttenteRef.current = [];
-    descriptionDistanteDefinieRef.current = false;
 
     async function demarrer() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (arrete) { stream.getTracks().forEach((t) => t.stop()); return; }
-        streamLocalRef.current = stream;
-        setPermission("accordee");
-        arreterDetecteurLocalRef.current = creerDetecteurParole(stream, setJeParle);
-      } catch {
-        setPermission("refusee");
-      }
+      // ---- WebSocket : feuille + transfert de prof ----
+      const socket = new WebSocket(urlSession(sessionToken, demandeId));
+      socketRef.current = socket;
 
-      let identifiantsTurn;
+      socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "sheet-update") {
+          setFeuillesAutorisees((prev) =>
+            prev[msg.sender] !== undefined ? { ...prev, [msg.sender]: msg.contenu } : prev
+          );
+        }
+        if (msg.type === "demande-voir-feuille") {
+          setDemandesRecues((prev) => (prev.includes(msg.sender) ? prev : [...prev, msg.sender]));
+        }
+        if (msg.type === "autorisation-voir-feuille") {
+          setDemandesEnvoyees((prev) => {
+            const s = new Set(prev);
+            s.delete(msg.sender);
+            return s;
+          });
+          if (msg.autorise) {
+            setFeuillesAutorisees((prev) => ({ ...prev, [msg.sender]: "" }));
+          }
+        }
+        if (msg.type === "demande-devenir-prof") {
+          setDemandeProfRecue(msg.sender);
+        }
+        if (msg.type === "reponse-devenir-prof") {
+          setDemandeProfEnvoyee(false);
+          if (msg.accepte) {
+            setProfActuel(monUsername);
+          }
+        }
+        if (msg.type === "prof-change") {
+          setProfActuel(msg.nouveau_prof);
+        }
+      };
+
+      // ---- LiveKit : audio à N personnes ----
+      let jetonData;
       try {
-        identifiantsTurn = await obtenirIdentifiantsTurn(sessionToken);
-      } catch {
-        setErreur("Configuration audio indisponible côté serveur");
+        jetonData = await obtenirJetonLiveKit(sessionToken, demandeId);
+      } catch (err) {
+        setErreur(err.message);
         setConnexion("echec");
         return;
       }
       if (arrete) return;
 
-      const socket = new WebSocket(urlSession(sessionToken, demandeId));
-      socketRef.current = socket;
+      const room = new Room({ adaptiveStream: true, dynacast: true });
+      roomRef.current = room;
 
-      socket.onopen = () => {
-        setConnexion("attente_pair");
-        socket.send(JSON.stringify({ type: "ready" }));
-      };
-      socket.onerror = () => setErreur("Connexion au serveur impossible");
-      socket.onclose = () => { if (!arrete) setConnexion("echec"); };
+      room.on(RoomEvent.ParticipantConnected, (p) => ajouterParticipant(p.identity));
+      room.on(RoomEvent.ParticipantDisconnected, (p) => retirerParticipant(p.identity));
 
-      socket.onmessage = async (event) => {
-        const msg = JSON.parse(event.data);
+      room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+        setParlants(new Set(speakers.map((p) => p.identity)));
+      });
 
-        // ---- Départ du pair : on efface tout son état, audio et feuille ----
-        if (msg.type === "peer-parti" && msg.sender === autreUsernameRef.current) {
-          setAutreUsername(null);
-          setAutreAvatarConfig(null);
-          setAutreMicroActif(null);
-          setAutreParle(false);
-          setConnexion("attente_pair");
-          setAutorisationObtenue(false);
-          setViewerAutorise(null);
-          setDemandeRecue(null);
-          setTexteDistant("");
-          arreterDetecteurDistantRef.current?.();
-          arreterDetecteurDistantRef.current = null;
-          pcRef.current?.close();
-          pcRef.current = null;
-          autreUsernameRef.current = null;
-          viewerAutoriseRef.current = null;
-          candidatsEnAttenteRef.current = [];
-          descriptionDistanteDefinieRef.current = false;
-          return;
+      room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+        if (track.kind === Track.Kind.Audio) {
+          const el = track.attach();
+          el.autoplay = true;
+          document.body.appendChild(el);
+          elementsAudioRef.current[participant.identity] = el;
         }
+      });
+      room.on(RoomEvent.TrackUnsubscribed, (track) => {
+        track.detach().forEach((el) => el.remove());
+      });
 
-        if (msg.type === "etat-micro" && msg.sender === autreUsernameRef.current) {
-          setAutreMicroActif(msg.actif);
-          return;
-        }
+      room.on(RoomEvent.TrackMuted, (_pub, participant) => {
+        setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: false } : p)));
+      });
+      room.on(RoomEvent.TrackUnmuted, (_pub, participant) => {
+        setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: true } : p)));
+      });
 
-        // ---- Feuille ----
-        if (msg.type === "demande-voir-feuille") {
-          setDemandeRecue(msg.sender);
-          return;
-        }
-        if (msg.type === "autorisation-voir-feuille") {
-          setDemandeEnvoyee(false);
-          if (msg.autorise) {
-            setAutorisationObtenue(true);
-          } else {
-            setAutorisationRefusee(true);
-          }
-          return;
-        }
-        if (msg.type === "sheet-update" && (msg.sender === viewerAutoriseRef.current || msg.sender === autreUsernameRef.current)) {
-          setTexteDistant(msg.contenu);
-          return;
-        }
+      room.on(RoomEvent.Disconnected, () => {
+        if (!arrete) setConnexion("echec");
+      });
 
-        // ---- Signalisation WebRTC (identique à l'étape précédente) ----
-        if (msg.type === "ready" && !autreUsernameRef.current) {
-          autreUsernameRef.current = msg.sender;
-          setAutreUsername(msg.sender);
-          setAutreMicroActif(true);
-          obtenirAvatarDe(msg.sender).then((res) => setAutreAvatarConfig(res.config));
+      try {
+        await room.connect(jetonData.url, jetonData.token);
+      } catch (err) {
+        setErreur("Connexion à la salle impossible");
+        setConnexion("echec");
+        return;
+      }
+      if (arrete) return;
+      setConnexion("connecte");
 
-          if (monUsername < msg.sender) {
-            await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
-            const offre = await pcRef.current.createOffer();
-            await pcRef.current.setLocalDescription(offre);
-            socket.send(JSON.stringify({ type: "webrtc-offer", cible: msg.sender, sdp: offre }));
-          } else {
-            await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
-          }
-        }
-
-        if (msg.type === "webrtc-offer") {
-          autreUsernameRef.current = msg.sender;
-          setAutreUsername(msg.sender);
-          setAutreMicroActif((v) => v ?? true);
-          obtenirAvatarDe(msg.sender).then((res) => setAutreAvatarConfig(res.config));
-          if (!pcRef.current) await creerConnexionPair(identifiantsTurn.iceServers, streamLocalRef.current, socket, msg.sender);
-          await pcRef.current.setRemoteDescription(msg.sdp);
-          descriptionDistanteDefinieRef.current = true;
-          for (const candidat of candidatsEnAttenteRef.current) {
-            try { await pcRef.current.addIceCandidate(candidat); } catch {}
-          }
-          candidatsEnAttenteRef.current = [];
-          const reponse = await pcRef.current.createAnswer();
-          await pcRef.current.setLocalDescription(reponse);
-          socket.send(JSON.stringify({ type: "webrtc-answer", cible: msg.sender, sdp: reponse }));
-        }
-
-        if (msg.type === "webrtc-answer" && pcRef.current) {
-          await pcRef.current.setRemoteDescription(msg.sdp);
-          descriptionDistanteDefinieRef.current = true;
-          for (const candidat of candidatsEnAttenteRef.current) {
-            try { await pcRef.current.addIceCandidate(candidat); } catch {}
-          }
-          candidatsEnAttenteRef.current = [];
-        }
-
-        if (msg.type === "webrtc-ice" && msg.candidate) {
-          if (pcRef.current && descriptionDistanteDefinieRef.current) {
-            try { await pcRef.current.addIceCandidate(msg.candidate); } catch {}
-          } else {
-            // Description distante pas encore posée — on garde le
-            // candidat de côté, appliqué juste après (voir plus haut).
-            candidatsEnAttenteRef.current.push(msg.candidate);
-          }
-        }
-      };
-    }
-
-    async function creerConnexionPair(iceServers, streamLocal, socket, destinataire) {
-      const pc = new RTCPeerConnection({ iceServers });
-      pcRef.current = pc;
-
-      if (streamLocal) {
-        streamLocal.getTracks().forEach((piste) => pc.addTrack(piste, streamLocal));
-      } else {
-        pc.addTransceiver("audio", { direction: "recvonly" });
+      for (const p of room.remoteParticipants.values()) {
+        ajouterParticipant(p.identity);
       }
 
-      pc.onicecandidate = (e) => {
-        if (e.candidate) socket.send(JSON.stringify({ type: "webrtc-ice", cible: destinataire, candidate: e.candidate }));
-      };
-      pc.ontrack = (e) => {
-        const streamDistant = e.streams[0];
-        if (audioDistantRef.current) audioDistantRef.current.srcObject = streamDistant;
-        setConnexion("connecte");
-        arreterDetecteurDistantRef.current?.();
-        arreterDetecteurDistantRef.current = creerDetecteurParole(streamDistant, setAutreParle);
-      };
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "connected") setConnexion("connecte");
-        else if (pc.connectionState === "disconnected") setConnexion("reconnexion");
-        else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
-          setConnexion((c) => (c === "connecte" || c === "reconnexion" ? "echec" : c));
-        }
-      };
+      try {
+        await room.localParticipant.setMicrophoneEnabled(true);
+        setPermission("accordee");
+      } catch {
+        setPermission("refusee");
+      }
     }
 
     demarrer();
@@ -259,64 +194,91 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
     return () => {
       arrete = true;
       socketRef.current?.close();
-      pcRef.current?.close();
-      streamLocalRef.current?.getTracks().forEach((t) => t.stop());
-      arreterDetecteurLocalRef.current?.();
-      arreterDetecteurDistantRef.current?.();
+      roomRef.current?.disconnect();
+      Object.values(elementsAudioRef.current).forEach((el) => el.remove());
       clearTimeout(delaiEnvoiRef.current);
     };
-  }, [tentative]);
+  }, []);
 
-  function basculerMicro() {
+  async function demanderMicro() {
+    try {
+      await roomRef.current?.localParticipant.setMicrophoneEnabled(true);
+      setPermission("accordee");
+      setMicroActif(true);
+    } catch {
+      setPermission("refusee");
+    }
+  }
+
+  async function basculerMicro() {
     if (permission !== "accordee") return;
     const nouvelEtat = !microActif;
     setMicroActif(nouvelEtat);
-    streamLocalRef.current?.getAudioTracks().forEach((t) => (t.enabled = nouvelEtat));
-    envoyer({ type: "etat-micro", actif: nouvelEtat });
+    await roomRef.current?.localParticipant.setMicrophoneEnabled(nouvelEtat);
   }
 
   function raccrocher() {
     socketRef.current?.close();
-    pcRef.current?.close();
-    streamLocalRef.current?.getTracks().forEach((t) => t.stop());
+    roomRef.current?.disconnect();
     onQuitter();
   }
 
-  // ---- Feuille : je tape, j'envoie seulement si quelqu'un est autorisé ----
+  // ---- Feuille ----
   function gererSaisie(valeur) {
     setMonTexte(valeur);
-    if (!viewerAutoriseRef.current) return;
     clearTimeout(delaiEnvoiRef.current);
     delaiEnvoiRef.current = setTimeout(() => {
-      envoyer({ type: "sheet-update", cible: viewerAutoriseRef.current, contenu: valeur });
+      mesViewersRef.current.forEach((cible) => {
+        envoyer({ type: "sheet-update", cible, contenu: valeur });
+      });
     }, 200);
   }
 
-  function autoriserDemande() {
-    if (!demandeRecue) return;
-    viewerAutoriseRef.current = demandeRecue;
-    setViewerAutorise(demandeRecue);
-    envoyer({ type: "autorisation-voir-feuille", cible: demandeRecue, autorise: true });
-    envoyer({ type: "sheet-update", cible: demandeRecue, contenu: monTexte });
-    setDemandeRecue(null);
+  function autoriserDemande(demandeur) {
+    mesViewersRef.current.add(demandeur);
+    setMesViewers(new Set(mesViewersRef.current));
+    envoyer({ type: "autorisation-voir-feuille", cible: demandeur, autorise: true });
+    envoyer({ type: "sheet-update", cible: demandeur, contenu: monTexte });
+    setDemandesRecues((prev) => prev.filter((u) => u !== demandeur));
   }
 
-  function refuserDemande() {
-    if (!demandeRecue) return;
-    envoyer({ type: "autorisation-voir-feuille", cible: demandeRecue, autorise: false });
-    setDemandeRecue(null);
+  function refuserDemande(demandeur) {
+    envoyer({ type: "autorisation-voir-feuille", cible: demandeur, autorise: false });
+    setDemandesRecues((prev) => prev.filter((u) => u !== demandeur));
   }
 
-  function retirerAcces() {
-    viewerAutoriseRef.current = null;
-    setViewerAutorise(null);
+  function retirerAcces(viewer) {
+    mesViewersRef.current.delete(viewer);
+    setMesViewers(new Set(mesViewersRef.current));
   }
 
-  function demanderAVoir() {
-    if (!autreUsername) return;
-    setDemandeEnvoyee(true);
-    setAutorisationRefusee(false);
-    envoyer({ type: "demande-voir-feuille", cible: autreUsername });
+  function demanderAVoir(identity) {
+    setDemandesEnvoyees((prev) => new Set(prev).add(identity));
+    envoyer({ type: "demande-voir-feuille", cible: identity });
+  }
+
+  // ---- Transfert de prof ----
+  function demanderDevenirProf() {
+    setDemandeProfEnvoyee(true);
+    envoyer({ type: "demande-devenir-prof", cible: profActuel });
+  }
+
+  async function accepterTransfertProf() {
+    const nouveau = demandeProfRecue;
+    try {
+      await transfererProf(sessionToken, demandeId, nouveau);
+      setProfActuel(nouveau);
+      setDemandeProfRecue(null);
+      envoyer({ type: "reponse-devenir-prof", cible: nouveau, accepte: true });
+      envoyer({ type: "prof-change", nouveau_prof: nouveau });
+    } catch (err) {
+      setErreur(err.message);
+    }
+  }
+
+  function refuserTransfertProf() {
+    envoyer({ type: "reponse-devenir-prof", cible: demandeProfRecue, accepte: false });
+    setDemandeProfRecue(null);
   }
 
   let iconeMicro = "fa-solid fa-microphone";
@@ -324,24 +286,17 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
   if (permission === "attente") iconeMicro = "fa-solid fa-spinner fa-spin";
   else if (permission === "refusee") { iconeMicro = "fa-solid fa-microphone-slash"; classeMicro += " bouton-micro-refuse"; }
   else if (!microActif) { iconeMicro = "fa-solid fa-microphone-slash"; classeMicro += " bouton-micro-coupe"; }
-  else if (jeParle) { iconeMicro = "fa-solid fa-microphone"; classeMicro += " bouton-micro-actif bouton-micro-parle"; }
+  else if (parlants.has(monUsername)) { iconeMicro = "fa-solid fa-microphone"; classeMicro += " bouton-micro-actif bouton-micro-parle"; }
   else { iconeMicro = "fa-solid fa-microphone"; classeMicro += " bouton-micro-actif"; }
+
+  const placesVides = Math.max(0, 9 - participants.length);
 
   return (
     <div className="salle-classe">
-      <audio ref={audioDistantRef} autoPlay />
-
       <div className="statut-appel">
         {connexion === "connexion" && <><i className="fa-solid fa-spinner fa-spin"></i> Préparation...</>}
-        {connexion === "attente_pair" && <><i className="fa-solid fa-ellipsis"></i> En attente d'un autre membre...</>}
-        {connexion === "connecte" && <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 10 }}></i> Connecté{autreUsername ? ` avec ${autreUsername}` : ""}</>}
-        {connexion === "reconnexion" && <><i className="fa-solid fa-rotate fa-spin"></i> Reconnexion...</>}
-        {connexion === "echec" && (
-          <>
-            <i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}
-            <button type="button" className="lien" onClick={() => setTentative((t) => t + 1)}>Réessayer</button>
-          </>
-        )}
+        {connexion === "connecte" && <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 10 }}></i> Connecté — {participants.length + 1}/10</>}
+        {connexion === "echec" && <><i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}</>}
       </div>
 
       {permission === "refusee" && (
@@ -351,19 +306,34 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
         </div>
       )}
 
-      {autreUsername && (
-        <div className="carte-participant">
-          <AvatarPersonnage config={autreAvatarConfig} parle={autreParle} taille={64} />
-          <div>
-            <div className="auteur-post">{autreUsername}</div>
-            <div className="etat-micro-participant">
-              {autreMicroActif === false ? <><i className="fa-solid fa-microphone-slash"></i> Micro coupé</>
-                : autreParle ? <><i className="fa-solid fa-microphone"></i> Parle</>
-                : <><i className="fa-solid fa-microphone"></i> Silencieux</>}
-            </div>
-          </div>
+      {demandeProfRecue && (
+        <div className="banniere-demande">
+          <i className="fa-solid fa-chalkboard-user"></i> {demandeProfRecue} veut devenir prof
+          <button type="button" onClick={accepterTransfertProf}>Accepter</button>
+          <button type="button" className="bouton-retour" onClick={refuserTransfertProf}>Refuser</button>
         </div>
       )}
+
+      {/* ---- Grille des bureaux ---- */}
+      <div className="grille-bureaux">
+        <div className="bureau-occupe bureau-moi">
+          <AvatarPersonnage config={avatarsCacheRef.current[monUsername]} parle={parlants.has(monUsername)} taille={64} />
+          <div className="nom-bureau">{monUsername} {estProf && <i className="fa-solid fa-star" title="Prof"></i>}</div>
+          <i className={microActif ? "fa-solid fa-microphone" : "fa-solid fa-microphone-slash"}></i>
+        </div>
+
+        {participants.map((p) => (
+          <div key={p.identity} className="bureau-occupe">
+            <AvatarPersonnage config={p.avatarConfig} parle={parlants.has(p.identity)} taille={64} />
+            <div className="nom-bureau">{p.identity} {profActuel === p.identity && <i className="fa-solid fa-star" title="Prof"></i>}</div>
+            <i className={p.micActif ? "fa-solid fa-microphone" : "fa-solid fa-microphone-slash"}></i>
+          </div>
+        ))}
+
+        {Array.from({ length: placesVides }).map((_, i) => (
+          <div key={`vide-${i}`} className="bureau-vide"><i className="fa-regular fa-circle"></i></div>
+        ))}
+      </div>
 
       <div className="controles-appel">
         <button className={classeMicro} onClick={basculerMicro} type="button" disabled={permission === "attente"}>
@@ -374,40 +344,42 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
         </button>
       </div>
 
-      {/* ================= Feuille collaborative ================= */}
+      {!estProf && !demandeProfEnvoyee && (
+        <button type="button" className="lien" onClick={demanderDevenirProf}>
+          <i className="fa-solid fa-chalkboard-user"></i> Demander à devenir prof
+        </button>
+      )}
+      {demandeProfEnvoyee && <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Demande envoyée...</div>}
+
+      {/* ---- Feuille collaborative ---- */}
       <div className="bloc-feuille">
         <div className="onglets-feuille">
           <button className={ongletFeuille === "moi" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("moi")} type="button">
             <i className="fa-solid fa-file-lines"></i> Ma feuille
           </button>
-          {autreUsername && (
-            <button className={ongletFeuille === "autre" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autre")} type="button">
-              <i className="fa-solid fa-eye"></i> Feuille de {autreUsername}
-            </button>
-          )}
+          <button className={ongletFeuille === "autres" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autres")} type="button">
+            <i className="fa-solid fa-eye"></i> Feuilles
+          </button>
         </div>
 
-        {demandeRecue && (
-          <div className="banniere-demande">
-            <i className="fa-solid fa-eye"></i> {demandeRecue} veut voir ta feuille
-            <button type="button" onClick={autoriserDemande}>Autoriser</button>
-            <button type="button" className="bouton-retour" onClick={refuserDemande}>Refuser</button>
+        {demandesRecues.map((d) => (
+          <div key={d} className="banniere-demande">
+            <i className="fa-solid fa-eye"></i> {d} veut voir ta feuille
+            <button type="button" onClick={() => autoriserDemande(d)}>Autoriser</button>
+            <button type="button" className="bouton-retour" onClick={() => refuserDemande(d)}>Refuser</button>
           </div>
-        )}
+        ))}
 
         {ongletFeuille === "moi" && (
           <>
-            <textarea
-              className="feuille-textarea"
-              value={monTexte}
-              onChange={(e) => gererSaisie(e.target.value)}
-              placeholder="Écris ici — privé, sauf si tu autorises quelqu'un à voir"
-              rows={8}
-            />
-            {viewerAutorise ? (
-              <div className="info">
-                <i className="fa-solid fa-eye"></i> Visible par {viewerAutorise}
-                <button type="button" className="lien" onClick={retirerAcces}>Retirer l'accès</button>
+            <textarea className="feuille-textarea" value={monTexte} onChange={(e) => gererSaisie(e.target.value)} placeholder="Écris ici — privé, sauf si tu autorises quelqu'un" rows={6} />
+            {mesViewers.size > 0 ? (
+              <div className="choix-categorie" style={{ flexWrap: "wrap" }}>
+                {[...mesViewers].map((v) => (
+                  <span key={v} className="chip">
+                    {v} <button type="button" className="lien" onClick={() => retirerAcces(v)} style={{ marginLeft: 6 }}>×</button>
+                  </span>
+                ))}
               </div>
             ) : (
               <div className="info"><i className="fa-solid fa-lock"></i> Privée, personne ne la voit</div>
@@ -415,19 +387,23 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, onQu
           </>
         )}
 
-        {ongletFeuille === "autre" && (
+        {ongletFeuille === "autres" && (
           <>
-            {autorisationObtenue ? (
-              <textarea className="feuille-textarea" value={texteDistant} readOnly rows={8} placeholder="En attente de contenu..." />
-            ) : demandeEnvoyee ? (
-              <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Demande envoyée, en attente...</div>
-            ) : autorisationRefusee ? (
-              <div className="erreur"><i className="fa-solid fa-lock"></i> Accès refusé</div>
-            ) : (
-              <button type="button" onClick={demanderAVoir}>
-                <i className="fa-solid fa-eye"></i> Demander à voir cette feuille
-              </button>
-            )}
+            {participants.length === 0 && <div className="info">Personne d'autre dans la salle.</div>}
+            {participants.map((p) => (
+              <div key={p.identity} className="carte-post" style={{ marginBottom: 10 }}>
+                <div className="auteur-post">{p.identity}</div>
+                {feuillesAutorisees[p.identity] !== undefined ? (
+                  <textarea className="feuille-textarea" value={feuillesAutorisees[p.identity]} readOnly rows={4} />
+                ) : demandesEnvoyees.has(p.identity) ? (
+                  <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> En attente...</div>
+                ) : (
+                  <button type="button" onClick={() => demanderAVoir(p.identity)}>
+                    <i className="fa-solid fa-eye"></i> Demander à voir sa feuille
+                  </button>
+                )}
+              </div>
+            ))}
           </>
         )}
       </div>

@@ -160,6 +160,28 @@ export async function renommerClasse(sessionToken, classeId, nom) {
   return data;
 }
 
+export async function obtenirJetonLiveKit(sessionToken, classeId) {
+  const res = await fetch(`${GRIND_URL}/api/livekit/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, classe_id: classeId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Impossible d'obtenir l'accès audio");
+  return data;
+}
+
+export async function transfererProf(sessionToken, classeId, nouveauProf) {
+  const res = await fetch(`${GRIND_URL}/api/classes/${classeId}/transferer-prof`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, nouveau_prof: nouveauProf }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Transfert impossible");
+  return data;
+}
+
 export async function supprimerClasse(sessionToken, classeId) {
   const res = await fetch(`${GRIND_URL}/api/classes/${classeId}?session_token=${encodeURIComponent(sessionToken)}`, {
     method: "DELETE",
