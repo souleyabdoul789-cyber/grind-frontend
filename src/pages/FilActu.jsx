@@ -5,10 +5,12 @@ import SelecteurDate from "../components/SelecteurDate.jsx";
 import EditeurPhoto from "../components/EditeurPhoto.jsx";
 import EditeurVideo from "../components/EditeurVideo.jsx";
 import EtatVide from "../components/EtatVide.jsx";
+import ProfilPublic from "../components/ProfilPublic.jsx";
 
 const LIMITE_LEGENDE = 500;
 
 export default function FilActu({ sessionToken, monUsername }) {
+  const [profilConsulte, setProfilConsulte] = useState(null);
   const [posts, setPosts] = useState([]);
   const [filtre, setFiltre] = useState(null);
   const [chargement, setChargement] = useState(true);
@@ -109,6 +111,10 @@ export default function FilActu({ sessionToken, monUsername }) {
       setEnvoiEnCours(false);
       setUploadEnCours(false);
     }
+  }
+
+  if (profilConsulte) {
+    return <ProfilPublic username={profilConsulte} onRetour={() => setProfilConsulte(null)} />;
   }
 
   return (
@@ -222,6 +228,7 @@ export default function FilActu({ sessionToken, monUsername }) {
             sessionToken={sessionToken}
             monUsername={monUsername}
             onSupprime={(id) => setPosts((prev) => prev.filter((p) => p.id !== id))}
+            onClicAuteur={setProfilConsulte}
           />
         ))
       )}

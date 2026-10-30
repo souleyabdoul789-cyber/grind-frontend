@@ -19,6 +19,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const [connexion, setConnexion] = useState("connexion");
   const [erreur, setErreur] = useState(null);
 
+  const [monAvatarConfig, setMonAvatarConfig] = useState(null);
   const [participants, setParticipants] = useState([]); // [{identity, avatarConfig, micActif}]
   const [parlants, setParlants] = useState(new Set());
 
@@ -42,6 +43,29 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const delaiEnvoiRef = useRef(null);
 
   const estProf = profActuel === monUsername;
+  const [estPaysage, setEstPaysage] = useState(
+    window.matchMedia("(orientation: landscape)").matches
+  );
+
+  useEffect(() => {
+    const media = window.matchMedia("(orientation: landscape)");
+    const gerer = (e) => setEstPaysage(e.matches);
+    media.addEventListener("change", gerer);
+
+    // Tentative de verrouillage réel — ne marche que dans certains
+    // contextes (app installée/plein écran) ; sinon on se rabat sur le
+    // message "tourne ton téléphone" ci-dessous, qui marche toujours.
+    if (screen.orientation?.lock) {
+      screen.orientation.lock("landscape").catch(() => {});
+    }
+
+    return () => {
+      media.removeEventListener("change", gerer);
+      if (screen.orientation?.unlock) {
+        try { screen.orientation.unlock(); } catch {}
+      }
+    };
+  }, []);
 
   function envoyer(msg) {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -291,6 +315,16 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
 
   const placesVides = Math.max(0, 9 - participants.length);
 
+  if (!estPaysage) {
+    return (
+      <div className="invite-paysage">
+        <i className="fa-solid fa-mobile-screen rotation-icone"></i>
+        <div className="sous-titre">Tourne ton téléphone en mode paysage</div>
+        <div className="info">La vue de classe a besoin d'espace pour afficher tout le monde</div>
+      </div>
+    );
+  }
+
   return (
     <div className="salle-classe">
       <div className="statut-appel">
@@ -314,24 +348,43 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         </div>
       )}
 
-      {/* ---- Grille des bureaux ---- */}
+      {/* ---- Zone prof : détachée, devant la classe ---- */}
+      <div className="zone-prof">
+        <div className="tableau-noir"></div>
+        <div className="carte-prof">
+          <AvatarPersonnage
+            config={avatarsCacheRef.current[profActuel] || (estProf ? avatarsCacheRef.current[monUsername] : null)}
+            parle={parlants.has(profActuel)}
+            taille={70}
+          />
+          <div className="nom-bureau"><i className="fa-solid fa-star"></i> {profActuel}</div>
+        </div>
+      </div>
+
+      {/* ---- Bureaux des élèves ---- */}
       <div className="grille-bureaux">
-        <div className="bureau-occupe bureau-moi">
-          <AvatarPersonnage config={avatarsCacheRef.current[monUsername]} parle={parlants.has(monUsername)} taille={64} />
+        <div className="bureau">
+          <div className="buste-bureau">
+            <AvatarPersonnage config={avatarsCacheRef.current[monUsername]} parle={parlants.has(monUsername)} taille={64} />
+          </div>
+          <div className="feuille-bureau"></div>
           <div className="nom-bureau">{monUsername} {estProf && <i className="fa-solid fa-star" title="Prof"></i>}</div>
           <i className={microActif ? "fa-solid fa-microphone" : "fa-solid fa-microphone-slash"}></i>
         </div>
 
         {participants.map((p) => (
-          <div key={p.identity} className="bureau-occupe">
-            <AvatarPersonnage config={p.avatarConfig} parle={parlants.has(p.identity)} taille={64} />
+          <div key={p.identity} className="bureau">
+            <div className="buste-bureau">
+              <AvatarPersonnage config={p.avatarConfig} parle={parlants.has(p.identity)} taille={64} />
+            </div>
+            <div className="feuille-bureau"></div>
             <div className="nom-bureau">{p.identity} {profActuel === p.identity && <i className="fa-solid fa-star" title="Prof"></i>}</div>
             <i className={p.micActif ? "fa-solid fa-microphone" : "fa-solid fa-microphone-slash"}></i>
           </div>
         ))}
 
         {Array.from({ length: placesVides }).map((_, i) => (
-          <div key={`vide-${i}`} className="bureau-vide"><i className="fa-regular fa-circle"></i></div>
+          <div key={`vide-${i}`} className="bureau bureau-vide"><i className="fa-regular fa-circle"></i></div>
         ))}
       </div>
 

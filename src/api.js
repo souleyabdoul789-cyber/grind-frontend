@@ -241,6 +241,11 @@ export async function obtenirMonAvatar(sessionToken) {
   return res.json();
 }
 
+export async function obtenirProfilDe(username) {
+  const res = await fetch(`${GRIND_URL}/api/profil/de/${encodeURIComponent(username)}`);
+  return res.json();
+}
+
 export async function obtenirAvatarDe(username) {
   const res = await fetch(`${GRIND_URL}/api/avatar/de/${encodeURIComponent(username)}`);
   return res.json();

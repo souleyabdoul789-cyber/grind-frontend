@@ -1648,34 +1648,97 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(201,182,228,0.3);
 }
 
-/* ==================== Grille de bureaux (salle à N personnes) ==================== */
-.grille-bureaux {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-  gap: 10px;
-  width: 100%;
-  max-width: 560px;
-  margin: 16px 0;
+/* ==================== Écran "tourne ton téléphone" ==================== */
+.invite-paysage {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  text-align: center;
 }
 
-.bureau-occupe, .bureau-vide {
+.rotation-icone {
+  font-size: 48px;
+  color: var(--violet);
+  animation: tourner-telephone 1.8s ease-in-out infinite;
+}
+
+@keyframes tourner-telephone {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-90deg); }
+}
+
+/* ==================== Zone prof, détachée devant la classe ==================== */
+.zone-prof {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 10px 0 20px;
+}
+
+.tableau-noir {
+  width: 220px;
+  height: 50px;
+  border-radius: 10px;
+  background: #16161c;
+  border: 1px solid var(--border);
+  margin-bottom: -14px;
+}
+
+.carte-prof {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 10px 6px;
+  padding: 10px 20px 12px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1px solid var(--brown);
+}
+
+/* ==================== Grille de bureaux (salle à N personnes) ==================== */
+.grille-bureaux {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 0 16px;
+}
+
+.bureau {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px 8px;
   border-radius: 14px;
   background: var(--card);
   border: 1px solid var(--border);
+  position: relative;
 }
 
-.bureau-moi {
-  border-color: var(--brown);
+.buste-bureau {
+  margin-bottom: -6px;
+}
+
+/* La feuille de l'élève, posée devant lui — légèrement transparente,
+   comme demandé, pour ne jamais cacher la vue d'ensemble */
+.feuille-bureau {
+  width: 60%;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 4px;
 }
 
 .bureau-vide {
   justify-content: center;
-  min-height: 110px;
+  min-height: 112px;
   color: var(--text-dim);
   opacity: 0.4;
   border-style: dashed;
@@ -1699,7 +1762,103 @@ button:disabled {
   font-size: 9px;
 }
 
-.bureau-occupe > i {
+.bureau > i {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+/* ==================== Avatar/pseudo cliquables dans le fil ==================== */
+.avatar-mini-bouton {
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: transparent;
+  border: none;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.avatar-mini-bouton:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  opacity: 0.85;
+}
+
+.auteur-post-bouton {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  text-align: left;
+}
+
+.auteur-post-bouton:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  text-decoration: underline;
+}
+
+/* ==================== Icône de profil (visage) — posts et commentaires ==================== */
+.avatar-icone {
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.avatar-icone:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  opacity: 0.85;
+}
+
+.avatar-icone svg {
+  display: block;
+}
+
+.ligne-commentaire {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.texte-commentaire {
+  flex: 1;
+  min-width: 0;
+}
+
+.auteur-commentaire-bouton {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--violet);
+  text-align: left;
+  cursor: pointer;
+}
+
+.auteur-commentaire-bouton:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  text-decoration: underline;
 }

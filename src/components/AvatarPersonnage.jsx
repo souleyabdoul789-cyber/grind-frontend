@@ -15,7 +15,8 @@ const COULEURS_AURA = {
  * - garçon  : épaules larges, pantalon, cheveux en pics, sourcils plus marqués
  * - neutre  : entre les deux, cheveux courts arrondis
  */
-export default function AvatarPersonnage({ config, parle = false, taille = 140 }) {
+export default function AvatarPersonnage({ config, parle = false, taille = 140, vue = "complet" }) {
+  const enTete = vue === "tete";
   const [auraA, auraB] = COULEURS_AURA[config?.couleur_aura] || COULEURS_AURA.brand;
 
   const genre = (config?.genre || "genre_neutre").replace("genre_", "");
@@ -42,7 +43,13 @@ export default function AvatarPersonnage({ config, parle = false, taille = 140 }
   const droiteX = 80 + demiTorse;
 
   return (
-    <svg width={taille} height={taille * 1.5} viewBox="0 0 160 240" xmlns="http://www.w3.org/2000/svg" className="avatar-respire">
+    <svg
+      width={taille}
+      height={enTete ? taille : taille * 1.5}
+      viewBox={enTete ? "28 24 104 104" : "0 0 160 240"}
+      xmlns="http://www.w3.org/2000/svg"
+      className={enTete ? undefined : "avatar-respire"}
+    >
       <defs>
         <radialGradient id="auraGlow">
           <stop offset="0%" stopColor={auraA} stopOpacity="0.55" />

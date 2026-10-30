@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost, supprimerPost } from "../api.js";
+import { useState, useEffect } from "react";
+import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost, supprimerPost, obtenirAvatarDe } from "../api.js";
 import LecteurMedia from "./LecteurMedia.jsx";
 import TexteExtensible from "./TexteExtensible.jsx";
 import ConfirmModal from "./ConfirmModal.jsx";
+import AvatarIcone from "./AvatarIcone.jsx";
 
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();
@@ -20,7 +21,13 @@ const STATUT_STYLE = {
   publiee: null,
 };
 
-export default function CartePost({ post, sessionToken, monUsername, onSupprime }) {
+export default function CartePost({ post, sessionToken, monUsername, onSupprime, onClicAuteur }) {
+  const [avatarAuteur, setAvatarAuteur] = useState(null);
+
+  useEffect(() => {
+    obtenirAvatarDe(post.auteur).then((res) => setAvatarAuteur(res.config));
+  }, [post.auteur]);
+
   const [aime, setAime] = useState(false);
   const [nbLikes, setNbLikes] = useState(post.likes);
   const [commentairesOuverts, setCommentairesOuverts] = useState(false);
@@ -83,11 +90,11 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime 
   return (
     <div className="carte-post">
       <div className="entete-post">
-        <div className="avatar-mini">
-          <i className="fa-solid fa-user"></i>
-        </div>
+        <AvatarIcone username={post.auteur} config={avatarAuteur} taille={40} onClic={onClicAuteur} />
         <div>
-          <div className="auteur-post">{post.auteur}</div>
+          <button type="button" className="auteur-post auteur-post-bouton" onClick={() => onClicAuteur && onClicAuteur(post.auteur)}>
+            {post.auteur}
+          </button>
           <div className={`badge-categorie ${post.categorie}`}>
             <i className={post.categorie === "probleme" ? "fa-solid fa-circle-question" : "fa-solid fa-star"}></i>
             {post.categorie === "probleme" ? "Problème" : "Démonstration"}
@@ -145,7 +152,13 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime 
         <div className="bloc-commentaires">
           {commentaires.map((c) => (
             <div key={c.id} className="ligne-commentaire">
-              <span className="auteur-commentaire">{c.username}</span> {c.contenu}
+              <AvatarIcone username={c.username} taille={26} onClic={onClicAuteur} />
+              <div className="texte-commentaire">
+                <button type="button" className="auteur-commentaire auteur-commentaire-bouton" onClick={() => onClicAuteur && onClicAuteur(c.username)}>
+                  {c.username}
+                </button>{" "}
+                {c.contenu}
+              </div>
             </div>
           ))}
           <div className="saisie-commentaire">
