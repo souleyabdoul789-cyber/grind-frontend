@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf } from "../api.js";
-import AvatarPersonnage from "./AvatarPersonnage.jsx";
+import SceneClasse, { NB_SIEGES } from "./SceneClasse.jsx";
 
 /**
  * SalleClasse — audio à N personnes via LiveKit (notre WebRTC fait
@@ -13,7 +13,7 @@ import AvatarPersonnage from "./AvatarPersonnage.jsx";
  * mais seulement pour ce que LiveKit ne fait pas : la feuille
  * collaborative et la demande/transfert du rôle de prof.
  */
-export default function SalleClasse({ sessionToken, demandeId, monUsername, profInitial, onQuitter }) {
+export default function SalleClasse({ sessionToken, demandeId, monUsername, profInitial, nomClasse, onQuitter }) {
   const [permission, setPermission] = useState("attente");
   const [microActif, setMicroActif] = useState(true);
   const [connexion, setConnexion] = useState("connexion");
@@ -41,6 +41,8 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const mesViewersRef = useRef(new Set());
   const elementsAudioRef = useRef({});
   const delaiEnvoiRef = useRef(null);
+  const placesRef = useRef({}); // identity -> numéro de siège (stable tant qu'on reste)
+  const [panneauOuvert, setPanneauOuvert] = useState(false);
 
   const estProf = profActuel === monUsername;
   const [estPaysage, setEstPaysage] = useState(
@@ -87,6 +89,14 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       return [...prev, { identity, avatarConfig, micActif: true }];
     });
   }
+
+  useEffect(() => {
+    let actif = true;
+    chargerAvatar(monUsername)
+      .then((c) => { if (actif) setMonAvatarConfig(c); })
+      .catch(() => {});
+    return () => { actif = false; };
+  }, [monUsername]);
 
   function retirerParticipant(identity) {
     setParticipants((prev) => prev.filter((p) => p.identity !== identity));
@@ -313,8 +323,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   else if (parlants.has(monUsername)) { iconeMicro = "fa-solid fa-microphone"; classeMicro += " bouton-micro-actif bouton-micro-parle"; }
   else { iconeMicro = "fa-solid fa-microphone"; classeMicro += " bouton-micro-actif"; }
 
-  const placesVides = Math.max(0, 9 - participants.length);
-
   if (!estPaysage) {
     return (
       <div className="invite-paysage">
@@ -325,141 +333,184 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     );
   }
 
+  function choisirSiege(identity) {
+    if (identity === monUsername) return;
+    setParticipantSelectionne(identity);
+    setOngletFeuille("autres");
+    setPanneauOuvert(true);
+  }
+
+  // ---- Sièges : chacun garde sa place tant qu'il reste dans la salle ----
+  // Le prof n'occupe pas de pupitre d'élève : il a son propre bureau devant le tableau.
+  const presents = [monUsername, ...participants.map((p) => p.identity)].filter((id) => id !== profActuel);
+  for (const id of Object.keys(placesRef.current)) {
+    if (!presents.includes(id)) delete placesRef.current[id];
+  }
+  const prises = new Set(Object.values(placesRef.current));
+  for (const id of presents) {
+    if (placesRef.current[id] === undefined) {
+      let i = 0;
+      while (prises.has(i)) i += 1;
+      placesRef.current[id] = i;
+      prises.add(i);
+    }
+  }
+
+  function infosDe(id) {
+    if (id === monUsername) {
+      return {
+        identity: id,
+        config: monAvatarConfig || avatarsCacheRef.current[id] || null,
+        parle: parlants.has(id),
+        micActif: microActif,
+      };
+    }
+    const p = participants.find((x) => x.identity === id);
+    return p ? { identity: id, config: p.avatarConfig, parle: parlants.has(id), micActif: p.micActif } : null;
+  }
+
+  const occupants = Array.from({ length: NB_SIEGES }, () => null);
+  presents.forEach((id) => {
+    const i = placesRef.current[id];
+    if (i < NB_SIEGES) occupants[i] = infosDe(id);
+  });
+  const profInfos = profActuel ? infosDe(profActuel) : null;
+
+  const autresOrdonnes = [...participants].sort(
+    (a, b) => (b.identity === participantSelectionne ? 1 : 0) - (a.identity === participantSelectionne ? 1 : 0)
+  );
+
   return (
-    <div className="salle-classe">
-      <div className="statut-appel">
-        {connexion === "connexion" && <><i className="fa-solid fa-spinner fa-spin"></i> Préparation...</>}
-        {connexion === "connecte" && <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 10 }}></i> Connecté — {participants.length + 1}/10</>}
-        {connexion === "echec" && <><i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}</>}
-      </div>
+    <div className="classe-jeu">
+      <SceneClasse
+        occupants={occupants}
+        prof={profInfos}
+        nomClasse={nomClasse}
+        monUsername={monUsername}
+        selection={participantSelectionne}
+        onSelection={choisirSiege}
+      />
 
-      {permission === "refusee" && (
-        <div className="info">
-          <i className="fa-solid fa-circle-info"></i> Micro refusé — tu peux écouter, pas parler.
-          <button type="button" className="lien" onClick={demanderMicro}>Autoriser le micro</button>
-        </div>
-      )}
-
-      {demandeProfRecue && (
-        <div className="banniere-demande">
-          <i className="fa-solid fa-chalkboard-user"></i> {demandeProfRecue} veut devenir prof
-          <button type="button" onClick={accepterTransfertProf}>Accepter</button>
-          <button type="button" className="bouton-retour" onClick={refuserTransfertProf}>Refuser</button>
-        </div>
-      )}
-
-      {/* ---- Zone prof : détachée, devant la classe ---- */}
-      <div className="zone-prof">
-        <div className="tableau-noir"></div>
-        <div className="carte-prof">
-          <AvatarPersonnage
-            config={avatarsCacheRef.current[profActuel] || (estProf ? avatarsCacheRef.current[monUsername] : null)}
-            parle={parlants.has(profActuel)}
-            taille={70}
-          />
-          <div className="nom-bureau"><i className="fa-solid fa-star"></i> {profActuel}</div>
+      {/* ---- Barre d'état, en haut à gauche ---- */}
+      <div className="hud hud-haut-gauche">
+        <div className="hud-pastille">
+          {connexion === "connexion" && <><i className="fa-solid fa-spinner fa-spin"></i> Préparation...</>}
+          {connexion === "connecte" && <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 9 }}></i> {participants.length + 1}/10</>}
+          {connexion === "echec" && <><i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}</>}
         </div>
       </div>
 
-      {/* ---- Bureaux des élèves ---- */}
-      <div className="grille-bureaux">
-        <div className="bureau">
-          <div className="buste-bureau">
-            <AvatarPersonnage config={avatarsCacheRef.current[monUsername]} parle={parlants.has(monUsername)} taille={64} />
-          </div>
-          <div className="feuille-bureau"></div>
-          <div className="nom-bureau">{monUsername} {estProf && <i className="fa-solid fa-star" title="Prof"></i>}</div>
-          <i className={microActif ? "fa-solid fa-microphone" : "fa-solid fa-microphone-slash"}></i>
-        </div>
-
-        {participants.map((p) => (
-          <div key={p.identity} className="bureau">
-            <div className="buste-bureau">
-              <AvatarPersonnage config={p.avatarConfig} parle={parlants.has(p.identity)} taille={64} />
-            </div>
-            <div className="feuille-bureau"></div>
-            <div className="nom-bureau">{p.identity} {profActuel === p.identity && <i className="fa-solid fa-star" title="Prof"></i>}</div>
-            <i className={p.micActif ? "fa-solid fa-microphone" : "fa-solid fa-microphone-slash"}></i>
-          </div>
-        ))}
-
-        {Array.from({ length: placesVides }).map((_, i) => (
-          <div key={`vide-${i}`} className="bureau bureau-vide"><i className="fa-regular fa-circle"></i></div>
-        ))}
-      </div>
-
-      <div className="controles-appel">
-        <button className={classeMicro} onClick={basculerMicro} type="button" disabled={permission === "attente"}>
-          <i className={iconeMicro}></i>
+      {/* ---- Actions, en haut à droite ---- */}
+      <div className="hud hud-haut-droite">
+        <button type="button" className="hud-bouton" onClick={() => setPanneauOuvert((o) => !o)}>
+          <i className="fa-solid fa-file-lines"></i> Feuille
+          {demandesRecues.length > 0 && <span className="hud-badge">{demandesRecues.length}</span>}
         </button>
-        <button className="bouton-appel bouton-raccrocher" onClick={raccrocher} type="button">
-          <i className="fa-solid fa-phone-slash"></i>
-        </button>
-      </div>
-
-      {!estProf && !demandeProfEnvoyee && (
-        <button type="button" className="lien" onClick={demanderDevenirProf}>
-          <i className="fa-solid fa-chalkboard-user"></i> Demander à devenir prof
-        </button>
-      )}
-      {demandeProfEnvoyee && <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Demande envoyée...</div>}
-
-      {/* ---- Feuille collaborative ---- */}
-      <div className="bloc-feuille">
-        <div className="onglets-feuille">
-          <button className={ongletFeuille === "moi" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("moi")} type="button">
-            <i className="fa-solid fa-file-lines"></i> Ma feuille
+        {!estProf && !demandeProfEnvoyee && (
+          <button type="button" className="hud-bouton" onClick={demanderDevenirProf}>
+            <i className="fa-solid fa-chalkboard-user"></i> Devenir prof
           </button>
-          <button className={ongletFeuille === "autres" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autres")} type="button">
-            <i className="fa-solid fa-eye"></i> Feuilles
-          </button>
-        </div>
+        )}
+        {demandeProfEnvoyee && (
+          <div className="hud-pastille"><i className="fa-solid fa-spinner fa-spin"></i> Demande envoyée...</div>
+        )}
+      </div>
 
+      {/* ---- Notifications au centre ---- */}
+      <div className="hud-notifs">
+        {permission === "refusee" && (
+          <div className="banniere-demande">
+            <i className="fa-solid fa-circle-info"></i> Micro refusé — tu peux écouter, pas parler.
+            <button type="button" className="hud-bouton" onClick={demanderMicro}>Autoriser le micro</button>
+          </div>
+        )}
+        {demandeProfRecue && (
+          <div className="banniere-demande">
+            <i className="fa-solid fa-chalkboard-user"></i> {demandeProfRecue} veut devenir prof
+            <button type="button" className="hud-bouton" onClick={accepterTransfertProf}>Accepter</button>
+            <button type="button" className="hud-bouton" onClick={refuserTransfertProf}>Refuser</button>
+          </div>
+        )}
         {demandesRecues.map((d) => (
           <div key={d} className="banniere-demande">
             <i className="fa-solid fa-eye"></i> {d} veut voir ta feuille
-            <button type="button" onClick={() => autoriserDemande(d)}>Autoriser</button>
-            <button type="button" className="bouton-retour" onClick={() => refuserDemande(d)}>Refuser</button>
+            <button type="button" className="hud-bouton" onClick={() => autoriserDemande(d)}>Autoriser</button>
+            <button type="button" className="hud-bouton" onClick={() => refuserDemande(d)}>Refuser</button>
           </div>
         ))}
-
-        {ongletFeuille === "moi" && (
-          <>
-            <textarea className="feuille-textarea" value={monTexte} onChange={(e) => gererSaisie(e.target.value)} placeholder="Écris ici — privé, sauf si tu autorises quelqu'un" rows={6} />
-            {mesViewers.size > 0 ? (
-              <div className="choix-categorie" style={{ flexWrap: "wrap" }}>
-                {[...mesViewers].map((v) => (
-                  <span key={v} className="chip">
-                    {v} <button type="button" className="lien" onClick={() => retirerAcces(v)} style={{ marginLeft: 6 }}>×</button>
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <div className="info"><i className="fa-solid fa-lock"></i> Privée, personne ne la voit</div>
-            )}
-          </>
-        )}
-
-        {ongletFeuille === "autres" && (
-          <>
-            {participants.length === 0 && <div className="info">Personne d'autre dans la salle.</div>}
-            {participants.map((p) => (
-              <div key={p.identity} className="carte-post" style={{ marginBottom: 10 }}>
-                <div className="auteur-post">{p.identity}</div>
-                {feuillesAutorisees[p.identity] !== undefined ? (
-                  <textarea className="feuille-textarea" value={feuillesAutorisees[p.identity]} readOnly rows={4} />
-                ) : demandesEnvoyees.has(p.identity) ? (
-                  <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> En attente...</div>
-                ) : (
-                  <button type="button" onClick={() => demanderAVoir(p.identity)}>
-                    <i className="fa-solid fa-eye"></i> Demander à voir sa feuille
-                  </button>
-                )}
-              </div>
-            ))}
-          </>
-        )}
       </div>
+
+      {/* ---- Contrôles d'appel, en bas ---- */}
+      <div className="hud hud-controles">
+        <div className="controles-appel">
+          <button className={classeMicro} onClick={basculerMicro} type="button" disabled={permission === "attente"}>
+            <i className={iconeMicro}></i>
+          </button>
+          <button className="bouton-appel bouton-raccrocher" onClick={raccrocher} type="button">
+            <i className="fa-solid fa-phone-slash"></i>
+          </button>
+        </div>
+      </div>
+
+      {/* ---- Feuille collaborative : panneau qui glisse sur le côté ---- */}
+      {panneauOuvert && (
+        <div className="panneau-feuille">
+          <div className="panneau-feuille-entete">
+            <span><i className="fa-solid fa-file-lines"></i> Feuilles</span>
+            <button type="button" className="hud-bouton hud-bouton-rond" onClick={() => setPanneauOuvert(false)} aria-label="Fermer">
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+
+          <div className="bloc-feuille">
+            <div className="onglets-feuille">
+              <button className={ongletFeuille === "moi" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("moi")} type="button">
+                <i className="fa-solid fa-file-lines"></i> Ma feuille
+              </button>
+              <button className={ongletFeuille === "autres" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autres")} type="button">
+                <i className="fa-solid fa-eye"></i> Feuilles
+              </button>
+            </div>
+
+            {ongletFeuille === "moi" && (
+              <>
+                <textarea className="feuille-textarea" value={monTexte} onChange={(e) => gererSaisie(e.target.value)} placeholder="Écris ici — privé, sauf si tu autorises quelqu'un" rows={6} />
+                {mesViewers.size > 0 ? (
+                  <div className="choix-categorie" style={{ flexWrap: "wrap" }}>
+                    {[...mesViewers].map((v) => (
+                      <span key={v} className="chip">
+                        {v} <button type="button" className="lien" onClick={() => retirerAcces(v)} style={{ marginLeft: 6 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="info"><i className="fa-solid fa-lock"></i> Privée, personne ne la voit</div>
+                )}
+              </>
+            )}
+
+            {ongletFeuille === "autres" && (
+              <>
+                {participants.length === 0 && <div className="info">Personne d'autre dans la salle.</div>}
+                {autresOrdonnes.map((p) => (
+                  <div key={p.identity} className="carte-post" style={{ marginBottom: 10 }}>
+                    <div className="auteur-post">{p.identity}</div>
+                    {feuillesAutorisees[p.identity] !== undefined ? (
+                      <textarea className="feuille-textarea" value={feuillesAutorisees[p.identity]} readOnly rows={4} />
+                    ) : demandesEnvoyees.has(p.identity) ? (
+                      <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> En attente...</div>
+                    ) : (
+                      <button type="button" onClick={() => demanderAVoir(p.identity)}>
+                        <i className="fa-solid fa-eye"></i> Demander à voir sa feuille
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

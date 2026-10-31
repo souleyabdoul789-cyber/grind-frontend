@@ -113,6 +113,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
           demandeId={salleActive}
           monUsername={monUsername}
           profInitial={classeOuverte?.prof_actuel}
+          nomClasse={classeOuverte?.nom}
           onQuitter={() => setSalleActive(null)}
         />
       </div>

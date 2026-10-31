@@ -1862,3 +1862,187 @@ button:disabled {
   transform: none;
   text-decoration: underline;
 }
+
+/* ==================== Vue de classe façon jeu (plein écran, paysage) ==================== */
+.classe-jeu {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #12131c;
+  overflow: hidden;
+}
+
+.scene-classe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.scene-classe .siege { cursor: pointer; }
+.scene-classe .siege-vide { cursor: default; }
+
+.hud {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-haut-gauche {
+  top: max(10px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+}
+
+.hud-haut-droite {
+  top: max(10px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+}
+
+.hud-controles {
+  left: max(12px, env(safe-area-inset-left));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.hud-controles .controles-appel {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hud-controles .bouton-micro,
+.hud-controles .bouton-appel {
+  width: 48px;
+  height: 48px;
+  font-size: 17px;
+  background: rgba(12, 12, 18, 0.8);
+}
+
+.hud-controles .bouton-raccrocher {
+  background: #e08a8a;
+  color: #0a0a0f;
+}
+
+.hud-pastille {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(12, 12, 18, 0.78);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.hud-bouton {
+  position: relative;
+  width: auto;
+  margin: 0;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(12, 12, 18, 0.78);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hud-bouton:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  background: rgba(34, 34, 48, 0.92);
+}
+
+.hud-bouton-rond {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.hud-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--violet);
+  color: #0a0a0f;
+  font-size: 11px;
+}
+
+.hud-notifs {
+  position: absolute;
+  z-index: 4;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(86%, 440px);
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+.hud-notifs .banniere-demande {
+  pointer-events: auto;
+  margin-bottom: 8px;
+  background: rgba(12, 12, 18, 0.92);
+}
+
+.panneau-feuille {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(46%, 380px);
+  padding: 12px 14px;
+  overflow-y: auto;
+  background: rgba(12, 12, 18, 0.95);
+  border-left: 1px solid var(--border);
+}
+
+.panneau-feuille-entete {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-family: "Space Grotesk", sans-serif;
+  font-weight: 600;
+}
+
+.panneau-feuille .bloc-feuille {
+  max-width: none;
+}
+
+/* Animations liées à de vrais états : seule la personne qui parle réellement bouge */
+.anneau-parole {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ondeParole 1.2s ease-out infinite;
+}
+
+@keyframes ondeParole {
+  0% { transform: scale(0.85); opacity: 0.9; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+.avatar-dessus-parle {
+  animation: avatarParle 0.45s ease-in-out infinite alternate;
+}
+
+@keyframes avatarParle {
+  from { transform: translateY(0); }
+  to { transform: translateY(-1.5px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anneau-parole,
+  .avatar-dessus-parle { animation: none; }
+}
