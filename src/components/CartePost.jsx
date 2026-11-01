@@ -4,6 +4,8 @@ import LecteurMedia from "./LecteurMedia.jsx";
 import TexteExtensible from "./TexteExtensible.jsx";
 import ConfirmModal from "./ConfirmModal.jsx";
 import AvatarIcone from "./AvatarIcone.jsx";
+import ModaleSignalement from "./ModaleSignalement.jsx";
+import BadgeCompte from "./BadgeCompte.jsx";
 
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();
@@ -36,6 +38,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
   const [statutActuel, setStatutActuel] = useState(post.statut);
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [confirmationOuverte, setConfirmationOuverte] = useState(false);
+  const [signalement, setSignalement] = useState(null); // { type, id, libelle }
 
   async function gererLike() {
     setAime(!aime);
@@ -93,7 +96,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
         <AvatarIcone username={post.auteur} config={avatarAuteur} taille={40} onClic={onClicAuteur} />
         <div>
           <button type="button" className="auteur-post auteur-post-bouton" onClick={() => onClicAuteur && onClicAuteur(post.auteur)}>
-            {post.auteur}
+            {post.auteur}<BadgeCompte badge={post.auteur_badge} />
           </button>
           <div className={`badge-categorie ${post.categorie}`}>
             <i className={post.categorie === "probleme" ? "fa-solid fa-circle-question" : "fa-solid fa-star"}></i>
@@ -146,6 +149,16 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
             <i className="fa-solid fa-trash"></i>
           </button>
         )}
+        {!estAuteur && (
+          <button
+            className="action-post action-signaler"
+            onClick={() => setSignalement({ type: "post", id: post.id, libelle: `ce post de ${post.auteur}` })}
+            type="button"
+            aria-label="Signaler ce post"
+          >
+            <i className="fa-regular fa-flag"></i>
+          </button>
+        )}
       </div>
 
       {commentairesOuverts && (
@@ -155,10 +168,20 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
               <AvatarIcone username={c.username} taille={26} onClic={onClicAuteur} />
               <div className="texte-commentaire">
                 <button type="button" className="auteur-commentaire auteur-commentaire-bouton" onClick={() => onClicAuteur && onClicAuteur(c.username)}>
-                  {c.username}
+                  {c.username}<BadgeCompte badge={c.badge} taille={12} />
                 </button>{" "}
                 {c.contenu}
               </div>
+              {c.username !== monUsername && (
+                <button
+                  type="button"
+                  className="action-signaler-mini"
+                  onClick={() => setSignalement({ type: "commentaire", id: c.id, libelle: `le commentaire de ${c.username}` })}
+                  aria-label="Signaler ce commentaire"
+                >
+                  <i className="fa-regular fa-flag"></i>
+                </button>
+              )}
             </div>
           ))}
           <div className="saisie-commentaire">
@@ -173,6 +196,15 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
             </button>
           </div>
         </div>
+      )}
+      {signalement && (
+        <ModaleSignalement
+          sessionToken={sessionToken}
+          typeCible={signalement.type}
+          cibleId={signalement.id}
+          libelle={signalement.libelle}
+          onFermer={() => setSignalement(null)}
+        />
       )}
       {confirmationOuverte && (
         <ConfirmModal

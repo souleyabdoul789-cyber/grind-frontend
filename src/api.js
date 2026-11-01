@@ -20,11 +20,12 @@ async function poster(url, body) {
 
 // ---------- Compte GRIND (propre à GRIND, distinct de G-SOCIETY) ----------
 
-export function inscrireGrind(username, password, apiKeyGSociety) {
+export function inscrireGrind(username, password, apiKeyGSociety, cguAcceptees) {
   return poster(`${GRIND_URL}/api/compte/signup`, {
     username,
     password,
     api_key: apiKeyGSociety,
+    cgu_acceptees: !!cguAcceptees,
   });
 }
 
@@ -267,4 +268,95 @@ export async function enregistrerAvatar(sessionToken, config) {
 export function urlNotifs(sessionToken) {
   const base = GRIND_URL.replace(/^https/, "wss").replace(/^http/, "ws");
   return `${base}/ws/notifs?session_token=${encodeURIComponent(sessionToken)}`;
+}
+
+
+// ---------- Modération, CGU et administration ----------
+
+export function obtenirMonStatut(sessionToken) {
+  return poster(`${GRIND_URL}/api/moderation/moi`, { session_token: sessionToken });
+}
+
+export function accepterCgu(sessionToken) {
+  return poster(`${GRIND_URL}/api/moderation/accepter-cgu`, { session_token: sessionToken });
+}
+
+export function signalerContenu(sessionToken, { type_cible, cible_id, motif, details }) {
+  return poster(`${GRIND_URL}/api/moderation/signaler`, {
+    session_token: sessionToken,
+    type_cible,
+    cible_id,
+    motif,
+    details,
+  });
+}
+
+export function adminListerSignalements(sessionToken, statut) {
+  return poster(`${GRIND_URL}/api/admin/signalements`, { session_token: sessionToken, statut });
+}
+
+export function adminTraiterSignalement(sessionToken, signalementId, { action, supprimer_contenu, duree_jours, note }) {
+  return poster(`${GRIND_URL}/api/admin/signalements/${signalementId}/traiter`, {
+    session_token: sessionToken,
+    action,
+    supprimer_contenu: !!supprimer_contenu,
+    duree_jours,
+    note,
+  });
+}
+
+export function adminChercherUtilisateurs(sessionToken, q) {
+  return poster(`${GRIND_URL}/api/admin/utilisateurs`, { session_token: sessionToken, q });
+}
+
+export function adminSanctionner(sessionToken, { username, type, duree_jours, motif }) {
+  return poster(`${GRIND_URL}/api/admin/sanctionner`, {
+    session_token: sessionToken,
+    username,
+    type,
+    duree_jours,
+    motif,
+  });
+}
+
+export function adminLeverSanction(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/admin/lever-sanction`, { session_token: sessionToken, username });
+}
+
+// ---------- Bureau d'administration : équipe, certification, annonces ----------
+
+export function adminApercu(sessionToken) {
+  return poster(`${GRIND_URL}/api/admin/apercu`, { session_token: sessionToken });
+}
+
+export function adminDefinirNom(sessionToken, nomAffiche) {
+  return poster(`${GRIND_URL}/api/admin/nom`, { session_token: sessionToken, nom_affiche: nomAffiche });
+}
+
+export function adminListerEquipe(sessionToken) {
+  return poster(`${GRIND_URL}/api/admin/equipe`, { session_token: sessionToken });
+}
+
+export function adminNommer(sessionToken, username, role) {
+  return poster(`${GRIND_URL}/api/admin/equipe/nommer`, { session_token: sessionToken, username, role });
+}
+
+export function adminRetirerDeLEquipe(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/admin/equipe/retirer`, { session_token: sessionToken, username });
+}
+
+export function adminCertifier(sessionToken, username, certifie) {
+  return poster(`${GRIND_URL}/api/admin/certifier`, { session_token: sessionToken, username, certifie });
+}
+
+export function adminPublierAnnonce(sessionToken, titre, contenu) {
+  return poster(`${GRIND_URL}/api/admin/annonces/publier`, { session_token: sessionToken, titre, contenu });
+}
+
+export function adminSupprimerAnnonce(sessionToken, annonceId) {
+  return poster(`${GRIND_URL}/api/admin/annonces/supprimer`, { session_token: sessionToken, annonce_id: annonceId });
+}
+
+export function listerAnnonces(sessionToken) {
+  return poster(`${GRIND_URL}/api/annonces`, { session_token: sessionToken });
 }

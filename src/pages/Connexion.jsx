@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { inscrireGrind, connecterGrind } from "../api.js";
 import FondAnime from "../components/FondAnime.jsx";
+import PageCgu from "../components/PageCgu.jsx";
 
 export default function Connexion({ onConnecte }) {
   const [mode, setMode] = useState("login"); // "login" ou "signup"
@@ -10,6 +11,8 @@ export default function Connexion({ onConnecte }) {
   const [apiKey, setApiKey] = useState("");
   const [erreur, setErreur] = useState(null);
   const [chargement, setChargement] = useState(false);
+  const [cgu, setCgu] = useState(false);
+  const [cguOuvertes, setCguOuvertes] = useState(false);
 
   async function gererConnexion(e) {
     e.preventDefault();
@@ -19,16 +22,21 @@ export default function Connexion({ onConnecte }) {
       setErreur("Les mots de passe ne correspondent pas");
       return;
     }
+    if (mode === "signup" && !cgu) {
+      setErreur("Tu dois accepter les conditions d'utilisation pour créer un compte");
+      return;
+    }
 
     setChargement(true);
     try {
       if (mode === "signup") {
-        await inscrireGrind(username, password, apiKey);
+        await inscrireGrind(username, password, apiKey, cgu);
       }
       const resLogin = await connecterGrind(username, password);
 
       localStorage.setItem("grind_session_token", resLogin.session_token);
       localStorage.setItem("grind_username", resLogin.username);
+      localStorage.setItem("grind_role", resLogin.role || "");
       onConnecte(resLogin.session_token);
     } catch (err) {
       setErreur(err.message);
@@ -67,6 +75,23 @@ export default function Connexion({ onConnecte }) {
                 <i className="fa-solid fa-circle-info"></i>
                 Génère cette clé sur le site G-SOCIETY avant de continuer.
               </div>
+
+              <div className="ligne-cgu">
+                <button
+                  type="button"
+                  className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`}
+                  onClick={() => setCgu((v) => !v)}
+                  aria-label="Accepter les conditions d'utilisation"
+                >
+                  <span className="curseur-interrupteur"></span>
+                </button>
+                <span>
+                  J'accepte les{" "}
+                  <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>
+                    conditions d'utilisation
+                  </button>
+                </span>
+              </div>
             </>
           )}
 
@@ -91,6 +116,10 @@ export default function Connexion({ onConnecte }) {
         >
           {mode === "login" ? "Pas encore de compte ? Inscris-toi" : "Déjà un compte ? Connecte-toi"}
         </button>
+        <button type="button" className="lien" onClick={() => setCguOuvertes(true)}>
+          Conditions d'utilisation
+        </button>
+        {cguOuvertes && <PageCgu onFermer={() => setCguOuvertes(false)} />}
       </div>
     </div>
   );

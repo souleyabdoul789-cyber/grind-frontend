@@ -2,11 +2,14 @@ import { useState, useEffect } from "react";
 import { obtenirProfilDe, obtenirAvatarDe } from "../api.js";
 import { nomPays } from "../paysListe.js";
 import AvatarPersonnage from "./AvatarPersonnage.jsx";
+import ModaleSignalement from "./ModaleSignalement.jsx";
+import BadgeCompte from "./BadgeCompte.jsx";
 
-export default function ProfilPublic({ username, onRetour }) {
+export default function ProfilPublic({ username, onRetour, sessionToken, monUsername }) {
   const [profil, setProfil] = useState(null);
   const [avatarConfig, setAvatarConfig] = useState(null);
   const [chargement, setChargement] = useState(true);
+  const [signalement, setSignalement] = useState(false);
 
   useEffect(() => {
     async function charger() {
@@ -46,7 +49,12 @@ export default function ProfilPublic({ username, onRetour }) {
         <div className="apercu-avatar" style={{ padding: 0, background: "none", marginBottom: 8 }}>
           <AvatarPersonnage config={avatarConfig} taille={120} />
         </div>
-        <div className="auteur-post" style={{ fontSize: 20 }}>{username}</div>
+        <div className="auteur-post" style={{ fontSize: 20 }}>{username}<BadgeCompte badge={profil?.badge} taille={18} /></div>
+        {sessionToken && username !== monUsername && (
+          <button type="button" className="bouton-admin bouton-admin-doux" style={{ marginTop: 12 }} onClick={() => setSignalement(true)}>
+            <i className="fa-regular fa-flag"></i> Signaler ce profil
+          </button>
+        )}
       </div>
 
       {profil?.profil_existe ? (
@@ -75,6 +83,16 @@ export default function ProfilPublic({ username, onRetour }) {
         </>
       ) : (
         <div className="info"><i className="fa-solid fa-circle-info"></i> Profil pas encore rempli.</div>
+      )}
+
+      {signalement && (
+        <ModaleSignalement
+          sessionToken={sessionToken}
+          typeCible="profil"
+          cibleId={username}
+          libelle={`le profil de ${username}`}
+          onFermer={() => setSignalement(false)}
+        />
       )}
     </div>
   );

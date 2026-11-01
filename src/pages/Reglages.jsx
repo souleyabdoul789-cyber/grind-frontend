@@ -1,7 +1,9 @@
+import PageCgu from "../components/PageCgu.jsx";
 import { useState } from "react";
 import { GRIND_URL } from "../api.js";
 
 export default function Reglages({ sessionToken, onDeconnexion }) {
+  const [cguOuvertes, setCguOuvertes] = useState(false);
   const [ancien, setAncien] = useState("");
   const [nouveau, setNouveau] = useState("");
   const [message, setMessage] = useState(null);
@@ -112,6 +114,11 @@ export default function Reglages({ sessionToken, onDeconnexion }) {
           </div>
         )}
       </form>
+
+      <button className="carte-post bouton-lien-carte" onClick={() => setCguOuvertes(true)} type="button">
+        <i className="fa-solid fa-file-contract"></i> Conditions d'utilisation
+      </button>
+      {cguOuvertes && <PageCgu onFermer={() => setCguOuvertes(false)} />}
 
       <button className="carte-post bouton-danger" onClick={onDeconnexion} type="button">
         <i className="fa-solid fa-right-from-bracket"></i> Se déconnecter

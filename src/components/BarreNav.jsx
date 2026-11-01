@@ -7,7 +7,11 @@ const ONGLETS = [
   { cle: "reglages", icone: "fa-solid fa-gear", label: "Réglages" },
 ];
 
-export default function BarreNav({ sessionToken, ongletActif, onChangerOnglet }) {
+export default function BarreNav({ sessionToken, ongletActif, onChangerOnglet, estEquipe = false }) {
+  const onglets = estEquipe
+    ? [...ONGLETS, { cle: "admin", icone: "fa-solid fa-building-shield", label: "Bureau" }]
+    : ONGLETS;
+
   return (
     <>
       <div className="barre-nav">
@@ -21,7 +25,7 @@ export default function BarreNav({ sessionToken, ongletActif, onChangerOnglet })
       </div>
 
       <div className="barre-onglets">
-        {ONGLETS.map((o) => (
+        {onglets.map((o) => (
           <button
             key={o.cle}
             className={`onglet ${ongletActif === o.cle ? "onglet-actif" : ""}`}

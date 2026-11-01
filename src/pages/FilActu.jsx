@@ -114,7 +114,7 @@ export default function FilActu({ sessionToken, monUsername }) {
   }
 
   if (profilConsulte) {
-    return <ProfilPublic username={profilConsulte} onRetour={() => setProfilConsulte(null)} />;
+    return <ProfilPublic username={profilConsulte} onRetour={() => setProfilConsulte(null)} sessionToken={sessionToken} monUsername={monUsername} />;
   }
 
   return (
