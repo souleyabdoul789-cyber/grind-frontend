@@ -81,6 +81,7 @@ export default function Notifications({ sessionToken }) {
     if (n.type === "nouvelle_demande") return `${n.demandeur} a besoin d'aide en ${n.sujet}`;
     if (n.type === "participant_rejoint") return `${n.username} a rejoint ta demande d'aide`;
     if (n.type === "nouveau_membre_classe") return `${n.nouveau_membre} a rejoint ta classe "${n.nom_classe}"`;
+    if (n.type === "support_reponse") return "L'équipe a répondu à ta demande (Réglages › Contactez-nous)";
     return "Nouvelle activité";
   }
 

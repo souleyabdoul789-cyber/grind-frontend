@@ -360,3 +360,47 @@ export function adminSupprimerAnnonce(sessionToken, annonceId) {
 export function listerAnnonces(sessionToken) {
   return poster(`${GRIND_URL}/api/annonces`, { session_token: sessionToken });
 }
+
+// ---------- Support : « Contactez-nous » (élève) ----------
+
+export function supportConversation(sessionToken) {
+  return poster(`${GRIND_URL}/api/support/conversation`, { session_token: sessionToken });
+}
+
+export function supportOuvrir(sessionToken, message) {
+  return poster(`${GRIND_URL}/api/support/ouvrir`, { session_token: sessionToken, message });
+}
+
+export function supportEnvoyer(sessionToken, conversationId, message) {
+  return poster(`${GRIND_URL}/api/support/envoyer`, { session_token: sessionToken, conversation_id: conversationId, message });
+}
+
+export function supportDemanderHumain(sessionToken, conversationId) {
+  return poster(`${GRIND_URL}/api/support/demander-humain`, { session_token: sessionToken, conversation_id: conversationId });
+}
+
+export function supportCloturer(sessionToken, conversationId) {
+  return poster(`${GRIND_URL}/api/support/cloturer`, { session_token: sessionToken, conversation_id: conversationId });
+}
+
+// ---------- Support : boîte de l'équipe ----------
+
+export function adminSupportListe(sessionToken, statut) {
+  return poster(`${GRIND_URL}/api/admin/support/liste`, { session_token: sessionToken, statut });
+}
+
+export function adminSupportLire(sessionToken, conversationId) {
+  return poster(`${GRIND_URL}/api/admin/support/lire`, { session_token: sessionToken, conversation_id: conversationId });
+}
+
+export function adminSupportRepondre(sessionToken, conversationId, message) {
+  return poster(`${GRIND_URL}/api/admin/support/repondre`, { session_token: sessionToken, conversation_id: conversationId, message });
+}
+
+export function adminSupportIA(sessionToken, conversationId, active) {
+  return poster(`${GRIND_URL}/api/admin/support/ia`, { session_token: sessionToken, conversation_id: conversationId, active });
+}
+
+export function adminSupportCloturer(sessionToken, conversationId) {
+  return poster(`${GRIND_URL}/api/admin/support/cloturer`, { session_token: sessionToken, conversation_id: conversationId });
+}

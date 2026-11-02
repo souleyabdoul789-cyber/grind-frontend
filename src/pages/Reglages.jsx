@@ -1,9 +1,11 @@
 import PageCgu from "../components/PageCgu.jsx";
+import ContactSupport from "../components/ContactSupport.jsx";
 import { useState } from "react";
 import { GRIND_URL } from "../api.js";
 
 export default function Reglages({ sessionToken, onDeconnexion }) {
   const [cguOuvertes, setCguOuvertes] = useState(false);
+  const [contactOuvert, setContactOuvert] = useState(false);
   const [ancien, setAncien] = useState("");
   const [nouveau, setNouveau] = useState("");
   const [message, setMessage] = useState(null);
@@ -114,6 +116,11 @@ export default function Reglages({ sessionToken, onDeconnexion }) {
           </div>
         )}
       </form>
+
+      <button className="carte-post bouton-lien-carte" onClick={() => setContactOuvert(true)} type="button">
+        <i className="fa-solid fa-headset"></i> Contactez-nous
+      </button>
+      {contactOuvert && <ContactSupport sessionToken={sessionToken} onFermer={() => setContactOuvert(false)} />}
 
       <button className="carte-post bouton-lien-carte" onClick={() => setCguOuvertes(true)} type="button">
         <i className="fa-solid fa-file-contract"></i> Conditions d'utilisation

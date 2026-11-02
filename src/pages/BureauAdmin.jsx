@@ -3,6 +3,7 @@ import { obtenirMonStatut, adminApercu, adminDefinirNom } from "../api.js";
 import BadgeCompte from "../components/BadgeCompte.jsx";
 import { SalleSignalements, SalleUtilisateurs } from "./Admin.jsx";
 import { SalleEquipe, SalleCertification, SalleAnnonces } from "./SallesEquipe.jsx";
+import SalleSupport from "./SalleSupport.jsx";
 import { libelleRole } from "../moderationInfos.js";
 
 const NOM_PAR_DEFAUT = "GRIND Admin";
@@ -10,6 +11,7 @@ const NOM_PAR_DEFAUT = "GRIND Admin";
 // Chaque salle n'apparaît que si le rôle en a la permission (le serveur applique la même règle).
 const SALLES = [
   { cle: "signalements", titre: "Salle de contrôle", desc: "Traiter les signalements des élèves.", icone: "fa-solid fa-flag", permission: "signalements" },
+  { cle: "support", titre: "Boîte de support", desc: "Répondre aux élèves, activer ou couper l'assistant IA.", icone: "fa-solid fa-headset", permission: "support" },
   { cle: "utilisateurs", titre: "Registre des comptes", desc: "Rechercher un compte, suspendre, bannir.", icone: "fa-solid fa-address-book", permission: "utilisateurs" },
   { cle: "certification", titre: "Certification", desc: "Accorder ou retirer le badge de certification.", icone: "fa-solid fa-circle-check", permission: "certification" },
   { cle: "equipe", titre: "Équipe", desc: "Nommer des associés et des contrôleurs.", icone: "fa-solid fa-people-group", permission: "equipe" },
@@ -142,7 +144,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
   const sallesVisibles = SALLES.filter((s) => permissions.includes(s.permission));
   const nom = statut.nom_affiche || statut.username;
   const salleActive = SALLES.find((s) => s.cle === salle);
-  const alerte = (apercu?.nb_signalements_ouverts || 0) > 0;
+  const alerte = (apercu?.nb_signalements_ouverts || 0) + (apercu?.nb_support_attente || 0) > 0;
 
   return (
     <div className="bureau">
@@ -173,6 +175,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
           </div>
 
           {salle === "signalements" && <SalleSignalements sessionToken={sessionToken} role={monRole} />}
+          {salle === "support" && <SalleSupport sessionToken={sessionToken} role={monRole} />}
           {salle === "utilisateurs" && <SalleUtilisateurs sessionToken={sessionToken} role={monRole} />}
           {salle === "certification" && <SalleCertification sessionToken={sessionToken} />}
           {salle === "equipe" && <SalleEquipe sessionToken={sessionToken} />}
@@ -189,6 +192,10 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
               <div className={`kpi ${alerte ? "kpi-alerte" : ""}`}>
                 <div className="kpi-valeur">{apercu.nb_signalements_ouverts}</div>
                 <div className="kpi-libelle">signalements à traiter</div>
+              </div>
+              <div className={`kpi ${apercu.nb_support_attente > 0 ? "kpi-alerte" : ""}`}>
+                <div className="kpi-valeur">{apercu.nb_support_attente}</div>
+                <div className="kpi-libelle">discussions à répondre</div>
               </div>
               <div className="kpi">
                 <div className="kpi-valeur">{apercu.nb_comptes}</div>
@@ -211,9 +218,14 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
                 <span className="salle-icone"><i className={s.icone}></i></span>
                 <span className="salle-titre">{s.titre}</span>
                 <span className="salle-desc">{s.desc}</span>
-                {s.cle === "signalements" && alerte && (
+                {s.cle === "signalements" && apercu?.nb_signalements_ouverts > 0 && (
                   <span className="salle-etiquette" style={{ color: "var(--erreur)", borderColor: "rgba(224,138,138,0.5)" }}>
                     {apercu.nb_signalements_ouverts} à traiter
+                  </span>
+                )}
+                {s.cle === "support" && apercu?.nb_support_attente > 0 && (
+                  <span className="salle-etiquette" style={{ color: "var(--erreur)", borderColor: "rgba(224,138,138,0.5)" }}>
+                    {apercu.nb_support_attente} à répondre
                   </span>
                 )}
               </button>
