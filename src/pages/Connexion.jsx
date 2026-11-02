@@ -73,7 +73,16 @@ export default function Connexion({ onConnecte }) {
               <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} required placeholder="collée depuis G-SOCIETY" />
               <div className="info">
                 <i className="fa-solid fa-circle-info"></i>
-                Génère cette clé sur le site G-SOCIETY avant de continuer.
+                Génère cette clé sur le{" "}
+                <a
+                  className="lien lien-en-ligne"
+                  href="https://g-society.onrender.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  site G-SOCIETY
+                </a>{" "}
+                avant de continuer.
               </div>
 
               <div className="ligne-cgu">
