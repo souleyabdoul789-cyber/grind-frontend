@@ -212,9 +212,15 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
               </>
             )}
 
-            <button className="action-post" onClick={() => setSalleActive(c.classe_id)} type="button">
-              <i className="fa-solid fa-phone"></i> Entrer dans la classe
-            </button>
+            {c.suspendue ? (
+              <div className="info classe-suspendue">
+                <i className="fa-solid fa-circle-pause"></i> Classe suspendue par l'administration de GRIND
+              </div>
+            ) : (
+              <button className="action-post" onClick={() => setSalleActive(c.classe_id)} type="button">
+                <i className="fa-solid fa-phone"></i> Entrer dans la classe
+              </button>
+            )}
           </div>
         ))
       )}

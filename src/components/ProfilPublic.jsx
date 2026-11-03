@@ -2,14 +2,14 @@ import { useState, useEffect } from "react";
 import { obtenirProfilDe, obtenirAvatarDe } from "../api.js";
 import { nomPays } from "../paysListe.js";
 import AvatarPersonnage from "./AvatarPersonnage.jsx";
-import ModaleSignalement from "./ModaleSignalement.jsx";
+import ActionsCompte from "./ActionsCompte.jsx";
+import IconeCompteBloque from "./IconeCompteBloque.jsx";
 import BadgeCompte from "./BadgeCompte.jsx";
 
 export default function ProfilPublic({ username, onRetour, sessionToken, monUsername }) {
   const [profil, setProfil] = useState(null);
   const [avatarConfig, setAvatarConfig] = useState(null);
   const [chargement, setChargement] = useState(true);
-  const [signalement, setSignalement] = useState(false);
 
   useEffect(() => {
     async function charger() {
@@ -28,6 +28,22 @@ export default function ProfilPublic({ username, onRetour, sessionToken, monUser
     return (
       <div className="fil-actu">
         <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement...</div>
+      </div>
+    );
+  }
+
+  // Compte sanctionné : même apparence que sur WhatsApp, ses contenus ne sont plus accessibles.
+  if (profil?.sanctionne) {
+    return (
+      <div className="fil-actu">
+        <button type="button" className="lien" onClick={onRetour} style={{ marginBottom: 12 }}>
+          <i className="fa-solid fa-arrow-left"></i> Retour
+        </button>
+        <div className="compte-indisponible">
+          <IconeCompteBloque taille={96} />
+          <div className="sous-titre" style={{ marginTop: 14 }}>Ce compte n'est plus disponible</div>
+          <div className="info">Ses contenus ne sont plus accessibles.</div>
+        </div>
       </div>
     );
   }
@@ -51,9 +67,9 @@ export default function ProfilPublic({ username, onRetour, sessionToken, monUser
         </div>
         <div className="auteur-post" style={{ fontSize: 20 }}>{username}<BadgeCompte badge={profil?.badge} taille={18} /></div>
         {sessionToken && username !== monUsername && (
-          <button type="button" className="bouton-admin bouton-admin-doux" style={{ marginTop: 12 }} onClick={() => setSignalement(true)}>
-            <i className="fa-regular fa-flag"></i> Signaler ce profil
-          </button>
+          <div className="menu-profil">
+            <ActionsCompte sessionToken={sessionToken} username={username} direction="bas" />
+          </div>
         )}
       </div>
 
@@ -83,16 +99,6 @@ export default function ProfilPublic({ username, onRetour, sessionToken, monUser
         </>
       ) : (
         <div className="info"><i className="fa-solid fa-circle-info"></i> Profil pas encore rempli.</div>
-      )}
-
-      {signalement && (
-        <ModaleSignalement
-          sessionToken={sessionToken}
-          typeCible="profil"
-          cibleId={username}
-          libelle={`le profil de ${username}`}
-          onFermer={() => setSignalement(false)}
-        />
       )}
     </div>
   );

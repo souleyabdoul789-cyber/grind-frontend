@@ -2,6 +2,7 @@ import { useState } from "react";
 import { inscrireGrind, connecterGrind } from "../api.js";
 import FondAnime from "../components/FondAnime.jsx";
 import PageCgu from "../components/PageCgu.jsx";
+import EcranSanction from "../components/EcranSanction.jsx";
 
 export default function Connexion({ onConnecte }) {
   const [mode, setMode] = useState("login"); // "login" ou "signup"
@@ -13,6 +14,7 @@ export default function Connexion({ onConnecte }) {
   const [chargement, setChargement] = useState(false);
   const [cgu, setCgu] = useState(false);
   const [cguOuvertes, setCguOuvertes] = useState(false);
+  const [sanction, setSanction] = useState(null); // détail renvoyé par le serveur pour un compte sanctionné
 
   async function gererConnexion(e) {
     e.preventDefault();
@@ -39,10 +41,20 @@ export default function Connexion({ onConnecte }) {
       localStorage.setItem("grind_role", resLogin.role || "");
       onConnecte(resLogin.session_token);
     } catch (err) {
-      setErreur(err.message);
+      if (err.donnees?.code === "sanction") setSanction(err.donnees);
+      else setErreur(err.message);
     } finally {
       setChargement(false);
     }
+  }
+
+  if (sanction) {
+    return (
+      <>
+        <FondAnime />
+        <EcranSanction donnees={sanction} username={username} onRetour={() => setSanction(null)} />
+      </>
+    );
   }
 
   return (

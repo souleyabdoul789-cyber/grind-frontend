@@ -7,7 +7,6 @@ import {
   adminLeverSanction,
 } from "../api.js";
 import LecteurMedia from "../components/LecteurMedia.jsx";
-import ConfirmModal from "../components/ConfirmModal.jsx";
 import BadgeCompte from "../components/BadgeCompte.jsx";
 import {
   libelleMotif,
@@ -65,7 +64,7 @@ function CarteSignalement({ sig, sessionToken, role, onTraite }) {
   const [duree, setDuree] = useState(d.durees.includes(3) ? 3 : d.durees[0]);
   const [supprimerAussi, setSupprimerAussi] = useState(true);
   const [note, setNote] = useState("");
-  const [confirmationBan, setConfirmationBan] = useState(false);
+  const [examenPossible, setExamenPossible] = useState(true);
   const [envoi, setEnvoi] = useState(false);
   const [erreur, setErreur] = useState(null);
 
@@ -81,6 +80,7 @@ function CarteSignalement({ sig, sessionToken, role, onTraite }) {
         supprimer_contenu: action === "suspendre" || action === "bannir" ? supprimerAussi : false,
         duree_jours: action === "suspendre" ? duree : null,
         note: note.trim() || null,
+        examen_possible: action === "suspendre" || action === "bannir" ? examenPossible : false,
       });
       onTraite();
     } catch (err) {
@@ -145,21 +145,38 @@ function CarteSignalement({ sig, sessionToken, role, onTraite }) {
             style={{ marginBottom: 10 }}
           />
 
-          {panneau === "suspension" && (
+          {(panneau === "suspension" || panneau === "ban") && (
             <div className="panneau-sanction">
-              <div className="info" style={{ marginBottom: 8 }}>Durée de la suspension</div>
-              <ChoixDuree valeur={duree} durees={d.durees} onChoisir={setDuree} />
+              {panneau === "suspension" && (
+                <>
+                  <div className="info" style={{ marginBottom: 8 }}>Durée de la suspension</div>
+                  <ChoixDuree valeur={duree} durees={d.durees} onChoisir={setDuree} />
+                </>
+              )}
               {sig.type_cible !== "profil" && sig.contenu.existe && (
                 <div className="ligne-reglage" style={{ padding: "4px 0 10px" }}>
                   <span>Supprimer aussi le contenu</span>
                   <Interrupteur actif={supprimerAussi} onBasculer={() => setSupprimerAussi((v) => !v)} />
                 </div>
               )}
+              <div className="ligne-reglage" style={{ padding: "4px 0 10px" }}>
+                <span>
+                  Autoriser une demande d'examen
+                  <div className="info" style={{ fontSize: 12 }}>Sinon, la personne verra qu'aucun examen n'est possible.</div>
+                </span>
+                <Interrupteur actif={examenPossible} onBasculer={() => setExamenPossible((v) => !v)} />
+              </div>
               <div className="rangee-boutons">
                 <button type="button" className="bouton-admin bouton-admin-doux" onClick={() => setPanneau(null)} disabled={envoi}>Annuler</button>
-                <button type="button" className="bouton-admin" onClick={() => agir("suspendre")} disabled={envoi}>
-                  Suspendre {duree} j
-                </button>
+                {panneau === "suspension" ? (
+                  <button type="button" className="bouton-admin" onClick={() => agir("suspendre")} disabled={envoi}>
+                    Suspendre {duree} j
+                  </button>
+                ) : (
+                  <button type="button" className="bouton-admin bouton-admin-danger" onClick={() => agir("bannir")} disabled={envoi}>
+                    Bannir
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -175,12 +192,12 @@ function CarteSignalement({ sig, sessionToken, role, onTraite }) {
                 </button>
               )}
               {d.peutSanctionner && (
-                <button type="button" className="bouton-admin" onClick={() => setPanneau("suspension")} disabled={envoi}>
+                <button type="button" className="bouton-admin" onClick={() => { setExamenPossible(true); setPanneau("suspension"); }} disabled={envoi}>
                   <i className="fa-solid fa-clock"></i> Suspendre
                 </button>
               )}
               {d.peutBannir && (
-                <button type="button" className="bouton-admin bouton-admin-danger" onClick={() => setConfirmationBan(true)} disabled={envoi}>
+                <button type="button" className="bouton-admin bouton-admin-danger" onClick={() => { setExamenPossible(false); setPanneau("ban"); }} disabled={envoi}>
                   <i className="fa-solid fa-ban"></i> Bannir
                 </button>
               )}
@@ -197,17 +214,6 @@ function CarteSignalement({ sig, sessionToken, role, onTraite }) {
 
       {erreur && <div className="erreur" style={{ marginTop: 8 }}>{erreur}</div>}
 
-      {confirmationBan && (
-        <ConfirmModal
-          message={`Bannir définitivement ${sig.auteur} ? Il ne pourra plus se connecter.`}
-          texteConfirmer="Bannir"
-          onConfirmer={() => {
-            setConfirmationBan(false);
-            agir("bannir");
-          }}
-          onAnnuler={() => setConfirmationBan(false)}
-        />
-      )}
     </div>
   );
 }
@@ -218,6 +224,7 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
   const [panneau, setPanneau] = useState(null); // null / "suspension" / "ban"
   const [duree, setDuree] = useState(d.durees.includes(3) ? 3 : d.durees[0]);
   const [motif, setMotif] = useState("");
+  const [examenPossible, setExamenPossible] = useState(true);
   const [envoi, setEnvoi] = useState(false);
   const [erreur, setErreur] = useState(null);
 
@@ -234,6 +241,7 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
         type,
         duree_jours: type === "suspension" ? duree : null,
         motif: motif.trim(),
+        examen_possible: examenPossible,
       });
       onChange();
     } catch (err) {
@@ -281,11 +289,11 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
         )
       ) : d.peutSanctionner && panneau === null ? (
         <div className="actions-admin">
-          <button type="button" className="bouton-admin" onClick={() => setPanneau("suspension")}>
+          <button type="button" className="bouton-admin" onClick={() => { setExamenPossible(true); setPanneau("suspension"); }}>
             <i className="fa-solid fa-clock"></i> Suspendre
           </button>
           {d.peutBannir && (
-            <button type="button" className="bouton-admin bouton-admin-danger" onClick={() => setPanneau("ban")}>
+            <button type="button" className="bouton-admin bouton-admin-danger" onClick={() => { setExamenPossible(false); setPanneau("ban"); }}>
               <i className="fa-solid fa-ban"></i> Bannir
             </button>
           )}
@@ -307,6 +315,13 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
             maxLength={200}
             style={{ marginBottom: 10 }}
           />
+          <div className="ligne-reglage" style={{ padding: "0 0 10px" }}>
+            <span>
+              Autoriser une demande d'examen
+              <div className="info" style={{ fontSize: 12 }}>Sinon, la personne verra qu'aucun examen n'est possible.</div>
+            </span>
+            <Interrupteur actif={examenPossible} onBasculer={() => setExamenPossible((v) => !v)} />
+          </div>
           <div className="rangee-boutons">
             <button type="button" className="bouton-admin bouton-admin-doux" onClick={() => setPanneau(null)} disabled={envoi}>Annuler</button>
             <button

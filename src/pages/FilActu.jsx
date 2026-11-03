@@ -32,7 +32,7 @@ export default function FilActu({ sessionToken, monUsername }) {
 
   async function charger() {
     setChargement(true);
-    const res = await listerPosts(filtre);
+    const res = await listerPosts(filtre, sessionToken);
     setPosts(res.posts || []);
     setChargement(false);
   }
@@ -229,6 +229,7 @@ export default function FilActu({ sessionToken, monUsername }) {
             monUsername={monUsername}
             onSupprime={(id) => setPosts((prev) => prev.filter((p) => p.id !== id))}
             onClicAuteur={setProfilConsulte}
+            onChange={() => charger()}
           />
         ))
       )}

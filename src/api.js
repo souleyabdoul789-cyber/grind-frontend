@@ -13,7 +13,11 @@ async function poster(url, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.detail || "Une erreur est survenue");
+    const detail = data.detail;
+    // Le serveur renvoie parfois un détail structuré (ex. compte sanctionné) : on le garde dans `donnees`.
+    const erreur = new Error(typeof detail === "string" ? detail : detail?.message || "Une erreur est survenue");
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) erreur.donnees = detail;
+    throw erreur;
   }
   return data;
 }
@@ -47,9 +51,10 @@ export function enregistrerProfil(sessionToken, { age, pays, niveau, difficultes
 
 // ---------- Fil d'actu ----------
 
-export async function listerPosts(categorie) {
+export async function listerPosts(categorie, sessionToken) {
   const url = new URL(`${GRIND_URL}/api/posts`);
   if (categorie) url.searchParams.set("categorie", categorie);
+  if (sessionToken) url.searchParams.set("session_token", sessionToken);
   const res = await fetch(url);
   return res.json();
 }
@@ -110,8 +115,10 @@ export function togglerLike(sessionToken, postId) {
   return poster(`${GRIND_URL}/api/posts/${postId}/like`, { session_token: sessionToken });
 }
 
-export async function listerCommentaires(postId) {
-  const res = await fetch(`${GRIND_URL}/api/posts/${postId}/commentaires`);
+export async function listerCommentaires(postId, sessionToken) {
+  const url = new URL(`${GRIND_URL}/api/posts/${postId}/commentaires`);
+  if (sessionToken) url.searchParams.set("session_token", sessionToken);
+  const res = await fetch(url);
   return res.json();
 }
 
@@ -295,13 +302,14 @@ export function adminListerSignalements(sessionToken, statut) {
   return poster(`${GRIND_URL}/api/admin/signalements`, { session_token: sessionToken, statut });
 }
 
-export function adminTraiterSignalement(sessionToken, signalementId, { action, supprimer_contenu, duree_jours, note }) {
+export function adminTraiterSignalement(sessionToken, signalementId, { action, supprimer_contenu, duree_jours, note, examen_possible }) {
   return poster(`${GRIND_URL}/api/admin/signalements/${signalementId}/traiter`, {
     session_token: sessionToken,
     action,
     supprimer_contenu: !!supprimer_contenu,
     duree_jours,
     note,
+    examen_possible: !!examen_possible,
   });
 }
 
@@ -309,13 +317,14 @@ export function adminChercherUtilisateurs(sessionToken, q) {
   return poster(`${GRIND_URL}/api/admin/utilisateurs`, { session_token: sessionToken, q });
 }
 
-export function adminSanctionner(sessionToken, { username, type, duree_jours, motif }) {
+export function adminSanctionner(sessionToken, { username, type, duree_jours, motif, examen_possible }) {
   return poster(`${GRIND_URL}/api/admin/sanctionner`, {
     session_token: sessionToken,
     username,
     type,
     duree_jours,
     motif,
+    examen_possible: !!examen_possible,
   });
 }
 
@@ -403,4 +412,59 @@ export function adminSupportIA(sessionToken, conversationId, active) {
 
 export function adminSupportCloturer(sessionToken, conversationId) {
   return poster(`${GRIND_URL}/api/admin/support/cloturer`, { session_token: sessionToken, conversation_id: conversationId });
+}
+
+// ---------- Blocage : « ne plus voir ses contenus » ----------
+
+export function bloquerCompte(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/moderation/bloquer`, { session_token: sessionToken, username });
+}
+
+export function debloquerCompte(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/moderation/debloquer`, { session_token: sessionToken, username });
+}
+
+export function listerBloques(sessionToken) {
+  return poster(`${GRIND_URL}/api/moderation/bloques`, { session_token: sessionToken });
+}
+
+// ---------- Examen d'une sanction (la personne n'a plus de session : elle utilise le jeton reçu à la connexion) ----------
+
+export function examenEtat(username, jetonExamen) {
+  return poster(`${GRIND_URL}/api/examen/etat`, { username, jeton_examen: jetonExamen });
+}
+
+export function examenDemander(username, jetonExamen, message) {
+  return poster(`${GRIND_URL}/api/examen/demander`, { username, jeton_examen: jetonExamen, message });
+}
+
+// ---------- Examens : côté administration ----------
+
+export function adminExamens(sessionToken, statut) {
+  return poster(`${GRIND_URL}/api/admin/examens`, { session_token: sessionToken, statut });
+}
+
+export function adminExamenDossier(sessionToken, examenId) {
+  return poster(`${GRIND_URL}/api/admin/examens/dossier`, { session_token: sessionToken, examen_id: examenId });
+}
+
+export function adminExamenTraiter(sessionToken, examenId, decision, note) {
+  return poster(`${GRIND_URL}/api/admin/examens/traiter`, {
+    session_token: sessionToken,
+    examen_id: examenId,
+    decision,
+    note: note || null,
+  });
+}
+
+export function adminSupprimerContenu(sessionToken, typeCible, cibleId) {
+  return poster(`${GRIND_URL}/api/admin/contenu/supprimer`, { session_token: sessionToken, type_cible: typeCible, cible_id: cibleId });
+}
+
+export function adminToutSupprimer(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/admin/contenu/tout-supprimer`, { session_token: sessionToken, username });
+}
+
+export function adminSupprimerClasse(sessionToken, classeId) {
+  return poster(`${GRIND_URL}/api/admin/classe/supprimer`, { session_token: sessionToken, classe_id: classeId });
 }

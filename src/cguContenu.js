@@ -2,7 +2,7 @@
 // Quand tu modifies ce texte, change aussi CGU_VERSION dans le serveur
 // (moderation.py) : chaque compte devra alors les accepter de nouveau.
 
-export const CGU_VERSION = "2026-10-31";
+export const CGU_VERSION = "2026-11-02";
 
 export const CGU_SECTIONS = [
   {
@@ -31,9 +31,9 @@ export const CGU_SECTIONS = [
       "Un post de catégorie « problème » doit comporter une date limite. Passé ce délai sans résolution, il expire automatiquement et devient non-répondable. Une classe créée par un utilisateur ne se rejoint que par lien d'invitation, jamais par recherche publique. La feuille de travail de chaque utilisateur est privée par défaut ; la rendre visible à un tiers nécessite une autorisation explicite du chef de classe ou du « prof » désigné pour la session.",
   },
   {
-    titre: "6. Signalements et modération",
+    titre: "6. Signalements, modération et examen",
     texte:
-      "Tu peux signaler un post, un commentaire ou un profil depuis le bouton drapeau. Les signalements sont examinés par l'administration de GRIND, qui peut ignorer le signalement, supprimer le contenu, suspendre un compte pour une durée limitée ou le bannir. Un compte suspendu ou banni ne peut plus se connecter. Les signalements abusifs ou en rafale peuvent eux-mêmes être sanctionnés.",
+      "Tu peux signaler un post, un commentaire ou un compte depuis le menu à trois points ou le bouton drapeau, et choisir de ne plus voir les contenus d'un compte (tu peux les réafficher à tout moment). Les signalements sont examinés par l'administration de GRIND, qui peut ignorer le signalement, supprimer le contenu, suspendre un compte pour une durée limitée ou le bannir. Ces décisions sont prises par des personnes, jamais par un algorithme. Un compte suspendu ou banni ne peut plus se connecter : ses publications et ses classes sont masquées ou suspendues, mais conservées. Quand l'administration l'autorise, la personne peut demander un examen : s'il est accepté, le compte est rétabli avec ses contenus ; s'il est refusé, la décision est définitive. Certaines décisions n'ouvrent pas droit à un examen. Les signalements abusifs ou en rafale peuvent eux-mêmes être sanctionnés.",
   },
   {
     titre: "7. Données collectées",

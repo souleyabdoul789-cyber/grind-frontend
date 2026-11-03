@@ -8,6 +8,7 @@ import Reglages from "./pages/Reglages.jsx";
 import BureauAdmin from "./pages/BureauAdmin.jsx";
 import ModaleAcceptationCgu from "./components/ModaleAcceptationCgu.jsx";
 import { obtenirMonStatut } from "./api.js";
+import { oublierBloques } from "./blocages.js";
 import BarreNav from "./components/BarreNav.jsx";
 import FondAnime from "./components/FondAnime.jsx";
 
@@ -52,6 +53,7 @@ export default function App() {
     localStorage.removeItem("grind_username");
     localStorage.removeItem("grind_profil_complet");
     localStorage.removeItem("grind_role");
+    oublierBloques();
     setSessionToken(null);
     setProfilComplet(false);
     setStatut(null);

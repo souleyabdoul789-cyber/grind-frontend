@@ -6,6 +6,7 @@ import ConfirmModal from "./ConfirmModal.jsx";
 import AvatarIcone from "./AvatarIcone.jsx";
 import ModaleSignalement from "./ModaleSignalement.jsx";
 import BadgeCompte from "./BadgeCompte.jsx";
+import ActionsCompte from "./ActionsCompte.jsx";
 
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();
@@ -23,7 +24,7 @@ const STATUT_STYLE = {
   publiee: null,
 };
 
-export default function CartePost({ post, sessionToken, monUsername, onSupprime, onClicAuteur }) {
+export default function CartePost({ post, sessionToken, monUsername, onSupprime, onClicAuteur, onChange }) {
   const [avatarAuteur, setAvatarAuteur] = useState(null);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
     const nouvelEtat = !commentairesOuverts;
     setCommentairesOuverts(nouvelEtat);
     if (nouvelEtat && commentaires.length === 0) {
-      const res = await listerCommentaires(post.id);
+      const res = await listerCommentaires(post.id, sessionToken);
       setCommentaires(res.commentaires || []);
     }
   }
@@ -150,14 +151,22 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
           </button>
         )}
         {!estAuteur && (
-          <button
-            className="action-post action-signaler"
-            onClick={() => setSignalement({ type: "post", id: post.id, libelle: `ce post de ${post.auteur}` })}
-            type="button"
-            aria-label="Signaler ce post"
-          >
-            <i className="fa-regular fa-flag"></i>
-          </button>
+          <span className="action-signaler">
+            <ActionsCompte
+              sessionToken={sessionToken}
+              username={post.auteur}
+              direction="haut"
+              onChange={onChange}
+              extras={[
+                {
+                  cle: "signaler-post",
+                  icone: "fa-regular fa-flag",
+                  label: "Signaler ce post",
+                  onClick: () => setSignalement({ type: "post", id: post.id, libelle: `ce post de ${post.auteur}`, compte: post.auteur }),
+                },
+              ]}
+            />
+          </span>
         )}
       </div>
 
@@ -176,7 +185,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
                 <button
                   type="button"
                   className="action-signaler-mini"
-                  onClick={() => setSignalement({ type: "commentaire", id: c.id, libelle: `le commentaire de ${c.username}` })}
+                  onClick={() => setSignalement({ type: "commentaire", id: c.id, libelle: `le commentaire de ${c.username}`, compte: c.username })}
                   aria-label="Signaler ce commentaire"
                 >
                   <i className="fa-regular fa-flag"></i>
@@ -203,6 +212,8 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
           typeCible={signalement.type}
           cibleId={signalement.id}
           libelle={signalement.libelle}
+          compteCible={signalement.compte}
+          onChange={onChange}
           onFermer={() => setSignalement(null)}
         />
       )}

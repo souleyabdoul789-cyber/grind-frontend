@@ -4,6 +4,7 @@ import BadgeCompte from "../components/BadgeCompte.jsx";
 import { SalleSignalements, SalleUtilisateurs } from "./Admin.jsx";
 import { SalleEquipe, SalleCertification, SalleAnnonces } from "./SallesEquipe.jsx";
 import SalleSupport from "./SalleSupport.jsx";
+import SalleExamens from "./SalleExamens.jsx";
 import { libelleRole } from "../moderationInfos.js";
 
 const NOM_PAR_DEFAUT = "GRIND Admin";
@@ -13,6 +14,7 @@ const SALLES = [
   { cle: "signalements", titre: "Salle de contrôle", desc: "Traiter les signalements des élèves.", icone: "fa-solid fa-flag", permission: "signalements" },
   { cle: "support", titre: "Boîte de support", desc: "Répondre aux élèves, activer ou couper l'assistant IA.", icone: "fa-solid fa-headset", permission: "support" },
   { cle: "utilisateurs", titre: "Registre des comptes", desc: "Rechercher un compte, suspendre, bannir.", icone: "fa-solid fa-address-book", permission: "utilisateurs" },
+  { cle: "examens", titre: "Examens", desc: "Dossiers des demandes d'examen après une sanction.", icone: "fa-solid fa-scale-balanced", permission: "examens" },
   { cle: "certification", titre: "Certification", desc: "Accorder ou retirer le badge de certification.", icone: "fa-solid fa-circle-check", permission: "certification" },
   { cle: "equipe", titre: "Équipe", desc: "Nommer des associés et des contrôleurs.", icone: "fa-solid fa-people-group", permission: "equipe" },
   { cle: "annonces", titre: "Annonces", desc: "Publier un message à tous les utilisateurs.", icone: "fa-solid fa-bullhorn", permission: "annonces" },
@@ -144,7 +146,8 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
   const sallesVisibles = SALLES.filter((s) => permissions.includes(s.permission));
   const nom = statut.nom_affiche || statut.username;
   const salleActive = SALLES.find((s) => s.cle === salle);
-  const alerte = (apercu?.nb_signalements_ouverts || 0) + (apercu?.nb_support_attente || 0) > 0;
+  const alerte =
+    (apercu?.nb_signalements_ouverts || 0) + (apercu?.nb_support_attente || 0) + (apercu?.nb_examens_attente || 0) > 0;
 
   return (
     <div className="bureau">
@@ -176,6 +179,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
 
           {salle === "signalements" && <SalleSignalements sessionToken={sessionToken} role={monRole} />}
           {salle === "support" && <SalleSupport sessionToken={sessionToken} role={monRole} />}
+          {salle === "examens" && <SalleExamens sessionToken={sessionToken} />}
           {salle === "utilisateurs" && <SalleUtilisateurs sessionToken={sessionToken} role={monRole} />}
           {salle === "certification" && <SalleCertification sessionToken={sessionToken} />}
           {salle === "equipe" && <SalleEquipe sessionToken={sessionToken} />}
@@ -197,6 +201,12 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
                 <div className="kpi-valeur">{apercu.nb_support_attente}</div>
                 <div className="kpi-libelle">discussions à répondre</div>
               </div>
+              {permissions.includes("examens") && (
+                <div className={`kpi ${apercu.nb_examens_attente > 0 ? "kpi-alerte" : ""}`}>
+                  <div className="kpi-valeur">{apercu.nb_examens_attente}</div>
+                  <div className="kpi-libelle">examens en attente</div>
+                </div>
+              )}
               <div className="kpi">
                 <div className="kpi-valeur">{apercu.nb_comptes}</div>
                 <div className="kpi-libelle">comptes</div>
@@ -226,6 +236,11 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
                 {s.cle === "support" && apercu?.nb_support_attente > 0 && (
                   <span className="salle-etiquette" style={{ color: "var(--erreur)", borderColor: "rgba(224,138,138,0.5)" }}>
                     {apercu.nb_support_attente} à répondre
+                  </span>
+                )}
+                {s.cle === "examens" && apercu?.nb_examens_attente > 0 && (
+                  <span className="salle-etiquette" style={{ color: "var(--erreur)", borderColor: "rgba(224,138,138,0.5)" }}>
+                    {apercu.nb_examens_attente} en attente
                   </span>
                 )}
               </button>

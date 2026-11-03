@@ -2617,3 +2617,207 @@ button:disabled {
   box-shadow: 0 0 0 1px var(--violet);
   transform: none;
 }
+
+/* ==================== Chargement GRIND (mascotte) ==================== */
+.chargement-grind {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  text-align: center;
+}
+
+.chargement-grind-svg {
+  animation: grindRebond 0.9s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+
+.chargement-yeux {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: grindClin 3.2s ease-in-out infinite;
+}
+
+.chargement-texte {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+@keyframes grindRebond {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  45% { transform: translateY(-9px) scale(0.97, 1.04); }
+  80% { transform: translateY(0) scale(1.05, 0.95); }
+}
+
+@keyframes grindClin {
+  0%, 92%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chargement-grind-svg, .chargement-yeux { animation: none; }
+}
+
+/* ==================== Menu « ⋮ » ==================== */
+.menu-points { position: relative; display: inline-block; }
+
+.menu-points-bouton {
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-points-bouton:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.menu-points-liste {
+  position: absolute;
+  right: 0;
+  z-index: 60;
+  min-width: 230px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #14141d;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  animation: apparition 0.12s ease both;
+}
+
+.menu-points-bas { top: calc(100% + 4px); }
+.menu-points-haut { bottom: calc(100% + 4px); }
+
+.menu-points-item {
+  width: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.menu-points-item:hover:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.menu-points-item i { width: 16px; text-align: center; color: var(--text-dim); }
+.menu-points-danger, .menu-points-danger i { color: var(--erreur); }
+
+.entete-profil { position: relative; }
+.menu-profil { position: absolute; top: 10px; right: 10px; }
+
+/* ==================== Compte indisponible / sanction (comme WhatsApp) ==================== */
+.icone-compte-bloque {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.icone-compte-pastille {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--erreur);
+  color: #1a0a0a;
+  border: 3px solid #0a0a0f;
+}
+
+.compte-indisponible {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 16px;
+  text-align: center;
+}
+
+.classe-suspendue { color: var(--erreur); margin-top: 8px; }
+
+.ecran-sanction {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  max-width: 460px;
+  text-align: center;
+}
+
+.sanction-titre {
+  margin: 6px 0 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.sanction-motif {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sanction-motif-label {
+  margin-bottom: 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.sanction-examen {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sanction-examen .bouton-admin { align-self: flex-start; }
+
+.bouton-sanction-ferme {
+  margin: 0;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px dashed var(--border);
+  cursor: not-allowed;
+}
