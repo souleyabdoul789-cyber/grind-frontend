@@ -123,11 +123,21 @@ export default function FilActu({ sessionToken, monUsername }) {
         <button className={filtre === null ? "filtre-actif" : "filtre"} onClick={() => setFiltre(null)}>
           Tout
         </button>
-        <button className={filtre === "probleme" ? "filtre-actif" : "filtre"} onClick={() => setFiltre("probleme")}>
-          <i className="fa-solid fa-circle-question"></i> Problèmes
+        <button
+          className={filtre === "probleme" ? "filtre-actif" : "filtre"}
+          onClick={() => setFiltre("probleme")}
+          title="Problèmes"
+          aria-label="Problèmes"
+        >
+          <i className="fa-solid fa-circle-question"></i> Prob
         </button>
-        <button className={filtre === "demonstration" ? "filtre-actif" : "filtre"} onClick={() => setFiltre("demonstration")}>
-          <i className="fa-solid fa-star"></i> Démonstrations
+        <button
+          className={filtre === "demonstration" ? "filtre-actif" : "filtre"}
+          onClick={() => setFiltre("demonstration")}
+          title="Démonstrations"
+          aria-label="Démonstrations"
+        >
+          <i className="fa-solid fa-star"></i> Démo
         </button>
       </div>
 

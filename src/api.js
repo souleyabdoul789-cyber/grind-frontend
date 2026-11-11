@@ -24,9 +24,10 @@ async function poster(url, body) {
 
 // ---------- Compte GRIND (propre à GRIND, distinct de G-SOCIETY) ----------
 
-export function inscrireGrind(username, password, apiKeyGSociety, cguAcceptees) {
+export function inscrireGrind(username, email, password, apiKeyGSociety, cguAcceptees) {
   return poster(`${GRIND_URL}/api/compte/signup`, {
     username,
+    email,
     password,
     api_key: apiKeyGSociety,
     cgu_acceptees: !!cguAcceptees,
@@ -144,8 +145,13 @@ export async function supprimerPost(sessionToken, postId) {
 
 // ---------- Classes ----------
 
-export function creerClasse(sessionToken, nom) {
-  return poster(`${GRIND_URL}/api/classes`, { session_token: sessionToken, nom });
+export function creerClasse(sessionToken, { niveau, matiere, complement }) {
+  return poster(`${GRIND_URL}/api/classes`, {
+    session_token: sessionToken,
+    niveau,
+    matiere,
+    complement,
+  });
 }
 
 export function rejoindreClasse(sessionToken, codeInvitation) {
@@ -410,6 +416,10 @@ export function adminSupportIA(sessionToken, conversationId, active) {
   return poster(`${GRIND_URL}/api/admin/support/ia`, { session_token: sessionToken, conversation_id: conversationId, active });
 }
 
+export function adminSupportAssistant(sessionToken, tester) {
+  return poster(`${GRIND_URL}/api/admin/support/assistant`, { session_token: sessionToken, tester: !!tester });
+}
+
 export function adminSupportCloturer(sessionToken, conversationId) {
   return poster(`${GRIND_URL}/api/admin/support/cloturer`, { session_token: sessionToken, conversation_id: conversationId });
 }
@@ -467,4 +477,42 @@ export function adminToutSupprimer(sessionToken, username) {
 
 export function adminSupprimerClasse(sessionToken, classeId) {
   return poster(`${GRIND_URL}/api/admin/classe/supprimer`, { session_token: sessionToken, classe_id: classeId });
+}
+
+// ---------- Authentification : vérification d'e-mail, mot de passe oublié, déconnexion, catalogue ----------
+
+export function verifierCode(jetonVerification, code) {
+  return poster(`${GRIND_URL}/api/compte/verification/verifier`, { jeton_verification: jetonVerification, code });
+}
+
+export function renvoyerCode(jetonVerification) {
+  return poster(`${GRIND_URL}/api/compte/verification/renvoyer`, { jeton_verification: jetonVerification });
+}
+
+export function associerEmail(jetonVerification, email) {
+  return poster(`${GRIND_URL}/api/compte/email/associer`, { jeton_verification: jetonVerification, email });
+}
+
+export function motDePasseOublie(email) {
+  return poster(`${GRIND_URL}/api/compte/mot-de-passe-oublie`, { email });
+}
+
+export function reinitialiserMotDePasse(jetonVerification, motDePasse) {
+  return poster(`${GRIND_URL}/api/compte/mot-de-passe/reinitialiser`, {
+    jeton_verification: jetonVerification,
+    mot_de_passe: motDePasse,
+  });
+}
+
+export function deconnecterGrind(sessionToken) {
+  return poster(`${GRIND_URL}/api/compte/deconnexion`, { session_token: sessionToken });
+}
+
+let _catalogue = null;
+export async function catalogueScolaire() {
+  if (_catalogue) return _catalogue;
+  const res = await fetch(`${GRIND_URL}/api/scolaire/catalogue`);
+  if (!res.ok) throw new Error("Catalogue indisponible");
+  _catalogue = await res.json();
+  return _catalogue;
 }

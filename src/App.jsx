@@ -7,7 +7,7 @@ import Profil from "./pages/Profil.jsx";
 import Reglages from "./pages/Reglages.jsx";
 import BureauAdmin from "./pages/BureauAdmin.jsx";
 import ModaleAcceptationCgu from "./components/ModaleAcceptationCgu.jsx";
-import { obtenirMonStatut } from "./api.js";
+import { obtenirMonStatut, deconnecterGrind } from "./api.js";
 import { oublierBloques } from "./blocages.js";
 import BarreNav from "./components/BarreNav.jsx";
 import FondAnime from "./components/FondAnime.jsx";
@@ -49,6 +49,8 @@ export default function App() {
   }, [sessionToken, profilComplet, role]);
 
   function deconnecter() {
+    // Déconnexion RÉELLE : la session est aussi supprimée côté serveur (le jeton ne sert plus, même volé).
+    if (sessionToken) deconnecterGrind(sessionToken).catch(() => {});
     localStorage.removeItem("grind_session_token");
     localStorage.removeItem("grind_username");
     localStorage.removeItem("grind_profil_complet");
@@ -105,7 +107,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <FondAnime />
-      <BarreNav sessionToken={sessionToken} ongletActif={onglet} onChangerOnglet={setOnglet} estEquipe={!!statut?.est_equipe} />
+      <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} estEquipe={!!statut?.est_equipe} />
 
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} />}
       {onglet === "classes" && (

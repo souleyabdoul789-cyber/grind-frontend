@@ -5,6 +5,7 @@ import {
   adminSupportRepondre,
   adminSupportIA,
   adminSupportCloturer,
+  adminSupportAssistant,
 } from "../api.js";
 import FilSupport from "../components/FilSupport.jsx";
 import BadgeCompte from "../components/BadgeCompte.jsx";
@@ -18,6 +19,48 @@ function Interrupteur({ actif, onBasculer }) {
     <button type="button" className={`interrupteur ${actif ? "interrupteur-actif" : ""}`} onClick={onBasculer}>
       <span className="curseur-interrupteur"></span>
     </button>
+  );
+}
+
+/* --------------------- État de l'assistant IA (pour l'équipe) --------------------- */
+function EtatAssistant({ sessionToken }) {
+  const [etat, setEtat] = useState(null);
+  const [essai, setEssai] = useState(false);
+
+  useEffect(() => {
+    adminSupportAssistant(sessionToken, false).then(setEtat).catch(() => {});
+  }, [sessionToken]);
+
+  async function tester() {
+    setEssai(true);
+    try {
+      setEtat(await adminSupportAssistant(sessionToken, true));
+    } catch (err) {
+      setEtat({ ok: false, detail: err.message, modele: null, cle_presente: false });
+    } finally {
+      setEssai(false);
+    }
+  }
+
+  const jamaisEssaye = etat && etat.ok === null;
+  return (
+    <div className="panneau-sanction" style={{ marginBottom: 14 }}>
+      <div className="ligne-reglage" style={{ padding: 0 }}>
+        <span style={{ minWidth: 0 }}>
+          <i className="fa-solid fa-robot"></i> Assistant IA{" "}
+          {etat && !jamaisEssaye && (
+            <span className={`badge-motif ${etat.ok ? "" : "badge-motif-alerte"}`}>{etat.ok ? "fonctionne" : "ne répond pas"}</span>
+          )}
+          <div className="info" style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>
+            {etat ? etat.detail : "Lecture de l'état..."}
+            {etat?.ok && etat.modele ? ` (${etat.modele})` : ""}
+          </div>
+        </span>
+        <button type="button" className="bouton-admin bouton-admin-doux" onClick={tester} disabled={essai}>
+          <i className="fa-solid fa-vial"></i> {essai ? "Test..." : "Tester"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -207,6 +250,8 @@ export default function SalleSupport({ sessionToken }) {
 
   return (
     <>
+      <EtatAssistant sessionToken={sessionToken} />
+
       <div className="choix-categorie" style={{ marginBottom: 14 }}>
         <button type="button" className={`chip ${statut === "ouvert" ? "chip-actif" : ""}`} onClick={() => setStatut("ouvert")}>Ouvertes</button>
         <button type="button" className={`chip ${statut === "clos" ? "chip-actif" : ""}`} onClick={() => setStatut("clos")}>Terminées</button>

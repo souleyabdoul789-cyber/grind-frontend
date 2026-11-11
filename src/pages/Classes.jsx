@@ -1,5 +1,6 @@
+import FormulaireClasse from "../components/FormulaireClasse.jsx";
 import { useState, useEffect } from "react";
-import { creerClasse, rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
+import { rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
 import SalleClasse from "../components/SalleClasse.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import EtatVide from "../components/EtatVide.jsx";
@@ -10,7 +11,6 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [salleActive, setSalleActive] = useState(null); // classe_id ou null
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
-  const [nomClasse, setNomClasse] = useState("");
   const [codeInvitation, setCodeInvitation] = useState(codeAttente || "");
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
@@ -30,22 +30,6 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   useEffect(() => {
     charger();
   }, []);
-
-  async function gererCreation(e) {
-    e.preventDefault();
-    setErreur(null);
-    setEnvoiEnCours(true);
-    try {
-      await creerClasse(sessionToken, nomClasse);
-      setNomClasse("");
-      setFormulaireOuvert(null);
-      charger();
-    } catch (err) {
-      setErreur(err.message);
-    } finally {
-      setEnvoiEnCours(false);
-    }
-  }
 
   async function gererAdhesion(e) {
     e.preventDefault();
@@ -72,7 +56,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
   function commencerEdition(c) {
     setClasseEnEdition(c.classe_id);
-    setNomEdition(c.nom);
+    setNomEdition(c.niveau && c.matiere ? c.complement || "" : c.nom);
   }
 
   async function validerRenommage(classeId) {
@@ -140,12 +124,13 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       </div>
 
       {formulaireOuvert === "creer" && (
-        <form className="carte-post formulaire-post" onSubmit={gererCreation}>
-          <label><i className="fa-solid fa-chalkboard"></i> Nom de la classe</label>
-          <input value={nomClasse} onChange={(e) => setNomClasse(e.target.value)} placeholder="ex: Maths Terminale - groupe de Fatima" required />
-          <button type="submit" disabled={envoiEnCours}>{envoiEnCours ? "..." : "Créer"}</button>
-          {erreur && <div className="erreur"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
-        </form>
+        <FormulaireClasse
+          sessionToken={sessionToken}
+          onCree={() => {
+            setFormulaireOuvert(null);
+            charger();
+          }}
+        />
       )}
 
       {formulaireOuvert === "rejoindre" && (
@@ -176,6 +161,8 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
                   <div className="edition-nom-classe">
                     <input
                       value={nomEdition}
+                      placeholder={c.niveau && c.matiere ? "Complément du nom (facultatif)" : "Nom de la classe"}
+                      maxLength={c.niveau && c.matiere ? 30 : 60}
                       onChange={(e) => setNomEdition(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && validerRenommage(c.classe_id)}
                       autoFocus
