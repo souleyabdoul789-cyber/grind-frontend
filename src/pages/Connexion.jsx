@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
+import { ErrorCode, GoogleSignIn } from "@capawesome/capacitor-google-sign-in";
 import {
   connecterGrind, inscrireGrind, motDePasseOublie, associerEmail, connecterGoogle, GOOGLE_CLIENT_ID, relockerPin,
 } from "../api.js";
@@ -47,22 +49,27 @@ export default function Connexion({ onConnecte }) {
   });
   const [googlePret, setGooglePret] = useState(false);
   const googleButtonRef = useRef(null);
+  const estAppNative = Capacitor.isNativePlatform();
 
-  // Initialise GIS une seule fois. Le bouton officiel reste responsable du geste
-  // utilisateur et de la remise du credential (pas de popup One Tap forcée).
+  // Une même validation backend reçoit le jeton Google, qu'il vienne du SDK
+  // natif Android ou de Google Identity Services sur le site web.
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID) return undefined;
     let actif = true;
     let script = null;
+
     const traiterMonCredential = async (response) => {
+      const idToken = response?.credential;
+      if (!idToken) {
+        setErreur("Google n'a pas fourni de jeton de connexion.");
+        return;
+      }
       setErreur(null);
       setChargement(true);
       try {
-        const result = await connecterGoogle(response.credential);
+        const result = await connecterGoogle(idToken);
         if (result.username_requis) {
-          // Google a déjà fourni le prénom, le nom et l'e-mail.
-          // Le nouveau compte ne demande ensuite que le pseudo et les CGU.
-          setCredentialGoogle(response.credential);
+          setCredentialGoogle(idToken);
           setUsernameGoogle(result.suggested_username || "");
           setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
         } else {
@@ -75,6 +82,19 @@ export default function Connexion({ onConnecte }) {
       }
     };
     traiterCredentialGoogle = traiterMonCredential;
+
+    if (estAppNative) {
+      // Sur Android, Google interdit le flux OAuth intégré dans une WebView.
+      // Le plugin ouvre le sélecteur natif et renvoie un ID token vérifié côté API.
+      GoogleSignIn.initialize({ clientId: GOOGLE_CLIENT_ID })
+        .then(() => { if (actif) setGooglePret(true); })
+        .catch(() => { if (actif) setErreur("La connexion Google native n'a pas pu être initialisée."); });
+
+      return () => {
+        actif = false;
+        if (traiterCredentialGoogle === traiterMonCredential) traiterCredentialGoogle = null;
+      };
+    }
 
     const initialiserGoogle = () => {
       if (!actif || !window.google?.accounts?.id) return;
@@ -378,13 +398,43 @@ export default function Connexion({ onConnecte }) {
                 <div className="bloc-google-auth">
                   <div className="separateur-auth"><span>ou</span></div>
                   <div className="google-action">
-                    <div
-                      className="bouton-google bouton-google-grind"
-                      ref={googleButtonRef}
-                      role="group"
-                      aria-label="Connexion avec Google"
-                    />
-                    <span className="google-action-label">Continuer avec Google</span>
+                    {estAppNative ? (
+                      <button
+                        type="button"
+                        className="google-native-button"
+                        onClick={async () => {
+                          setErreur(null);
+                          try {
+                            setChargement(true);
+                            const resultat = await GoogleSignIn.signIn();
+                            if (!resultat?.idToken) throw new Error("Google n'a pas renvoyé de jeton d'identité.");
+                            if (traiterCredentialGoogle) await traiterCredentialGoogle({ credential: resultat.idToken });
+                            else throw new Error("Le service de connexion Google n'est pas prêt. Réessaie.");
+                          } catch (err) {
+                            if (err?.code !== ErrorCode.SignInCanceled) {
+                              setErreur(err.message || "La connexion Google a échoué.");
+                            }
+                          } finally {
+                            setChargement(false);
+                          }
+                        }}
+                        disabled={chargement}
+                        aria-label="Continuer avec Google"
+                      >
+                        <i className="fa-brands fa-google" aria-hidden="true" />
+                        <span>Continuer avec Google</span>
+                      </button>
+                    ) : (
+                      <>
+                        <div
+                          className="bouton-google bouton-google-grind"
+                          ref={googleButtonRef}
+                          role="group"
+                          aria-label="Connexion avec Google"
+                        />
+                        <span className="google-action-label">Continuer avec Google</span>
+                      </>
+                    )}
                   </div>
                 </div>
               )}

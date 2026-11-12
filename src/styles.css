@@ -3661,8 +3661,10 @@ button:disabled {
 .discussion-identite-texte strong { font-size:14px; }
 .discussion-identite-texte small { color:var(--text-dim); font-size:11px; margin-top:3px; }
 .discussion-actions-entete { display:flex; align-items:center; gap:7px; }
-.discussion-mentions { position:relative; color:var(--brown); }
-.discussion-mentions span { position:absolute; top:-5px; right:-5px; display:grid; place-items:center; min-width:18px; height:18px; padding:0 4px; border-radius:12px; background:var(--violet); color:#0a0a0f; font-size:10px; font-weight:800; }
+.discussion-mention-flottant { position:absolute; z-index:8; right:18px; bottom:112px; display:grid; place-items:center; width:48px; height:48px; margin:0; padding:0; border:1px solid var(--border); border-radius:50%; color:#0a0a0f; background:linear-gradient(145deg,var(--violet),var(--brown)); box-shadow:0 8px 22px rgba(0,0,0,.28); cursor:pointer; }
+.discussion-mention-flottant > i { font-size:18px; }
+.discussion-mention-flottant > span { position:absolute; top:-5px; right:-5px; display:grid; place-items:center; min-width:19px; height:19px; padding:0 4px; border:2px solid #101018; border-radius:12px; color:#101018; background:var(--violet); font-size:10px; font-weight:800; }
+.discussion-mention-flottant:focus-visible { outline:2px solid var(--text); outline-offset:3px; }
 .discussion-statut { display:flex; align-items:center; gap:7px; min-height:28px; padding:4px 18px; color:var(--text-dim); font-size:11px; border-bottom:1px solid rgba(201,182,228,.08); }
 .discussion-online-dot { width:7px; height:7px; border-radius:50%; background:var(--text-dim); }
 .discussion-online-dot.actif { background:#8fc49b; box-shadow:0 0 0 3px rgba(143,196,155,.12); }
@@ -3840,8 +3842,7 @@ button:disabled {
 .discussion-rejoindre-ligne button { background:var(--violet); color:#0a0a0f; }
 .discussion-ouvrir-groupe { border-color:rgba(201,182,228,.5); background:linear-gradient(135deg,var(--violet),var(--brown)); color:#0a0a0f; }
 .discussion-photo,.discussion-groupe-photo { border-color:rgba(201,182,228,.55); color:#0a0a0f; background:linear-gradient(145deg,var(--violet),var(--brown)); }
-.discussion-mentions,.discussion-auteur,.discussion-mention-texte { color:var(--violet); }
-.discussion-mentions span { background:var(--violet); color:#0a0a0f; }
+.discussion-auteur,.discussion-mention-texte { color:var(--violet); }
 .discussion-corps { background:radial-gradient(ellipse at 20% 0%,rgba(201,182,228,.08),transparent 55%),radial-gradient(ellipse at 85% 80%,rgba(216,191,166,.035),transparent 50%); }
 .discussion-bulle { background:linear-gradient(145deg,rgba(44,39,56,.88),rgba(27,29,43,.94)); color:var(--text); border-color:rgba(201,182,228,.12); }
 .discussion-ligne.moi .discussion-bulle { background:linear-gradient(145deg,#2c2738,#1b1d2b); color:var(--text); }
@@ -4099,3 +4100,13 @@ button:disabled {
   .discussion-texte { font-size:14px; }
   .discussion-attachement-menu { left:-4px; width:min(312px,calc(100vw - 34px)); }
 }
+
+/* Bouton flottant des mentions non lues dans la discussion. */
+@media (max-width: 640px) {
+  .discussion-mention-flottant { right:14px; bottom:104px; width:44px; height:44px; }
+}
+
+/* Bouton Google natif affiché uniquement dans l'application Capacitor. */
+.google-native-button { display:flex; align-items:center; justify-content:center; gap:11px; width:min(100%,280px); min-height:44px; margin:0; padding:0 16px; border:1px solid var(--border); border-radius:12px; color:var(--text); background:var(--surface); font:inherit; font-size:13px; font-weight:600; box-shadow:0 3px 12px rgba(0,0,0,.08); }
+.google-native-button i { color:#4285f4; font-size:16px; }
+.google-native-button:disabled { opacity:.6; cursor:not-allowed; }

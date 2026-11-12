@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
+import { Capacitor } from "@capacitor/core";
+import { ScreenOrientation } from "@capacitor/screen-orientation";
 import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf, obtenirEtatSalle, modererMicroClasse } from "../api.js";
 import SceneClasse, { NB_SIEGES } from "./SceneClasse.jsx";
 import FeuillePapier from "./FeuillePapier.jsx";
@@ -60,19 +62,26 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   useEffect(() => {
     const media = window.matchMedia("(orientation: landscape)");
     const gerer = (e) => setEstPaysage(e.matches);
+    let actif = true;
     media.addEventListener("change", gerer);
 
-    // Tentative de verrouillage réel — ne marche que dans certains
-    // contextes (app installée/plein écran) ; sinon on se rabat sur le
-    // message "tourne ton téléphone" ci-dessous, qui marche toujours.
-    if (screen.orientation?.lock) {
-      screen.orientation.lock("landscape").catch(() => {});
+    if (Capacitor.isNativePlatform()) {
+      // Dans l'APK, verrouillage Android natif pendant la salle LiveKit seulement.
+      ScreenOrientation.lock({ orientation: "landscape" })
+        .then(() => { if (actif) setEstPaysage(media.matches); })
+        .catch(() => {});
+    } else if (window.screen?.orientation?.lock) {
+      // Sur le web, conserver la tentative existante lorsque le navigateur l'autorise.
+      window.screen.orientation.lock("landscape").catch(() => {});
     }
 
     return () => {
+      actif = false;
       media.removeEventListener("change", gerer);
-      if (screen.orientation?.unlock) {
-        try { screen.orientation.unlock(); } catch {}
+      if (Capacitor.isNativePlatform()) {
+        ScreenOrientation.unlock().catch(() => {});
+      } else if (window.screen?.orientation?.unlock) {
+        try { window.screen.orientation.unlock(); } catch {}
       }
     };
   }, []);

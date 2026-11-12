@@ -489,15 +489,25 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           <span className="discussion-identite-texte"><strong>{discussion.nom}</strong><small>{discussion.nb_membres} membres · groupe de classe</small></span>
         </button>
         <div className="discussion-actions-entete">
-          <button type="button" className="discussion-action-icon discussion-mentions" onClick={sauterVersMention} title="Aller à ta première mention" aria-label="Mentions non lues">
-            <i className="fa-solid fa-at" />{mentionsNonLues > 0 && <span>{mentionsNonLues > 99 ? "99+" : mentionsNonLues}</span>}
-          </button>
           {!discussion.est_membre_classe && <button type="button" className="discussion-action-icon" onClick={rejoindreVraieClasse} disabled={actionEnCours === "classe"} title="Rejoindre la vraie classe" aria-label="Rejoindre la vraie classe"><i className="fa-solid fa-person-circle-plus" /></button>}
           <button type="button" className="discussion-action-icon" onClick={() => setPanneauMembres(v => !v)} title="Informations du groupe" aria-label="Informations du groupe"><i className="fa-solid fa-ellipsis-vertical" /></button>
         </div>
       </header>
 
       <div className="discussion-statut"><span className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"} · {discussion.limite_membres || 200} membres maximum</div>
+
+      {mentionsNonLues > 0 && (
+        <button
+          type="button"
+          className="discussion-mention-flottant"
+          onClick={sauterVersMention}
+          title="Aller à ta première mention non lue"
+          aria-label={`Aller à tes ${mentionsNonLues} mentions non lues`}
+        >
+          <i className="fa-solid fa-at" aria-hidden="true" />
+          <span>{mentionsNonLues > 99 ? "99+" : mentionsNonLues}</span>
+        </button>
+      )}
 
       <div className="discussion-corps" ref={scrollRef}>
         {plusAnciens && messages.length > 0 && <button className="discussion-plus-anciens" type="button" onClick={chargerPlusAnciens} disabled={chargementAnciens}>{chargementAnciens ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-clock-rotate-left" />} Charger les messages précédents</button>}
