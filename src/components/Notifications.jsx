@@ -132,6 +132,7 @@ export default function Notifications({ sessionToken }) {
     if (n.type === "persistante") {
       const nom = n.acteur_nom || n.acteur;
       if (n.eventType === "mention") return `${nom} t’a mentionné`;
+      if (n.eventType === "mention_classe") return `${nom} t’a mentionné dans une discussion de classe`;
       if (n.eventType === "like_publication") return `${nom} a aimé ta publication`;
       if (n.eventType === "commentaire") return `${nom} a commenté ta publication`;
       if (n.eventType === "reponse_commentaire") return `${nom} a répondu à ton commentaire`;
@@ -169,9 +170,10 @@ export default function Notifications({ sessionToken }) {
                   setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, lu: true } : x));
                   setOuvert(false);
                   if (n.resource_type === "library_document") window.dispatchEvent(new CustomEvent("grind-open-library-doc", { detail: n.resource_id }));
+                  else if (n.resource_type === "classe_discussion_message" && n.classe_id) window.dispatchEvent(new CustomEvent("grind-open-discussion", { detail: { classe_id: n.classe_id, message_id: n.resource_id } }));
                   else if (n.post_id) window.dispatchEvent(new CustomEvent("grind-navigate-post", { detail: { post_id: n.post_id, commentaire_id: n.commentaire_id || null } }));
                 }}>
-                  <i className={n.eventType === "mention" ? "fa-solid fa-at" : n.eventType?.includes("like") || n.eventType === "avis_doc" ? "fa-solid fa-heart" : "fa-solid fa-comment"}></i><span>{texteNotif(n)}<small>{n.extrait || "Ouvrir le contenu"}</small></span>
+                  <i className={n.eventType === "mention" || n.eventType === "mention_classe" ? "fa-solid fa-at" : n.eventType?.includes("like") || n.eventType === "avis_doc" ? "fa-solid fa-heart" : "fa-solid fa-comment"}></i><span>{texteNotif(n)}<small>{n.extrait || "Ouvrir le contenu"}</small></span>
                 </button>
               ) : n.type === "annonce" ? (
                 <button key={n.id} type="button" className={`ligne-notif ligne-notif-annonce ${n.important ? "ligne-notif-importante" : ""}`} onClick={() => ouvrirAnnonce(n)}>

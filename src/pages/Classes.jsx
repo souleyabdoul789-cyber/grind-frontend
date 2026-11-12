@@ -1,18 +1,26 @@
 import FormulaireClasse from "../components/FormulaireClasse.jsx";
 import { useState, useEffect } from "react";
-import { rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
+import { rejoindreClasse, rejoindreDiscussion, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
 import SalleClasse from "../components/SalleClasse.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import EtatVide from "../components/EtatVide.jsx";
+import DiscussionClasse from "../components/DiscussionClasse.jsx";
+import ProfilPublic from "../components/ProfilPublic.jsx";
 
-export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme }) {
+export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme, discussionAouvrir, onDiscussionOuverte }) {
   const [classes, setClasses] = useState([]);
   const [chargement, setChargement] = useState(true);
-  const [salleActive, setSalleActive] = useState(null); // classe_id ou null
+  const [salleActive, setSalleActive] = useState(null); // salle LiveKit de la classe réelle
+  const [discussionActive, setDiscussionActive] = useState(null);
+  const [messageInitialDiscussion, setMessageInitialDiscussion] = useState(null);
+  const [profilConsulte, setProfilConsulte] = useState(null);
   const [ouvertureSalleId, setOuvertureSalleId] = useState(null);
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
   const [codeInvitation, setCodeInvitation] = useState(codeAttente || "");
+  const [codeDiscussion, setCodeDiscussion] = useState("");
+  const [erreurDiscussion, setErreurDiscussion] = useState("");
+  const [adhesionDiscussion, setAdhesionDiscussion] = useState(false);
   const [erreur, setErreur] = useState(null);
   const [erreurChargement, setErreurChargement] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
@@ -39,6 +47,26 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     charger();
   }, []);
 
+  useEffect(() => {
+    const ouvrirProfil = (event) => {
+      const username = typeof event.detail === "string" ? event.detail : event.detail?.username;
+      if (username) setProfilConsulte(username);
+    };
+    window.addEventListener("grind-open-profil", ouvrirProfil);
+    return () => window.removeEventListener("grind-open-profil", ouvrirProfil);
+  }, []);
+
+  useEffect(() => {
+    if (!discussionAouvrir?.classe_id || chargement) return;
+    const cible = classes.find(c => Number(c.classe_id) === Number(discussionAouvrir.classe_id));
+    if (cible) {
+      setSalleActive(null);
+      setMessageInitialDiscussion(discussionAouvrir.message_id || null);
+      setDiscussionActive(cible);
+      if (onDiscussionOuverte) onDiscussionOuverte();
+    }
+  }, [discussionAouvrir, classes, chargement, onDiscussionOuverte]);
+
   async function gererAdhesion(e) {
     e.preventDefault();
     setErreur(null);
@@ -54,6 +82,34 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     } finally {
       setEnvoiEnCours(false);
     }
+  }
+
+  async function gererAdhesionDiscussion(e) {
+    e.preventDefault();
+    setErreurDiscussion("");
+    setAdhesionDiscussion(true);
+    try {
+      const res = await rejoindreDiscussion(sessionToken, extraireCode(codeDiscussion));
+      setCodeDiscussion("");
+      await charger();
+      const cible = classes.find(c => Number(c.classe_id) === Number(res.classe_id));
+      if (cible) setDiscussionActive(cible);
+      else {
+        const actualisees = await listerMesClasses(sessionToken);
+        const ligne = (actualisees.classes || []).find(c => Number(c.classe_id) === Number(res.classe_id));
+        if (ligne) { setClasses(actualisees.classes); setDiscussionActive(ligne); }
+      }
+    } catch (err) {
+      setErreurDiscussion(err.message || "Impossible de rejoindre cette discussion.");
+    } finally {
+      setAdhesionDiscussion(false);
+    }
+  }
+
+  function ouvrirDiscussion(c, messageId = null) {
+    setSalleActive(null);
+    setMessageInitialDiscussion(messageId);
+    setDiscussionActive(c);
   }
 
   function ouvrirSalle(classeId) {
@@ -102,6 +158,28 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     }
   }
 
+  if (profilConsulte) {
+    return (
+      <div className="fil-actu">
+        <ProfilPublic username={profilConsulte} sessionToken={sessionToken} monUsername={monUsername} onRetour={() => setProfilConsulte(null)} />
+      </div>
+    );
+  }
+
+  if (discussionActive) {
+    return (
+      <div className="fil-actu discussion-page-shell">
+        <DiscussionClasse
+          sessionToken={sessionToken}
+          classe={discussionActive}
+          monUsername={monUsername}
+          messageAouvrirId={messageInitialDiscussion}
+          onQuitter={() => { setDiscussionActive(null); setMessageInitialDiscussion(null); charger(); }}
+        />
+      </div>
+    );
+  }
+
   if (salleActive) {
     const classeOuverte = classes.find((c) => c.classe_id === salleActive);
     return (
@@ -123,6 +201,18 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
   return (
     <div className="fil-actu">
+      <form className="discussion-rejoindre-form carte-post" onSubmit={gererAdhesionDiscussion}>
+        <div className="discussion-rejoindre-intro">
+          <span className="discussion-rejoindre-icone"><i className="fa-solid fa-comments" /></span>
+          <span><strong>Rejoindre une discussion</strong><small>Entre le code du groupe. Tu peux discuter même si la classe réelle est complète.</small></span>
+        </div>
+        <div className="discussion-rejoindre-ligne">
+          <input value={codeDiscussion} onChange={e => setCodeDiscussion(e.target.value)} placeholder="Code ou lien d'invitation du groupe" aria-label="Code ou lien d'invitation du groupe" />
+          <button type="submit" disabled={adhesionDiscussion || !codeDiscussion.trim()}>{adhesionDiscussion ? <i className="fa-solid fa-circle-notch fa-spin" /> : <><i className="fa-solid fa-arrow-right-to-bracket" /> Rejoindre</>}</button>
+        </div>
+        {erreurDiscussion && <div className="erreur" role="alert">{erreurDiscussion}</div>}
+      </form>
+
       <div className="choix-categorie" style={{ marginBottom: 16 }}>
         <button
           className={formulaireOuvert === "creer" ? "chip chip-actif" : "chip"}
@@ -196,7 +286,11 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
                   <div className="auteur-post">{c.nom}</div>
                 )}
                 <div className="badge-categorie demonstration">
-                  <i className="fa-solid fa-users"></i> {c.nb_membres} {c.nb_membres > 1 ? "membres" : "membre"}
+                  <i className="fa-solid fa-users"></i> {c.nb_membres} {c.nb_membres > 1 ? "membres" : "membre"} dans la classe
+                </div>
+                <div className="discussion-meta-classe">
+                  <i className="fa-solid fa-comments" /> {c.discussion_membres ?? 0} / 200 dans la discussion
+                  {c.est_membre_classe === false && <span> · membre du groupe uniquement</span>}
                 </div>
               </div>
               {c.role === "prof" && (
@@ -221,15 +315,21 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
               </>
             )}
 
-            {c.suspendue ? (
-              <div className="info classe-suspendue">
-                <i className="fa-solid fa-circle-pause"></i> Classe suspendue par l'administration de GRIND
-              </div>
-            ) : (
-              <button className="action-post" onClick={() => ouvrirSalle(c.classe_id)} disabled={ouvertureSalleId !== null} type="button">
-                {ouvertureSalleId === c.classe_id ? <><i className="fa-solid fa-spinner fa-spin"></i> Ouverture de la classe...</> : <><i className="fa-solid fa-phone"></i> Entrer dans la classe</>}
-              </button>
-            )}
+            <div className="discussion-actions-classe">
+              {c.est_membre_discussion !== false ? (
+                <button className="discussion-ouvrir-groupe" onClick={() => ouvrirDiscussion(c)} type="button">
+                  <i className="fa-solid fa-comments" /> Ouvrir la discussion <span>{c.discussion_membres ?? 0}</span>
+                </button>
+              ) : (
+                <div className="info discussion-acces-retire"><i className="fa-solid fa-lock" /> Accès à la discussion retiré. Contacte un administrateur du groupe.</div>
+              )}
+              {c.est_membre_classe !== false && !c.suspendue && (
+                <button className="action-post discussion-ouvrir-classe" onClick={() => ouvrirSalle(c.classe_id)} disabled={ouvertureSalleId !== null} type="button">
+                  {ouvertureSalleId === c.classe_id ? <><i className="fa-solid fa-circle-notch fa-spin"></i> Ouverture...</> : <><i className="fa-solid fa-phone"></i> Entrer dans la classe</>}
+                </button>
+              )}
+              {c.suspendue && <div className="info classe-suspendue"><i className="fa-solid fa-circle-pause"></i> Classe suspendue par l'administration de GRIND</div>}
+            </div>
           </div>
         ))
       )}

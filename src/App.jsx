@@ -44,6 +44,18 @@ export default function App() {
   const [bienvenueVerifiee, setBienvenueVerifiee] = useState(false);
   const [documentLibraryAouvrir, setDocumentLibraryAouvrir] = useState(null);
   const [postAouvrir, setPostAouvrir] = useState(null);
+  const [discussionAouvrir, setDiscussionAouvrir] = useState(null);
+
+  useEffect(() => {
+    const ouvrirDiscussion = (event) => {
+      const cible = event.detail;
+      if (!cible?.classe_id) return;
+      setDiscussionAouvrir(cible);
+      setOnglet("classes");
+    };
+    window.addEventListener("grind-open-discussion", ouvrirDiscussion);
+    return () => window.removeEventListener("grind-open-discussion", ouvrirDiscussion);
+  }, []);
 
   async function initialiserSession(token, donnees = {}) {
     setBienvenueOuverte(false);
@@ -389,7 +401,7 @@ export default function App() {
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
       {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}
       {onglet === "classes" && (
-        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} />
+        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} />
       )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
       {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}

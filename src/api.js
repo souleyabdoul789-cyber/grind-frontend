@@ -347,6 +347,99 @@ export function extraireCode(saisie) {
   return propre;
 }
 
+
+export async function obtenirDiscussionClasse(sessionToken, classeId) {
+  const url = `${GRIND_URL}/api/classes/${classeId}/discussion?session_token=${encodeURIComponent(sessionToken)}`;
+  const res = await fetchApi(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "Impossible d'ouvrir la discussion.");
+  return data;
+}
+
+export async function listerMessagesDiscussion(sessionToken, classeId, beforeId = null, afterId = null) {
+  const url = new URL(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`);
+  url.searchParams.set("session_token", sessionToken);
+  if (beforeId) url.searchParams.set("before_id", String(beforeId));
+  if (afterId) url.searchParams.set("after_id", String(afterId));
+  const res = await fetchApi(url.toString());
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Impossible de charger les messages.");
+  return data;
+}
+
+export function envoyerMessageDiscussion(sessionToken, classeId, payload) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, { session_token: sessionToken, ...payload });
+}
+
+export function urlDiscussion(sessionToken, discussionId) {
+  const base = GRIND_URL.replace(/^https/, "wss").replace(/^http/, "ws");
+  return `${base}/ws/discussion/${discussionId}?session_token=${encodeURIComponent(sessionToken)}`;
+}
+
+export function urlPieceDiscussion(sessionToken, classeId, messageId) {
+  const url = new URL(`${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/piece`);
+  url.searchParams.set("session_token", sessionToken);
+  return url.toString();
+}
+
+export async function listerMentionsDiscussion(sessionToken, classeId) {
+  const res = await fetchApi(`${GRIND_URL}/api/classes/${classeId}/discussion/mentions?session_token=${encodeURIComponent(sessionToken)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Impossible de charger les mentions.");
+  return data;
+}
+
+export function marquerMentionDiscussionLue(sessionToken, classeId, mentionId) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/mentions/${mentionId}/lue`, { session_token: sessionToken });
+}
+
+export function rejoindreDiscussion(sessionToken, codeInvitation) {
+  return poster(`${GRIND_URL}/api/classes/discussions/rejoindre`, { session_token: sessionToken, code_invitation: codeInvitation });
+}
+
+export function rejoindreVraieClasseDepuisDiscussion(sessionToken, classeId) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/rejoindre-classe`, { session_token: sessionToken });
+}
+
+export function modifierPhotoDiscussion(sessionToken, classeId, photoUrl) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/photo`, { session_token: sessionToken, photo_url: photoUrl });
+}
+
+export function ajouterAdminDiscussion(sessionToken, classeId, username) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/admins`, { session_token: sessionToken, username });
+}
+
+export function retirerAdminDiscussion(sessionToken, classeId, username) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/admins/${encodeURIComponent(username)}?session_token=${encodeURIComponent(sessionToken)}`, { session_token: sessionToken });
+}
+
+export function restreindreMembreDiscussion(sessionToken, classeId, username, options) {
+  return fetchApi(`${GRIND_URL}/api/classes/${classeId}/discussion/membres/${encodeURIComponent(username)}/restriction`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, ...options }),
+  }).then(async (res) => { const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.detail || "Restriction impossible."); return data; });
+}
+
+export function leverRestrictionDiscussion(sessionToken, classeId, username) {
+  return fetchApi(`${GRIND_URL}/api/classes/${classeId}/discussion/membres/${encodeURIComponent(username)}/restriction?session_token=${encodeURIComponent(sessionToken)}`, { method: "DELETE" }).then(async (res) => { const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.detail || "Impossible de lever la restriction."); return data; });
+}
+
+export function retirerMembreDiscussion(sessionToken, classeId, username) {
+  return fetchApi(`${GRIND_URL}/api/classes/${classeId}/discussion/membres/${encodeURIComponent(username)}?session_token=${encodeURIComponent(sessionToken)}`, { method: "DELETE" }).then(async (res) => { const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.detail || "Impossible de retirer ce membre."); return data; });
+}
+
+export function quitterDiscussion(sessionToken, classeId) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/quitter`, { session_token: sessionToken });
+}
+
+export function transfererProprietaireDiscussion(sessionToken, classeId, username) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/proprietaire`, { session_token: sessionToken, username });
+}
+
+export function renouvelerInvitationDiscussion(sessionToken, classeId) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/invitation/renouveler`, { session_token: sessionToken });
+}
+
 // ---------- Aide ----------
 
 export function demanderAide(sessionToken, sujet, description) {

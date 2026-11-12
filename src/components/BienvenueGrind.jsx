@@ -4,11 +4,11 @@ import { terminerBienvenue } from "../api.js";
 function LogoGrind({ grand = false }) {
   return <div className={grand ? "welcome-logo grand" : "welcome-logo"}>
     <svg viewBox="0 0 100 100" role="img" aria-label="Emblème GRIND">
-      <path d="M18 25 L50 8 L82 25 L50 42 Z" fill="#b28b68" />
-      <path d="M28 30 L28 42 Q50 54 72 42 L72 30 L50 43 Z" fill="#d9c7b2" />
-      <path d="M50 43 C33 43 21 55 21 70 C21 84 32 92 48 92 C63 92 75 82 75 66 L53 66 L53 78 L62 78 C59 83 54 85 48 85 C38 85 32 79 32 70 C32 60 39 54 50 54 C57 54 63 57 67 62 L78 55 C72 44 62 43 50 43 Z" fill="#b28b68" />
-      <path d="M81 24 L88 24 L88 48 L82 48 L82 32 Z" fill="#8f6b4f" />
-      <circle cx="88" cy="53" r="5" fill="#8f6b4f" />
+      <path d="M18 25 L50 8 L82 25 L50 42 Z" fill="#c9b6e4" />
+      <path d="M28 30 L28 42 Q50 54 72 42 L72 30 L50 43 Z" fill="#d8bfa6" />
+      <path d="M50 43 C33 43 21 55 21 70 C21 84 32 92 48 92 C63 92 75 82 75 66 L53 66 L53 78 L62 78 C59 83 54 85 48 85 C38 85 32 79 32 70 C32 60 39 54 50 54 C57 54 63 57 67 62 L78 55 C72 44 62 43 50 43 Z" fill="#c9b6e4" />
+      <path d="M81 24 L88 24 L88 48 L82 48 L82 32 Z" fill="#d8bfa6" />
+      <circle cx="88" cy="53" r="5" fill="#d8bfa6" />
     </svg>
     <strong>GRIND</strong>
   </div>;
@@ -20,9 +20,9 @@ function DrapeauNiger() {
 
 function IllustrationEtude() {
   return <svg className="welcome-scene" viewBox="0 0 640 420" role="img" aria-label="Deux élèves étudient ensemble avec GRIND">
-    <defs><linearGradient id="welcomeShirt" x1="0" x2="1"><stop stopColor="#ad8968"/><stop offset="1" stopColor="#806048"/></linearGradient><linearGradient id="welcomeBook" x1="0" x2="1"><stop stopColor="#e6d9c8"/><stop offset="1" stopColor="#c4ad96"/></linearGradient></defs>
+    <defs><linearGradient id="welcomeShirt" x1="0" x2="1"><stop stopColor="#c9b6e4"/><stop offset="1" stopColor="#d8bfa6"/></linearGradient><linearGradient id="welcomeBook" x1="0" x2="1"><stop stopColor="#e6d9c8"/><stop offset="1" stopColor="#c4ad96"/></linearGradient></defs>
     <rect x="20" y="18" width="600" height="380" rx="32" fill="#eee5d9"/><circle cx="90" cy="84" r="34" fill="#e3d2bf"/><circle cx="560" cy="75" r="28" fill="#e3d2bf"/>
-    <rect x="72" y="282" width="496" height="22" rx="11" fill="#8f6b4f"/><path d="M110 304 L530 304 L510 370 L132 370 Z" fill="#9f7959"/>
+    <rect x="72" y="282" width="496" height="22" rx="11" fill="#d8bfa6"/><path d="M110 304 L530 304 L510 370 L132 370 Z" fill="#9f7959"/>
     <rect x="128" y="265" width="148" height="19" rx="5" fill="url(#welcomeBook)"/><path d="M134 260 L270 260 L276 268 L128 268 Z" fill="#faf7f2"/>
     <rect x="380" y="266" width="130" height="18" rx="5" fill="#e9dfd3"/><path d="M386 260 L505 260 L510 268 L380 268 Z" fill="#fff"/>
     {/* garçon */}
@@ -33,7 +33,7 @@ function IllustrationEtude() {
     <path d="M343 280 Q338 202 384 164 Q418 135 455 167 Q491 202 486 280 Z" fill="#9b775c"/><ellipse cx="416" cy="137" rx="48" ry="56" fill="#744831"/>
     <path d="M370 127 Q358 55 417 55 Q479 60 465 143 Q452 103 419 96 Q390 96 370 127" fill="#211a16"/><path d="M377 79 Q339 126 365 186 M456 78 Q490 127 470 184" fill="none" stroke="#211a16" strokeWidth="12" strokeLinecap="round"/><circle cx="399" cy="139" r="4" fill="#241713"/><circle cx="435" cy="139" r="4" fill="#241713"/><path d="M401 159 Q416 171 434 159" fill="none" stroke="#f1c2a0" strokeWidth="5" strokeLinecap="round"/><text x="416" y="251" textAnchor="middle" fontSize="16" fontWeight="700" fill="#fff">G</text>
     {/* téléphone GRIND */}
-    <g transform="rotate(-7 320 224)"><rect x="280" y="154" width="82" height="124" rx="14" fill="#2b2925"/><rect x="286" y="162" width="70" height="107" rx="8" fill="#f5efe7"/><rect x="292" y="171" width="58" height="22" rx="6" fill="#b28b68"/><text x="321" y="186" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700">GRIND</text><rect x="293" y="200" width="56" height="7" rx="3" fill="#c5ad95"/><rect x="293" y="213" width="48" height="7" rx="3" fill="#dfd2c3"/><rect x="293" y="229" width="55" height="28" rx="6" fill="#e8dfd4"/><path d="M300 249 L309 239 L318 245 L329 233 L340 245" fill="none" stroke="#8f6b4f" strokeWidth="2"/></g>
+    <g transform="rotate(-7 320 224)"><rect x="280" y="154" width="82" height="124" rx="14" fill="#2b2925"/><rect x="286" y="162" width="70" height="107" rx="8" fill="#f5efe7"/><rect x="292" y="171" width="58" height="22" rx="6" fill="#c9b6e4"/><text x="321" y="186" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="700">GRIND</text><rect x="293" y="200" width="56" height="7" rx="3" fill="#d8bfa6"/><rect x="293" y="213" width="48" height="7" rx="3" fill="#c9b6e4"/><rect x="293" y="229" width="55" height="28" rx="6" fill="#c9b6e4"/><path d="M300 249 L309 239 L318 245 L329 233 L340 245" fill="none" stroke="#8f6b4f" strokeWidth="2"/></g>
     <path d="M236 214 Q260 210 284 228 M351 232 Q372 208 394 218" fill="none" stroke="#683f2b" strokeWidth="16" strokeLinecap="round"/>
   </svg>;
 }

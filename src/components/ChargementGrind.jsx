@@ -6,12 +6,11 @@
 export default function ChargementGrind({ texte, taille = 46 }) {
   return (
     <div className="chargement-grind" role="status" aria-live="polite">
-      <span className="grind-spinner chargement-anneau" aria-hidden="true" />
       <svg width={taille} height={taille} viewBox="0 0 100 100" className="chargement-grind-svg" aria-hidden="true">
         <defs>
           <linearGradient id="degradeChargement" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
             <stop offset="0" stopColor="#d8bfa6" />
-            <stop offset="1" stopColor="#e8ddd0" />
+            <stop offset="1" stopColor="#c9b6e4" />
           </linearGradient>
         </defs>
         <ellipse cx="38" cy="56" rx="28" ry="30" fill="url(#degradeChargement)" opacity="0.92" />
