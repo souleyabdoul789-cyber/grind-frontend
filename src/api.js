@@ -109,6 +109,20 @@ export function enregistrerProfil(sessionToken, { age, pays, niveau, filiere, et
   });
 }
 
+export async function obtenirMonProfil(sessionToken) {
+  const res = await fetchApi(`${GRIND_URL}/api/profil/moi?session_token=${encodeURIComponent(sessionToken)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.detail;
+    throw new Error(typeof detail === "string" ? detail : detail?.message || "Impossible de vérifier le profil GRIND.");
+  }
+  return data;
+}
+
+export function modifierIdentite(sessionToken, prenom, nom) {
+  return poster(`${GRIND_URL}/api/compte/identite`, { session_token: sessionToken, prenom, nom });
+}
+
 // ---------- Fil d'actu ----------
 
 export async function listerPosts(categorie, sessionToken) {

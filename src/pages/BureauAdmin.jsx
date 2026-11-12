@@ -162,7 +162,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
           </div>
         </div>
         {autonome && <div className="bureau-actions-session">
-          {onChangerCompte && <button type="button" className="bouton-admin bouton-admin-doux" onClick={onChangerCompte} disabled={changementCompteEnCours}>{changementCompteEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Changement...</> : <><i className="fa-solid fa-users"></i> Changer de compte</>}</button>}
+          {onChangerCompte && <button type="button" className="bouton-admin bouton-admin-doux" onClick={onChangerCompte} disabled={changementCompteEnCours}>{changementCompteEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Changement...</> : <><i className="fa-solid fa-users"></i> Gérer les comptes</>}</button>}
           {onDeconnexion && <button type="button" className="bouton-admin bouton-admin-doux" onClick={onDeconnexion}><i className="fa-solid fa-right-from-bracket"></i> Quitter</button>}
         </div>}
       </header>

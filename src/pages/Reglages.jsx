@@ -1,8 +1,49 @@
 import PageCgu from "../components/PageCgu.jsx";
 import ContactSupport from "../components/ContactSupport.jsx";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { obtenirMonProfil, modifierIdentite } from "../api.js";
 
-export default function Reglages({ sessionToken, onDeconnexion }) {
+export default function Reglages({ sessionToken, monUsername, onDeconnexion }) {
+  const [prenom, setPrenom] = useState("");
+  const [nom, setNom] = useState("");
+  const [identiteChargee, setIdentiteChargee] = useState(false);
+  const [editionIdentite, setEditionIdentite] = useState(false);
+  const [identiteErreur, setIdentiteErreur] = useState("");
+  const [sauvegardeIdentite, setSauvegardeIdentite] = useState(false);
+
+  useEffect(() => {
+    let actif = true;
+    obtenirMonProfil(sessionToken)
+      .then((profil) => {
+        if (!actif) return;
+        setPrenom(profil.prenom || "");
+        setNom(profil.nom || "");
+        setIdentiteChargee(true);
+      })
+      .catch((erreur) => {
+        if (!actif) return;
+        setIdentiteErreur(erreur.message || "Impossible de charger l'identité.");
+        setIdentiteChargee(true);
+      });
+    return () => { actif = false; };
+  }, [sessionToken]);
+
+  async function enregistrerIdentite(e) {
+    e.preventDefault();
+    setIdentiteErreur("");
+    setSauvegardeIdentite(true);
+    try {
+      const resultat = await modifierIdentite(sessionToken, prenom, nom);
+      setPrenom(resultat.prenom);
+      setNom(resultat.nom);
+      setEditionIdentite(false);
+    } catch (erreur) {
+      setIdentiteErreur(erreur.message || "La modification n'a pas pu être enregistrée.");
+    } finally {
+      setSauvegardeIdentite(false);
+    }
+  }
+
   const [cguOuvertes, setCguOuvertes] = useState(false);
   const [contactOuvert, setContactOuvert] = useState(false);
 
@@ -27,6 +68,34 @@ export default function Reglages({ sessionToken, onDeconnexion }) {
 
   return (
     <div className="fil-actu">
+      <div className="carte-post reglages-identite">
+        <div className="sous-titre reglages-identite-titre">Identité</div>
+        <div className="reglages-identite-username">@{monUsername || ""}</div>
+        <div className="reglages-identite-ligne">
+          <div className="reglages-identite-valeur">
+            <span>{identiteChargee ? ([prenom, nom].filter(Boolean).join(" ") || "Prénom et nom non renseignés") : "Chargement de l'identité…"}</span>
+            <small>Prénom et nom associés à ton compte</small>
+          </div>
+          {!editionIdentite && (
+            <button type="button" className="bouton-editer-identite" onClick={() => { setIdentiteErreur(""); setEditionIdentite(true); }} aria-label="Modifier le prénom et le nom" title="Modifier">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
+            </button>
+          )}
+        </div>
+        {editionIdentite && (
+          <form className="form-identite-reglages" onSubmit={enregistrerIdentite}>
+            <label>Prénom<input value={prenom} onChange={(e) => setPrenom(e.target.value)} maxLength={80} autoComplete="given-name" required /></label>
+            <label>Nom<input value={nom} onChange={(e) => setNom(e.target.value)} maxLength={80} autoComplete="family-name" required /></label>
+            {identiteErreur && <p className="erreur" role="alert">{identiteErreur}</p>}
+            <div className="actions-identite-reglages">
+              <button type="button" className="bouton-retour" disabled={sauvegardeIdentite} onClick={() => { setEditionIdentite(false); setIdentiteErreur(""); }}>Annuler</button>
+              <button type="submit" disabled={sauvegardeIdentite || !prenom.trim() || !nom.trim()}>{sauvegardeIdentite ? "Enregistrement…" : "Enregistrer"}</button>
+            </div>
+          </form>
+        )}
+        {!editionIdentite && identiteErreur && <p className="erreur" role="alert">{identiteErreur}</p>}
+      </div>
+
       <div className="carte-post">
         <div className="sous-titre" style={{ marginBottom: 14 }}>
           <i className="fa-solid fa-bell"></i> Notifications

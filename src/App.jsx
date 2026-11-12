@@ -7,12 +7,13 @@ import Profil from "./pages/Profil.jsx";
 import Reglages from "./pages/Reglages.jsx";
 import BureauAdmin from "./pages/BureauAdmin.jsx";
 import ModaleAcceptationCgu from "./components/ModaleAcceptationCgu.jsx";
-import { obtenirMonStatut, deconnecterGrind, statutPin, relockerPin } from "./api.js";
+import { obtenirMonStatut, deconnecterGrind, statutPin, relockerPin, obtenirMonProfil } from "./api.js";
 import { oublierBloques } from "./blocages.js";
 import BarreNav from "./components/BarreNav.jsx";
 import FondAnime from "./components/FondAnime.jsx";
 import EspaceProviseur from "./pages/EspaceProviseur.jsx";
 import VerrouPin from "./components/VerrouPin.jsx";
+import GestionComptes from "./components/GestionComptes.jsx";
 
 function extraireCodeDepuisUrl() {
   const correspondance = window.location.pathname.match(/^\/rejoindre\/(.+)$/);
@@ -22,6 +23,8 @@ function extraireCodeDepuisUrl() {
 export default function App() {
   const [sessionToken, setSessionToken] = useState(null);
   const [profilComplet, setProfilComplet] = useState(false);
+  const [profilPret, setProfilPret] = useState(false);
+  const [profilErreur, setProfilErreur] = useState("");
   const [username, setUsername] = useState(null);
   const [codeAttente, setCodeAttente] = useState(extraireCodeDepuisUrl());
   const [onglet, setOnglet] = useState(codeAttente ? "classes" : "fil");
@@ -30,16 +33,67 @@ export default function App() {
   const [typeCompte, setTypeCompte] = useState("eleve");
   const [pinStatus, setPinStatus] = useState(null);
   const [changementCompteEnCours, setChangementCompteEnCours] = useState(false);
+  const [gestionComptesOuverte, setGestionComptesOuverte] = useState(false);
+
+  async function initialiserSession(token, donnees = {}) {
+    const nouveauRole = donnees.role ?? localStorage.getItem("grind_role") ?? null;
+    const nouveauType = donnees.type_compte ?? localStorage.getItem("grind_type_compte") ?? "eleve";
+    const nouveauUsername = donnees.username ?? localStorage.getItem("grind_username");
+
+    setSessionToken(token);
+    setUsername(nouveauUsername);
+    setRole(nouveauRole);
+    setTypeCompte(nouveauType);
+    setProfilErreur("");
+
+    if (nouveauRole === "admin" || nouveauType === "proviseur") {
+      setProfilComplet(true);
+      setProfilPret(true);
+      localStorage.setItem("grind_profil_complet", "1");
+      return;
+    }
+
+    if (typeof donnees.profil_complet === "boolean") {
+      setProfilComplet(donnees.profil_complet);
+      setProfilPret(true);
+      if (donnees.profil_complet) localStorage.setItem("grind_profil_complet", "1");
+      else localStorage.removeItem("grind_profil_complet");
+      return;
+    }
+
+    // Session ancienne ou mémorisée : vérifier le profil après la validation éventuelle du PIN.
+    // Le middleware de session refuse volontairement les routes privées tant que le PIN est expiré.
+    setProfilPret(false);
+  }
+
+  async function verifierProfilServeur(token) {
+    setProfilPret(false);
+    setProfilErreur("");
+    try {
+      const profil = await obtenirMonProfil(token);
+      if (localStorage.getItem("grind_session_token") !== token) return;
+      const complet = profil.profil_complet === true || (!!profil.profil_existe && profil.profil_complet !== false);
+      setProfilComplet(complet);
+      if (complet) localStorage.setItem("grind_profil_complet", "1");
+      else localStorage.removeItem("grind_profil_complet");
+      setProfilPret(true);
+    } catch (erreur) {
+      if (localStorage.getItem("grind_session_token") !== token) return;
+      setProfilErreur(erreur.message || "Impossible de vérifier le profil sur le serveur.");
+      setProfilPret(true);
+    }
+  }
 
   useEffect(() => {
     const tokenSauvegarde = localStorage.getItem("grind_session_token");
-    const usernameSauvegarde = localStorage.getItem("grind_username");
     if (tokenSauvegarde) {
-      setSessionToken(tokenSauvegarde);
-      setUsername(usernameSauvegarde);
-      setProfilComplet(!!localStorage.getItem("grind_profil_complet"));
-      setRole(localStorage.getItem("grind_role") || null);
-      setTypeCompte(localStorage.getItem("grind_type_compte") || "eleve");
+      initialiserSession(tokenSauvegarde, {
+        username: localStorage.getItem("grind_username"),
+        role: localStorage.getItem("grind_role") || null,
+        type_compte: localStorage.getItem("grind_type_compte") || "eleve",
+      });
+    } else {
+      setProfilPret(true);
     }
   }, []);
 
@@ -58,6 +112,12 @@ export default function App() {
       });
     return () => { actif = false; };
   }, [sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken || !pinStatus || pinStatus.loading || pinStatus.required || profilPret) return;
+    if (role === "admin" || typeCompte === "proviseur") return;
+    verifierProfilServeur(sessionToken);
+  }, [sessionToken, pinStatus, profilPret, role, typeCompte]);
 
   useEffect(() => {
     const majNom = (event) => {
@@ -128,24 +188,61 @@ export default function App() {
     oublierBloques();
     setSessionToken(null);
     setProfilComplet(false);
+    setProfilPret(true);
+    setProfilErreur("");
     setStatut(null);
     setRole(null);
     setTypeCompte("eleve");
     setOnglet("fil");
   }
 
+  function ouvrirGestionComptes() {
+    setGestionComptesOuverte(true);
+  }
+
   async function changerCompte() {
     if (changementCompteEnCours) return;
     setChangementCompteEnCours(true);
     try {
-      if (sessionToken) { try { await relockerPin(sessionToken); } catch { /* la connexion mémorisée sera réévaluée */ } }
+      if (sessionToken) { try { await relockerPin(sessionToken); } catch { /* le PIN sera contrôlé à la prochaine utilisation */ } }
+      // On conserve grind_accounts : l'ajout d'un compte ne doit pas effacer les autres sessions mémorisées.
       localStorage.removeItem("grind_session_token");
       localStorage.removeItem("grind_username");
       localStorage.removeItem("grind_role");
       localStorage.removeItem("grind_type_compte");
       localStorage.removeItem("grind_profil_complet");
+      setGestionComptesOuverte(false);
+      setOnglet("fil");
       setSessionToken(null); setUsername(null); setPinStatus(null); setStatut(null);
-      setRole(null); setTypeCompte("eleve"); setProfilComplet(false);
+      setRole(null); setTypeCompte("eleve"); setProfilComplet(false); setProfilPret(true); setProfilErreur("");
+    } finally {
+      setChangementCompteEnCours(false);
+    }
+  }
+
+  async function selectionnerCompteMemorise(compte) {
+    if (!compte?.token || compte.token === sessionToken) return;
+    if (changementCompteEnCours) return;
+    setChangementCompteEnCours(true);
+    try {
+      // Les deux sessions sont verrouillées avant le basculement : le PIN du compte cible sera demandé.
+      if (sessionToken) { try { await relockerPin(sessionToken); } catch { /* la session cible reste contrôlée par le serveur */ } }
+      try { await relockerPin(compte.token); } catch { /* statutPin détectera une session expirée ou invalide */ }
+      localStorage.setItem("grind_session_token", compte.token);
+      localStorage.setItem("grind_username", compte.username);
+      localStorage.setItem("grind_role", compte.role || "");
+      localStorage.setItem("grind_type_compte", compte.type_compte || "eleve");
+      localStorage.removeItem("grind_profil_complet");
+      oublierBloques();
+      setStatut(null);
+      setPinStatus({ loading: true });
+      setGestionComptesOuverte(false);
+      setOnglet("fil");
+      await initialiserSession(compte.token, {
+        username: compte.username,
+        role: compte.role || null,
+        type_compte: compte.type_compte || "eleve",
+      });
     } finally {
       setChangementCompteEnCours(false);
     }
@@ -159,12 +256,7 @@ export default function App() {
   if (!sessionToken) {
     return (
       <Connexion
-        onConnecte={(token) => {
-          setSessionToken(token);
-          setUsername(localStorage.getItem("grind_username"));
-          setRole(localStorage.getItem("grind_role") || null);
-          setTypeCompte(localStorage.getItem("grind_type_compte") || "eleve");
-        }}
+        onConnecte={(token, donnees) => initialiserSession(token, donnees || {})}
       />
     );
   }
@@ -173,13 +265,31 @@ export default function App() {
     return <VerrouPin sessionToken={sessionToken} statut={pinStatus} onValide={apresValidationPin} />;
   }
 
+  if (gestionComptesOuverte) {
+    return (
+      <div className="app-shell">
+        <FondAnime />
+        <GestionComptes
+          sessionToken={sessionToken}
+          monUsername={username}
+          role={role}
+          compteType={typeCompte}
+          chargementAction={changementCompteEnCours}
+          onRetour={() => setGestionComptesOuverte(false)}
+          onAjouter={changerCompte}
+          onSelectionner={selectionnerCompteMemorise}
+        />
+      </div>
+    );
+  }
+
   // L'administrateur n'est pas un élève : il ne voit ni classes, ni fil, ni avatar,
   // ni réglages — uniquement son bureau d'administration.
   if (role === "admin") {
     return (
       <div className="app-shell">
         <FondAnime />
-        <BureauAdmin sessionToken={sessionToken} role="admin" autonome onDeconnexion={deconnecter} onChangerCompte={changerCompte} changementCompteEnCours={changementCompteEnCours} />
+        <BureauAdmin sessionToken={sessionToken} role="admin" autonome onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
       </div>
     );
   }
@@ -188,8 +298,21 @@ export default function App() {
     return (
       <div className="app-shell">
         <FondAnime />
-        <EspaceProviseur sessionToken={sessionToken} onDeconnexion={deconnecter} onChangerCompte={changerCompte} changementCompteEnCours={changementCompteEnCours} />
+        <EspaceProviseur sessionToken={sessionToken} onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
       </div>
+    );
+  }
+
+  if (!profilPret) {
+    return <div className="app-shell"><FondAnime /><div className="info profil-verification-chargement">Vérification du profil GRIND…</div></div>;
+  }
+
+  if (profilErreur) {
+    return (
+      <div className="app-shell"><FondAnime /><div className="carte-post profil-verification-erreur">
+        <p>{profilErreur}</p>
+        <button type="button" onClick={() => { setProfilErreur(""); setProfilPret(false); }}>Réessayer</button>
+      </div></div>
     );
   }
 
@@ -209,14 +332,14 @@ export default function App() {
   return (
     <div className="app-shell">
       <FondAnime />
-      <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} estEquipe={!!statut?.est_equipe} onChangerCompte={changerCompte} changementCompteEnCours={changementCompteEnCours} />
+      <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />
 
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} />}
       {onglet === "classes" && (
         <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} />
       )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
-      {onglet === "reglages" && <Reglages sessionToken={sessionToken} onDeconnexion={deconnecter} />}
+      {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}
       {onglet === "admin" && statut?.est_equipe && <BureauAdmin sessionToken={sessionToken} role={statut.role} />}
 
       {statut?.cgu_a_accepter && (

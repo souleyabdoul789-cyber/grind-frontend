@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { configurerPin, verifierPin, reinitialiserPin, demanderReinitialisationPin, reinitialiserPinParEmail, verifierCode, associerCompteAppareil } from "../api.js";
 
-function enregistrerCompteLocal() {
+function enregistrerCompteLocal(limitesAppareil = null) {
   const username = localStorage.getItem("grind_username");
   const token = localStorage.getItem("grind_session_token");
   if (!username || !token) return;
@@ -10,6 +10,13 @@ function enregistrerCompteLocal() {
   comptes = comptes.filter((c) => c.username !== username);
   comptes.unshift({ username, token, role: localStorage.getItem("grind_role") || "", type_compte: localStorage.getItem("grind_type_compte") || "eleve" });
   localStorage.setItem("grind_accounts", JSON.stringify(comptes.slice(0, 4)));
+  // Ces valeurs proviennent de l'API après validation du PIN ; l'API reste l'autorité finale.
+  if (Number.isInteger(limitesAppareil?.max_comptes) && limitesAppareil.max_comptes > 0) {
+    localStorage.setItem("grind_device_max_comptes", String(limitesAppareil.max_comptes));
+  }
+  if (Number.isInteger(limitesAppareil?.comptes_memorises) && limitesAppareil.comptes_memorises >= 0) {
+    localStorage.setItem("grind_device_comptes_memorises", String(limitesAppareil.comptes_memorises));
+  }
 }
 
 export default function VerrouPin({ sessionToken, statut, onValide }) {
@@ -55,7 +62,7 @@ export default function VerrouPin({ sessionToken, statut, onValide }) {
       else await verifierPin(sessionToken, pin);
       try {
         const res = await associerCompteAppareil(sessionToken);
-        enregistrerCompteLocal();
+        enregistrerCompteLocal(res);
         setInfo(`Compte mémorisé sur cet appareil (${res.comptes_memorises}/${res.max_comptes}).`);
       } catch (e) {
         if (e.message?.includes("Limite")) setInfo("Session ouverte, mais la limite de comptes mémorisés sur cet appareil est atteinte.");

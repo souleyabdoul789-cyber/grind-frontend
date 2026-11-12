@@ -33,7 +33,7 @@ export default function EspaceProviseur({ sessionToken, onDeconnexion, onChanger
         <div className="logo-grind"><i className="fa-solid fa-brain"></i><span>GRIND</span></div>
         <h2>Espace établissement</h2>
         <div className="prov-actions-compte">
-          {onChangerCompte && <button type="button" className="lien" onClick={onChangerCompte} disabled={changementCompteEnCours}>{changementCompteEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Changement...</> : <><i className="fa-solid fa-users"></i> Changer de compte</>}</button>}
+          {onChangerCompte && <button type="button" className="lien" onClick={onChangerCompte} disabled={changementCompteEnCours}>{changementCompteEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Changement...</> : <><i className="fa-solid fa-users"></i> Gérer les comptes</>}</button>}
           <button type="button" className="lien" onClick={onDeconnexion}>Se déconnecter</button>
         </div>
         {!candidature && !erreur && <p className="info">Chargement du dossier...</p>}

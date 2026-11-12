@@ -12,9 +12,10 @@ const ONGLETS = [
 const ENTREES_MENU = [
   { cle: "profil", icone: "fa-solid fa-user", label: "Profil", desc: "Ton profil et tes publications" },
   { cle: "reglages", icone: "fa-solid fa-gear", label: "Paramètres", desc: "Contact, conditions, déconnexion" },
+  { cle: "comptes", icone: "fa-solid fa-users", label: "Ajouter un compte", desc: "Gérer les comptes de cet appareil" },
 ];
 
-export default function BarreNav({ sessionToken, monUsername, ongletActif, onChangerOnglet, estEquipe = false, onChangerCompte, changementCompteEnCours = false }) {
+export default function BarreNav({ sessionToken, monUsername, ongletActif, onChangerOnglet, onGererComptes, estEquipe = false }) {
   const onglets = estEquipe
     ? [...ONGLETS, { cle: "admin", icone: "fa-solid fa-building-shield", label: "Bureau" }]
     : ONGLETS;
@@ -27,14 +28,13 @@ export default function BarreNav({ sessionToken, monUsername, ongletActif, onCha
           <span>GRIND</span>
         </div>
         <div className="barre-nav-droite">
-          {onChangerCompte && <button className="bouton-changer-compte" type="button" onClick={onChangerCompte} disabled={changementCompteEnCours} title="Changer de compte" aria-label="Changer de compte">{changementCompteEnCours ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-users"></i>}</button>}
           <Notifications sessionToken={sessionToken} />
           <MenuPrincipal
             sessionToken={sessionToken}
             monUsername={monUsername}
             entrees={ENTREES_MENU}
             ongletActif={ongletActif}
-            onChoisir={onChangerOnglet}
+            onChoisir={(cle) => cle === "comptes" ? onGererComptes?.() : onChangerOnglet(cle)}
           />
         </div>
       </div>

@@ -10,6 +10,11 @@ import EtapeVerification from "../components/EtapeVerification.jsx";
 import EtapeNouveauMotDePasse, { IndicateurForce } from "../components/EtapeNouveauMotDePasse.jsx";
 import CandidatureProviseur from "./CandidatureProviseur.jsx";
 
+// GIS s'initialise une seule fois par page. Le gestionnaire actif est remplacé
+// quand l'écran Connexion est monté/démonté (déconnexion puis reconnexion).
+let googleIdentityInitialisee = false;
+let traiterCredentialGoogle = null;
+
 
 /**
  * Connexion — entrée de GRIND.
@@ -40,48 +45,106 @@ export default function Connexion({ onConnecte }) {
   const [accountsRemembered, setAccountsRemembered] = useState(() => {
     try { return JSON.parse(localStorage.getItem("grind_accounts") || "[]"); } catch { return []; }
   });
+  const [googlePret, setGooglePret] = useState(false);
   const googleButtonRef = useRef(null);
 
+  // Initialise GIS une seule fois. Le bouton officiel reste responsable du geste
+  // utilisateur et de la remise du credential (pas de popup One Tap forcée).
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
-    const render = () => {
-      if (!window.google?.accounts?.id || !googleButtonRef.current) return;
-      window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: async (response) => {
-          setErreur(null); setChargement(true);
-          try {
-            const result = await connecterGoogle(response.credential);
-            if (result.username_requis) {
-              setCredentialGoogle(response.credential);
-              setUsernameGoogle(result.suggested_username || "");
-              setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
-            } else terminer(result);
-          } catch (err) { setErreur(err.message); }
-          finally { setChargement(false); }
-        },
-      });
-      // Bouton officiel Google Identity Services en mode icône : le libellé GRIND
-      // est affiché séparément, en texte discret, sans imiter le bouton Google.
-      window.google.accounts.id.renderButton(googleButtonRef.current, {
-        type: "icon", theme: "outline", size: "large", shape: "circle",
-        logo_alignment: "center",
-      });
+    if (!GOOGLE_CLIENT_ID) return undefined;
+    let actif = true;
+    let script = null;
+    const traiterMonCredential = async (response) => {
+      setErreur(null);
+      setChargement(true);
+      try {
+        const result = await connecterGoogle(response.credential);
+        if (result.username_requis) {
+          // Google a déjà fourni le prénom, le nom et l'e-mail.
+          // Le nouveau compte ne demande ensuite que le pseudo et les CGU.
+          setCredentialGoogle(response.credential);
+          setUsernameGoogle(result.suggested_username || "");
+          setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
+        } else {
+          terminer(result);
+        }
+      } catch (err) {
+        setErreur(err.message || "La connexion Google a échoué.");
+      } finally {
+        setChargement(false);
+      }
     };
-    if (window.google?.accounts?.id) { render(); return; }
-    const script = document.createElement("script");
-    script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.defer = true;
-    script.onload = render; document.head.appendChild(script);
-    return () => { if (script.parentNode) script.parentNode.removeChild(script); };
-  }, [mode]);
+    traiterCredentialGoogle = traiterMonCredential;
+
+    const initialiserGoogle = () => {
+      if (!actif || !window.google?.accounts?.id) return;
+      if (!googleIdentityInitialisee) {
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            if (traiterCredentialGoogle) traiterCredentialGoogle(response);
+          },
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+        googleIdentityInitialisee = true;
+      }
+      setGooglePret(true);
+    };
+    const echecChargement = () => {
+      if (actif) setErreur("Le service Google ne peut pas être chargé. Vérifie ta connexion puis réessaie.");
+    };
+
+    if (window.google?.accounts?.id) {
+      initialiserGoogle();
+    } else {
+      script = document.querySelector('script[data-grind-google-gsi="true"]');
+      const creerScript = !script;
+      if (!script) {
+        script = document.createElement("script");
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.defer = true;
+        script.dataset.grindGoogleGsi = "true";
+      }
+      script.addEventListener("load", initialiserGoogle);
+      script.addEventListener("error", echecChargement);
+      if (creerScript) document.head.appendChild(script);
+    }
+
+    return () => {
+      actif = false;
+      if (traiterCredentialGoogle === traiterMonCredential) traiterCredentialGoogle = null;
+      script?.removeEventListener("load", initialiserGoogle);
+      script?.removeEventListener("error", echecChargement);
+    };
+  }, []);
+
+  // Le formulaire connexion/inscription est rendu conditionnellement ; on monte
+  // le bouton officiel dans son conteneur après initialisation, à chaque retour.
+  useEffect(() => {
+    if (!googlePret || !googleButtonRef.current || !window.google?.accounts?.id) return;
+    googleButtonRef.current.replaceChildren();
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      type: "icon",
+      theme: "outline",
+      size: "large",
+      shape: "circle",
+      logo_alignment: "center",
+    });
+  }, [googlePret, mode, ecran, credentialGoogle]);
 
   function terminer(res) {
     localStorage.setItem("grind_session_token", res.session_token);
     localStorage.setItem("grind_username", res.username);
     localStorage.setItem("grind_role", res.role || "");
     localStorage.setItem("grind_type_compte", res.type_compte || "eleve");
-    if (res.type_compte === "proviseur") localStorage.setItem("grind_profil_complet", "1");
-    onConnecte(res.session_token);
+    if (res.profil_complet === true || res.type_compte === "proviseur" || res.role === "admin") {
+      localStorage.setItem("grind_profil_complet", "1");
+    } else {
+      localStorage.removeItem("grind_profil_complet");
+    }
+    onConnecte(res.session_token, res);
   }
 
   function aller(nouvelEcran) {
@@ -110,7 +173,8 @@ export default function Connexion({ onConnecte }) {
       localStorage.setItem("grind_username", compte.username);
       localStorage.setItem("grind_role", compte.role || "");
       localStorage.setItem("grind_type_compte", compte.type_compte || "eleve");
-      onConnecte(compte.token);
+      // L'App vérifie l'état du questionnaire auprès du backend pour les sessions mémorisées.
+      onConnecte(compte.token, compte);
     } catch (err) {
       const restants = accountsRemembered.filter((a) => a.username !== compte.username);
       setAccountsRemembered(restants); localStorage.setItem("grind_accounts", JSON.stringify(restants));
@@ -310,21 +374,22 @@ export default function Connexion({ onConnecte }) {
               >
                 {mode === "login" ? "Pas encore de compte ? Inscris-toi" : "Déjà un compte ? Connecte-toi"}
               </button>
-              {mode === "login" && (
-                <>
-                  {GOOGLE_CLIENT_ID && (
-                    <div className="bloc-google-auth">
-                      <div className="separateur-auth"><span>ou</span></div>
-                      <div className="google-action">
-                        <div ref={googleButtonRef} className="bouton-google" aria-label="Continuer avec Google" />
-                        <span className="google-action-label">Continuer avec Google</span>
-                      </div>
-                    </div>
-                  )}
-                  {!GOOGLE_CLIENT_ID && <p className="info info-google">La connexion Google sera activée dès que GOOGLE_CLIENT_ID et VITE_GOOGLE_CLIENT_ID seront configurés.</p>}
-                  <button type="button" className="lien" onClick={() => setMode("proviseur")}>Candidater comme proviseur / directeur</button>
-                </>
+              {GOOGLE_CLIENT_ID && googlePret && (mode === "login" || mode === "signup") && (
+                <div className="bloc-google-auth">
+                  <div className="separateur-auth"><span>ou</span></div>
+                  <div className="google-action">
+                    <div
+                      className="bouton-google bouton-google-grind"
+                      ref={googleButtonRef}
+                      role="group"
+                      aria-label="Connexion avec Google"
+                    />
+                    <span className="google-action-label">Continuer avec Google</span>
+                  </div>
+                </div>
               )}
+              {!GOOGLE_CLIENT_ID && (mode === "login" || mode === "signup") && <p className="info info-google">La connexion Google n'est pas configurée sur ce déploiement.</p>}
+              {mode === "login" && <button type="button" className="lien" onClick={() => setMode("proviseur")}>Candidater comme proviseur / directeur</button>}
               <button type="button" className="lien" onClick={() => setCguOuvertes(true)}>
                 Conditions d'utilisation
               </button>
