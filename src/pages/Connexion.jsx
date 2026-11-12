@@ -36,6 +36,7 @@ export default function Connexion({ onConnecte }) {
   const [sanction, setSanction] = useState(null);
   const [credentialGoogle, setCredentialGoogle] = useState(null);
   const [usernameGoogle, setUsernameGoogle] = useState("");
+  const [identiteGoogle, setIdentiteGoogle] = useState({ prenom: "", nom: "" });
   const [accountsRemembered, setAccountsRemembered] = useState(() => {
     try { return JSON.parse(localStorage.getItem("grind_accounts") || "[]"); } catch { return []; }
   });
@@ -51,13 +52,21 @@ export default function Connexion({ onConnecte }) {
           setErreur(null); setChargement(true);
           try {
             const result = await connecterGoogle(response.credential);
-            if (result.username_requis) setCredentialGoogle(response.credential);
-            else terminer(result);
+            if (result.username_requis) {
+              setCredentialGoogle(response.credential);
+              setUsernameGoogle(result.suggested_username || "");
+              setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
+            } else terminer(result);
           } catch (err) { setErreur(err.message); }
           finally { setChargement(false); }
         },
       });
-      window.google.accounts.id.renderButton(googleButtonRef.current, { theme: "outline", size: "large", shape: "pill", text: "continue_with", width: 280 });
+      // Bouton officiel Google Identity Services en mode icône : le libellé GRIND
+      // est affiché séparément, en texte discret, sans imiter le bouton Google.
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        type: "icon", theme: "outline", size: "large", shape: "circle",
+        logo_alignment: "center",
+      });
     };
     if (window.google?.accounts?.id) { render(); return; }
     const script = document.createElement("script");
@@ -85,7 +94,10 @@ export default function Connexion({ onConnecte }) {
     try {
       const result = await connecterGoogle(credentialGoogle, usernameGoogle, cgu);
       if (result.username_requis) { setErreur("Choisis un nom de profil pour continuer."); return; }
-      setCredentialGoogle(null); terminer(result);
+      setCredentialGoogle(null);
+      setIdentiteGoogle({ prenom: "", nom: "" });
+      setUsernameGoogle("");
+      terminer(result);
     } catch (err) { setErreur(err.message); }
     finally { setChargement(false); }
   }
@@ -181,6 +193,9 @@ export default function Connexion({ onConnecte }) {
     setPassword("");
     setConfirmation("");
     setFlux(null);
+    setCredentialGoogle(null);
+    setIdentiteGoogle({ prenom: "", nom: "" });
+    setUsernameGoogle("");
     setMode("login");
     setMessage(texte || null);
     aller("formulaire");
@@ -211,9 +226,14 @@ export default function Connexion({ onConnecte }) {
         <div key={ecran} className="etape-auth">
           {credentialGoogle ? (
             <form onSubmit={terminerGoogle} noValidate>
-              <div className="sous-titre">Finaliser ton compte Google</div>
-              <p className="info">Ton adresse e-mail a été vérifiée par Google. Choisis un nom de profil unique.</p>
-              <ChampAvecIcone icone="fa-solid fa-user" valeur={usernameGoogle} onChange={setUsernameGoogle} placeholder="Nom de profil" maxLength={24} autoFocus />
+              <div className="sous-titre">Créer ton compte GRIND</div>
+              <div className="google-identite-confirmee">
+                <span className="google-identite-libelle">Compte Google vérifié</span>
+                <strong>{[identiteGoogle.prenom, identiteGoogle.nom].filter(Boolean).join(" ") || "Identité Google"}</strong>
+                <span className="google-identite-note">Ton prénom et ton nom sont repris automatiquement depuis Google.</span>
+              </div>
+              <p className="info">Ton compte sera créé après acceptation des conditions. Un nom de profil unique t'est proposé automatiquement ; tu peux le modifier.</p>
+              <ChampAvecIcone icone="fa-solid fa-at" valeur={usernameGoogle} onChange={setUsernameGoogle} placeholder="Nom de profil" maxLength={24} autoFocus />
               <div className="ligne-cgu">
                 <button type="button" className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`} onClick={() => setCgu((v) => !v)} aria-label="Accepter les conditions"><span className="curseur-interrupteur"></span></button>
                 <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
@@ -292,7 +312,15 @@ export default function Connexion({ onConnecte }) {
               </button>
               {mode === "login" && (
                 <>
-                  {GOOGLE_CLIENT_ID && <div className="bloc-google-auth"><div className="separateur-auth"><span>ou</span></div><div ref={googleButtonRef} className="bouton-google" /></div>}
+                  {GOOGLE_CLIENT_ID && (
+                    <div className="bloc-google-auth">
+                      <div className="separateur-auth"><span>ou</span></div>
+                      <div className="google-action">
+                        <div ref={googleButtonRef} className="bouton-google" aria-label="Continuer avec Google" />
+                        <span className="google-action-label">Continuer avec Google</span>
+                      </div>
+                    </div>
+                  )}
                   {!GOOGLE_CLIENT_ID && <p className="info info-google">La connexion Google sera activée dès que GOOGLE_CLIENT_ID et VITE_GOOGLE_CLIENT_ID seront configurés.</p>}
                   <button type="button" className="lien" onClick={() => setMode("proviseur")}>Candidater comme proviseur / directeur</button>
                 </>

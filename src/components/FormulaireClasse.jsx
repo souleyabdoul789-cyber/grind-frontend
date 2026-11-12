@@ -16,14 +16,19 @@ export default function FormulaireClasse({ sessionToken, onCree }) {
   const [envoi, setEnvoi] = useState(false);
   const [erreur, setErreur] = useState(null);
 
-  useEffect(() => {
-    catalogueScolaire().then(setCatalogue).catch(() => setErreur("Impossible de charger la liste des niveaux."));
-  }, []);
+  function chargerCatalogue() {
+    setErreur(null);
+    catalogueScolaire()
+      .then(setCatalogue)
+      .catch((err) => setErreur(err.message || "Impossible de charger la liste des niveaux."));
+  }
+
+  useEffect(() => { chargerCatalogue(); }, []);
 
   if (!catalogue) {
     return (
       <div className="carte-post formulaire-post">
-        {erreur ? <div className="erreur">{erreur}</div> : <ChargementGrind texte="Chargement..." />}
+        {erreur ? <><div className="erreur" role="alert">{erreur}</div><button type="button" onClick={chargerCatalogue}>Réessayer</button></> : <ChargementGrind texte="Chargement du catalogue scolaire..." />}
       </div>
     );
   }

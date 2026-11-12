@@ -2,8 +2,20 @@
 // Les comptes sont autonomes : aucune clé G-SOCIETY n'est demandée à l'inscription.
 export const GRIND_URL = import.meta.env.VITE_GRIND_URL || "https://grind-4vsz.onrender.com";
 
+async function fetchApi(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (cause) {
+    const erreur = new Error(
+      "Impossible de joindre le serveur GRIND. Vérifie la connexion, l'URL VITE_GRIND_URL sur le frontend et l'origine autorisée dans GRIND_FRONTEND_ORIGINS sur Render."
+    );
+    erreur.cause = cause;
+    throw erreur;
+  }
+}
+
 async function poster(url, body) {
-  const res = await fetch(url, {
+  const res = await fetchApi(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -199,8 +211,10 @@ export function rejoindreClasse(sessionToken, codeInvitation) {
 }
 
 export async function listerMesClasses(sessionToken) {
-  const res = await fetch(`${GRIND_URL}/api/classes/mes-classes?session_token=${encodeURIComponent(sessionToken)}`);
-  return res.json();
+  const res = await fetchApi(`${GRIND_URL}/api/classes/mes-classes?session_token=${encodeURIComponent(sessionToken)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Impossible de charger les classes.");
+  return data;
 }
 
 export async function renommerClasse(sessionToken, classeId, nom) {
@@ -554,16 +568,20 @@ export function deconnecterGrind(sessionToken) {
 let _catalogue = null;
 export async function catalogueScolaire() {
   if (_catalogue) return _catalogue;
-  const res = await fetch(`${GRIND_URL}/api/scolaire/catalogue`);
-  if (!res.ok) throw new Error("Catalogue indisponible");
-  _catalogue = await res.json();
+  const res = await fetchApi(`${GRIND_URL}/api/scolaire/catalogue`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Le catalogue scolaire est temporairement indisponible.");
+  if (!Array.isArray(data.niveaux) || !data.matieres_par_niveau) {
+    throw new Error("Le serveur a répondu, mais le catalogue scolaire est incomplet. Vérifie la version du backend déployée.");
+  }
+  _catalogue = data;
   return _catalogue;
 }
 
 // ---------- Candidature proviseur / direction ----------
 
 export async function inscrireProviseur(formData) {
-  const res = await fetch(`${GRIND_URL}/api/proviseur/candidature`, { method: "POST", body: formData });
+  const res = await fetchApi(`${GRIND_URL}/api/proviseur/candidature`, { method: "POST", body: formData });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Candidature impossible");
   return data;

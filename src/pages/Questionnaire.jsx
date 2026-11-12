@@ -31,7 +31,7 @@ export default function Questionnaire({ sessionToken, onTermine }) {
     setErreurCatalogue(null);
     catalogueScolaire()
       .then(setCatalogue)
-      .catch(() => setErreurCatalogue("Impossible de préparer ton profil. Vérifie ta connexion."));
+      .catch((err) => setErreurCatalogue(err.message || "Impossible de préparer ton profil. Vérifie ta connexion."));
   }
 
   useEffect(() => { chargerCatalogue(); }, []);

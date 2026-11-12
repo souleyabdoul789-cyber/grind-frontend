@@ -14,6 +14,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
   const [codeInvitation, setCodeInvitation] = useState(codeAttente || "");
   const [erreur, setErreur] = useState(null);
+  const [erreurChargement, setErreurChargement] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
   const [lienCopie, setLienCopie] = useState(null);
 
@@ -23,9 +24,15 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
   async function charger() {
     setChargement(true);
-    const res = await listerMesClasses(sessionToken);
-    setClasses(res.classes || []);
-    setChargement(false);
+    setErreurChargement(null);
+    try {
+      const res = await listerMesClasses(sessionToken);
+      setClasses(Array.isArray(res.classes) ? res.classes : []);
+    } catch (err) {
+      setErreurChargement(err.message || "Impossible de charger les classes. Réessaie.");
+    } finally {
+      setChargement(false);
+    }
   }
 
   useEffect(() => {
@@ -158,7 +165,12 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       )}
 
       {chargement ? (
-        <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement...</div>
+        <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement des classes...</div>
+      ) : erreurChargement && classes.length === 0 ? (
+        <div className="carte-post etat-erreur-reseau" role="alert">
+          <p>{erreurChargement}</p>
+          <button type="button" onClick={charger}>Réessayer</button>
+        </div>
       ) : classes.length === 0 ? (
         <EtatVide texte="Aucune classe pour l'instant" />
       ) : (
