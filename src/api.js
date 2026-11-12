@@ -133,10 +133,10 @@ export async function listerPosts(categorie, sessionToken) {
   return res.json();
 }
 
-export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, media_items, document_url, document_name, document_type, etablissement_id }) {
+export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, media_items, document_url, document_name, document_type, document_categorie, etablissement_id }) {
   return poster(`${GRIND_URL}/api/posts`, {
     session_token: sessionToken, categorie, contenu, date_limite,
-    media_url, media_type, media_items, document_url, document_name, document_type, etablissement_id,
+    media_url, media_type, media_items, document_url, document_name, document_type, document_categorie, etablissement_id,
   });
 }
 
@@ -307,6 +307,24 @@ export async function renommerClasse(sessionToken, classeId, nom) {
   return data;
 }
 
+export async function obtenirEtatSalle(sessionToken, classeId) {
+  const res = await fetchApi(`${GRIND_URL}/api/classes/${classeId}/salle/etat?session_token=${encodeURIComponent(sessionToken)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Impossible de charger la salle de classe.");
+  return data;
+}
+
+export async function modererMicroClasse(sessionToken, classeId, username, mute) {
+  const res = await fetchApi(`${GRIND_URL}/api/livekit/classes/${classeId}/micro/${encodeURIComponent(username)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, mute: !!mute }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "La modération du micro a échoué.");
+  return data;
+}
+
 export async function obtenirJetonLiveKit(sessionToken, classeId) {
   const res = await fetch(`${GRIND_URL}/api/livekit/token`, {
     method: "POST",
@@ -464,9 +482,10 @@ export async function obtenirIdentifiantsTurn(sessionToken) {
   return res.json();
 }
 
-export function urlSession(sessionToken, demandeId) {
+export function urlSession(sessionToken, demandeId, estClasse = false) {
   const base = GRIND_URL.replace(/^https/, "wss").replace(/^http/, "ws");
-  return `${base}/ws/session/${demandeId}?session_token=${encodeURIComponent(sessionToken)}`;
+  const mode = estClasse ? "&classe=1" : "";
+  return `${base}/ws/session/${demandeId}?session_token=${encodeURIComponent(sessionToken)}${mode}`;
 }
 
 // ---------- Avatar ----------

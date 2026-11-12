@@ -20,6 +20,13 @@ function tailleLisible(bytes) {
   return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} Mo` : `${Math.max(1, Math.round(bytes / 1024))} Ko`;
 }
 
+function iconePieceSelectionnee(file) {
+  const extension = String(file?.name || "").split(".").pop().toLowerCase();
+  if (file?.type?.startsWith("video/") || ["mp4", "mov", "webm"].includes(extension)) return "fa-file-video";
+  if (file?.type?.startsWith("image/") || ["jpg", "jpeg", "png", "webp"].includes(extension)) return "fa-file-image";
+  return "fa-file-lines";
+}
+
 function extraireDureeVideo(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -57,6 +64,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [menuPolice, setMenuPolice] = useState(false);
   const [reponse, setReponse] = useState(null);
   const [fichier, setFichier] = useState(null);
+  const [menuPiecesOuvert, setMenuPiecesOuvert] = useState(false);
   const [envoi, setEnvoi] = useState(false);
   const [progression, setProgression] = useState(0);
   const [suggestions, setSuggestions] = useState([]);
@@ -79,7 +87,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
   const socketRef = useRef(null);
-  const fileRef = useRef(null);
+  const imagePieceRef = useRef(null);
+  const videoPieceRef = useRef(null);
+  const documentPieceRef = useRef(null);
   const photoRef = useRef(null);
   const messageRefs = useRef(new Map());
   const swipeStart = useRef(new Map());
@@ -377,7 +387,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       setMessages(prev => prev.some(m => m.id === res.message.id) ? prev : [...prev, res.message]);
       setTexte(""); setFichier(null); setReponse(null); setStyleTexte("normal");
       if (textareaRef.current) textareaRef.current.style.height = "auto";
-      if (fileRef.current) fileRef.current.value = "";
+      [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
+      setMenuPiecesOuvert(false);
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "typing", typing: false }));
     } catch (error) { setMessageErreur(error.message || "Échec de l'envoi du message."); }
@@ -526,11 +537,20 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       {restreint ? <div className="discussion-restreint"><i className="fa-solid fa-comment-slash" /> Tu ne peux pas envoyer de message{discussion.restriction_jusqua ? ` jusqu'au ${new Date(discussion.restriction_jusqua).toLocaleString()}` : " pour le moment"}.</div> : (
         <div className="discussion-compositeur-zone">
           {reponse && <div className="discussion-reponse-active"><span><strong>Réponse à {reponse.auteur_nom}</strong><small>{reponse.contenu}</small></span><button type="button" onClick={() => setReponse(null)} aria-label="Annuler la réponse"><i className="fa-solid fa-xmark" /></button></div>}
-          {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${fichier.type.startsWith("video") ? "fa-file-video" : fichier.type.startsWith("image") ? "fa-file-image" : "fa-file-lines"}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { setFichier(null); if (fileRef.current) fileRef.current.value = ""; }}><i className="fa-solid fa-xmark" /></button></div>}
+          {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${iconePieceSelectionnee(fichier)}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { setFichier(null); [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }}><i className="fa-solid fa-xmark" /></button></div>}
           {envoi && <div className="discussion-progression"><span style={{ width: `${progression}%` }} /></div>}
           <div className="discussion-compositeur">
-            <button type="button" className="discussion-joindre" onClick={() => fileRef.current?.click()} title="Joindre une photo, vidéo ou document" aria-label="Joindre"><i className="fa-solid fa-paperclip" /></button>
-            <input ref={fileRef} type="file" hidden accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,.pdf,.docx" onChange={event => setFichier(event.target.files?.[0] || null)} />
+            <div className="discussion-attachement-wrap">
+              <button type="button" className={`discussion-joindre ${menuPiecesOuvert ? "actif" : ""}`} onClick={() => setMenuPiecesOuvert(v => !v)} title="Choisir une pièce jointe" aria-label="Choisir une pièce jointe" aria-expanded={menuPiecesOuvert}><i className="fa-solid fa-paperclip" /></button>
+              {menuPiecesOuvert && <div className="discussion-attachement-menu" role="group" aria-label="Type de pièce jointe">
+                <button type="button" onClick={() => imagePieceRef.current?.click()}><span><i className="fa-regular fa-image" /></span><strong>Image</strong><small>Photo ou capture</small></button>
+                <button type="button" onClick={() => videoPieceRef.current?.click()}><span><i className="fa-solid fa-video" /></span><strong>Vidéo</strong><small>Lecture dans le fil</small></button>
+                <button type="button" onClick={() => documentPieceRef.current?.click()}><span><i className="fa-solid fa-file-lines" /></span><strong>Document</strong><small>PDF ou DOCX</small></button>
+              </div>}
+              <input ref={imagePieceRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+              <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+              <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+            </div>
             <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); envoyer(); } }} placeholder="Écrire un message…" disabled={envoi} />
             {!texte.trim() && !fichier && <div className="discussion-police-wrap"><button type="button" className="discussion-police" title="Style du texte" onClick={() => setMenuPolice(v => !v)}>Aᴀ</button>{menuPolice && <div className="discussion-police-menu">{[["normal", "Normal"], ["serif", "Sérif"], ["mono", "Monospace"]].map(([value, label]) => <button type="button" key={value} className={styleTexte === value ? "active" : ""} onClick={() => { setStyleTexte(value); setMenuPolice(false); }}>{label}</button>)}</div>}</div>}
             {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-paper-plane" />}</button>}

@@ -138,7 +138,7 @@ function Bureau({ occupant, selection, onSelection, monUsername }) {
 }
 
 /* ---------------------- Zone prof : mur, tableau, bureau ---------------------- */
-function ZoneProf({ prof, nomClasse }) {
+function ZoneProf({ prof, nomClasse, texteTableau = "" }) {
   return (
     <g>
       {/* Mur du fond */}
@@ -167,15 +167,17 @@ function ZoneProf({ prof, nomClasse }) {
       <rect x="320" y="14" width="46" height="22" rx="3" fill="#a9d3b8" opacity="0.8" />
       <rect x="200" y="53" width="160" height="4" rx="2" fill="#6f7c8c" />
 
-      {/* Tableau noir, avec le nom de la classe à la craie */}
+      {/* Tableau noir : son contenu est écrit en direct par le professeur actuel. */}
       <rect x="412" y="5" width="262" height="52" rx="3" fill="#2f5242" stroke="#8b5e34" strokeWidth="4" />
       <rect x="418" y="11" width="250" height="40" rx="1" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-      <text
-        x="543" y="37" textAnchor="middle" fontFamily={POLICE} fontSize="20" fontWeight="600"
-        fill="#f1f1e6" opacity="0.88"
-      >
-        {raccourcir(nomClasse || "Classe", 22)}
+      <text x="430" y="19" fontFamily={POLICE} fontSize="7.5" fontWeight="700" fill="#f1f1e6" opacity="0.64">
+        {raccourcir(nomClasse || "CLASSE", 28).toUpperCase()}
       </text>
+      <foreignObject x="423" y="21" width="240" height="28">
+        <div xmlns="http://www.w3.org/1999/xhtml" className="tableau-noir-contenu" aria-label="Contenu du tableau noir">
+          {texteTableau || <span className="tableau-noir-vide">Le cours apparaîtra ici…</span>}
+        </div>
+      </foreignObject>
       <rect x="430" y="57" width="26" height="5" rx="1.5" fill="#f1f1e6" opacity="0.85" />
       <rect x="626" y="56" width="30" height="6" rx="1.5" fill="#e8c94a" />
 
@@ -274,7 +276,7 @@ function Decor() {
  *             { identity, config, parle, micActif }
  * prof      : null ou { identity, config, parle, micActif }
  */
-export default function SceneClasse({ occupants, prof, nomClasse, monUsername, selection, onSelection }) {
+export default function SceneClasse({ occupants, prof, nomClasse, texteTableau = "", monUsername, selection, onSelection }) {
   return (
     <svg
       className="scene-classe"
@@ -302,7 +304,7 @@ export default function SceneClasse({ occupants, prof, nomClasse, monUsername, s
       </defs>
 
       <Decor />
-      <ZoneProf prof={prof} nomClasse={nomClasse} />
+      <ZoneProf prof={prof} nomClasse={nomClasse} texteTableau={texteTableau} />
 
       {SIEGES.map((s, i) => (
         <g key={i} transform={`translate(${s.x} ${s.y})`}>

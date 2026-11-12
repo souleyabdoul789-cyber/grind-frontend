@@ -3863,3 +3863,239 @@ button:disabled {
 .library-sheet-tabs button.actif { color:#0a0a0f; }
 .admin-pays-list article button { color:var(--text); }
 .admin-pays-note code { color:var(--brown); }
+
+/* ==================== Feuilles papier et tableau noir de la salle ==================== */
+.feuille-papier {
+  position: relative;
+  width: 100%;
+  min-height: 330px;
+  height: min(56vh, 520px);
+  max-width: 520px;
+  aspect-ratio: 0.72;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 7px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22), 0 2px 5px rgba(0, 0, 0, 0.12);
+  background: #f7f5ee;
+}
+
+.feuille-papier-dessin {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+.feuille-papier-ecriture {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 17px 5% 34px 18%;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: #34343a;
+  font-family: "Segoe Print", "Comic Sans MS", cursive;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 26px;
+  letter-spacing: 0.12px;
+  white-space: pre-wrap;
+  box-shadow: none;
+}
+
+.feuille-papier-ecriture:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.feuille-papier-ecriture::placeholder {
+  color: #89909b;
+  opacity: 0.78;
+}
+
+.feuille-papier-bas {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 7px;
+  color: #8a8b8c;
+  font: 600 8px/1 "Space Grotesk", sans-serif;
+  letter-spacing: 1.2px;
+  pointer-events: none;
+}
+
+.feuille-papier-lecture .feuille-papier-ecriture {
+  cursor: default;
+  color: #34343a;
+}
+
+.tableau-noir-contenu {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: #f4f1e6;
+  font-family: "Space Grotesk", "Inter", sans-serif;
+  font-size: 11.5px;
+  line-height: 1.18;
+  font-weight: 800;
+  text-shadow: 0 0 1px rgba(255,255,255,0.45), 0 1px 0 rgba(0,0,0,0.18);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(241,241,230,0.35) transparent;
+}
+
+.tableau-noir-vide {
+  opacity: 0.52;
+  font-style: italic;
+  font-weight: 600;
+}
+
+.hud-role-prof {
+  border-color: rgba(201, 182, 228, 0.48);
+}
+
+.editeur-tableau-classe {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.editeur-tableau-entete {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text);
+}
+
+.tableau-etat-direct {
+  margin-left: auto;
+  color: var(--succes);
+  font-size: 11px;
+}
+
+.tableau-etat-direct i {
+  margin-right: 5px;
+  font-size: 7px;
+}
+
+.tableau-apercu-panneau {
+  min-height: 92px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 15px 16px;
+  border: 4px solid #8b5e34;
+  border-radius: 7px;
+  background: #2f5242;
+  color: #f4f1e6;
+  font-family: "Space Grotesk", "Inter", sans-serif;
+  font-weight: 800;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 5px 14px rgba(0,0,0,0.2);
+}
+
+.tableau-saisie-prof {
+  width: 100%;
+  min-height: 118px;
+  margin: 0;
+  resize: vertical;
+  font-family: "Space Grotesk", "Inter", sans-serif;
+}
+
+.bouton-moderation-micro {
+  width: auto;
+  margin: 8px 0 0;
+  padding: 7px 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(12, 12, 18, 0.52);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.bouton-moderation-micro:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+@media (max-width: 760px) {
+  .panneau-feuille {
+    width: min(72%, 380px);
+  }
+  .feuille-papier {
+    min-height: 330px;
+    height: min(56vh, 480px);
+  }
+  .feuille-papier-ecriture {
+    font-size: 12px;
+    line-height: 26px;
+  }
+}
+
+
+/* ================= Finalisation GRIND : classement auto, pièces jointes et ergonomie ================= */
+.publication-attachments-picker { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; }
+.publication-attachment-trigger { display:inline-flex; align-items:center; gap:9px; width:auto; margin:0; padding:9px 13px; border:1px solid var(--border); border-radius:12px; color:var(--text); background:var(--card); font-size:12px; font-weight:700; }
+.publication-attachment-trigger>i:first-child { color:var(--violet); }
+.publication-attachment-trigger>i:last-child { color:var(--text-dim); font-size:10px; }
+.publication-attachment-trigger.actif { border-color:var(--violet); box-shadow:0 0 0 3px rgba(201,182,228,.10); }
+.publication-attachment-menu { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; width:min(100%,540px); margin-top:9px; padding:9px; border:1px solid var(--border); border-radius:14px; background:var(--card); box-shadow:0 14px 34px rgba(0,0,0,.22); animation:discussion-panneau .16s ease both; }
+.publication-attachment-menu button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; min-width:0; margin:0; padding:12px 7px; border:1px solid var(--border); border-radius:11px; background:rgba(255,255,255,.035); color:var(--text); }
+.publication-attachment-menu button:active { transform:scale(.98); }
+.publication-attachment-icon { display:grid; place-items:center; width:38px; height:38px; border-radius:12px; background:rgba(201,182,228,.13); color:var(--violet); font-size:17px; }
+.publication-attachment-menu strong { font-size:12px; }
+.publication-attachment-menu small { color:var(--text-dim); font-size:10px; text-align:center; }
+.publication-document-categorie { display:grid; gap:7px; margin:9px 0 4px; padding:12px; border:1px solid var(--border); border-radius:13px; background:rgba(255,255,255,.025); }
+.publication-document-categorie label { color:var(--text); font-size:12px; font-weight:750; }
+.publication-document-categorie label i { margin-right:7px; color:var(--violet); }
+.publication-document-categorie input { width:100%; margin:0; }
+.publication-document-categorie small { color:var(--text-dim); font-size:10px; line-height:1.45; }
+.publication-document-selected { margin-top:8px; }
+
+/* Bulles de discussion : ma bulle claire à droite, celles des autres à gauche. */
+.discussion-bulle-wrap { max-width:min(84%,720px); }
+.discussion-bulle { padding:13px 16px 22px; min-width:min(96px,100%); font-size:15px; }
+.discussion-texte { font-size:15px; line-height:1.55; }
+.discussion-ligne.autre .discussion-bulle { background:linear-gradient(145deg,rgba(201,182,228,.22),rgba(216,191,166,.13)); border-color:rgba(201,182,228,.30); color:var(--text); }
+.discussion-ligne.autre .discussion-heure { color:var(--text-dim); }
+.discussion-ligne.moi .discussion-bulle { background:linear-gradient(145deg,#f5f2ec,#eae6df); border-color:rgba(216,191,166,.42); color:#28252a; box-shadow:0 6px 18px rgba(0,0,0,.17); }
+.discussion-ligne.moi .discussion-heure { color:rgba(40,37,42,.62); }
+.discussion-ligne.moi .discussion-reponse-citee { background:rgba(201,182,228,.18); color:#28252a; }
+.discussion-ligne.moi .discussion-reponse-citee strong { color:#69567f; }
+.discussion-ligne.moi .discussion-mention-texte { color:#70598f; }
+.discussion-ligne.autre .discussion-auteur { color:var(--violet); }
+.discussion-attachement-wrap { position:relative; display:flex; align-items:center; flex:0 0 auto; }
+.discussion-joindre.actif { border-color:var(--violet); color:var(--violet); background:rgba(201,182,228,.12); }
+.discussion-attachement-menu { position:absolute; z-index:20; left:0; bottom:calc(100% + 12px); display:grid; grid-template-columns:repeat(3,minmax(92px,1fr)); gap:7px; width:min(330px,calc(100vw - 40px)); padding:9px; border:1px solid var(--border); border-radius:15px; background:var(--card); box-shadow:0 16px 38px rgba(0,0,0,.35); animation:discussion-panneau .16s ease both; }
+.discussion-attachement-menu button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; min-width:0; margin:0; padding:11px 6px; border:1px solid var(--border); border-radius:11px; background:rgba(255,255,255,.035); color:var(--text); }
+.discussion-attachement-menu button>span { display:grid; place-items:center; width:36px; height:36px; border-radius:11px; background:rgba(201,182,228,.13); color:var(--violet); font-size:16px; }
+.discussion-attachement-menu button strong { font-size:11px; }
+.discussion-attachement-menu button small { color:var(--text-dim); font-size:9px; text-align:center; }
+
+/* Les surfaces d'écriture et de lecture restent scrollables sur souris et écran tactile. */
+.tableau-noir-contenu,.tableau-apercu-panneau { overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; scrollbar-width:thin; }
+.feuille-papier-ecriture { overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; scrollbar-width:thin; scrollbar-color:rgba(80,75,90,.38) transparent; }
+.panneau-feuille { overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+@media(max-width:640px) {
+  .publication-attachment-menu { gap:6px; padding:7px; }
+  .publication-attachment-menu button { padding:10px 4px; }
+  .discussion-bulle-wrap { max-width:88%; }
+  .discussion-bulle { padding:11px 13px 21px; }
+  .discussion-texte { font-size:14px; }
+  .discussion-attachement-menu { left:-4px; width:min(312px,calc(100vw - 34px)); }
+}

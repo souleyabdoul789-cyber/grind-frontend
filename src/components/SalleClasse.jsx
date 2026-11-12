@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
-import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf } from "../api.js";
+import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf, obtenirEtatSalle, modererMicroClasse } from "../api.js";
 import SceneClasse, { NB_SIEGES } from "./SceneClasse.jsx";
+import FeuillePapier from "./FeuillePapier.jsx";
 
 /**
  * SalleClasse — audio à N personnes via LiveKit (notre WebRTC fait
@@ -10,20 +11,25 @@ import SceneClasse, { NB_SIEGES } from "./SceneClasse.jsx";
  * juste le volume brut), l'état micro de chacun, les arrivées/départs.
  *
  * Notre propre canal WebSocket (/ws/session/{classe_id}) reste utilisé,
- * mais seulement pour ce que LiveKit ne fait pas : la feuille
- * collaborative et la demande/transfert du rôle de prof.
+ * mais seulement pour ce que LiveKit ne fait pas : les feuilles privées,
+ * le tableau noir partagé et la demande/transfert du rôle de professeur.
  */
 export default function SalleClasse({ sessionToken, demandeId, monUsername, profInitial, nomClasse, onQuitter }) {
   const [permission, setPermission] = useState("attente");
   const [microActif, setMicroActif] = useState(true);
   const [connexion, setConnexion] = useState("connexion");
   const [erreur, setErreur] = useState(null);
+  const [microAutoriseParProf, setMicroAutoriseParProf] = useState(true);
+  const [microMessage, setMicroMessage] = useState("");
 
   const [monAvatarConfig, setMonAvatarConfig] = useState(null);
   const [participants, setParticipants] = useState([]); // [{identity, avatarConfig, micActif}]
   const [parlants, setParlants] = useState(new Set());
 
   const [profActuel, setProfActuel] = useState(profInitial);
+  const [etatSalle, setEtatSalle] = useState(null);
+  const [tableauTexte, setTableauTexte] = useState("");
+  const [moderationEnCours, setModerationEnCours] = useState({});
   const [demandeProfRecue, setDemandeProfRecue] = useState(null);
   const [demandeProfEnvoyee, setDemandeProfEnvoyee] = useState(false);
 
@@ -39,12 +45,14 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const socketRef = useRef(null);
   const avatarsCacheRef = useRef({});
   const mesViewersRef = useRef(new Set());
+  const membresSalleRef = useRef({});
   const elementsAudioRef = useRef({});
   const delaiEnvoiRef = useRef(null);
-  const placesRef = useRef({}); // identity -> numéro de siège (stable tant qu'on reste)
+  const delaiTableauRef = useRef(null);
   const [panneauOuvert, setPanneauOuvert] = useState(false);
 
   const estProf = profActuel === monUsername;
+  const estOwner = etatSalle?.est_owner === true;
   const [estPaysage, setEstPaysage] = useState(
     window.matchMedia("(orientation: landscape)").matches
   );
@@ -75,6 +83,25 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     }
   }
 
+  function appliquerTransfertProf(info) {
+    const nouveauProf = info.nouveau_prof;
+    if (!nouveauProf) return;
+    setProfActuel(nouveauProf);
+    setEtatSalle((prev) => {
+      if (!prev) return prev;
+      const ancienProf = info.ancien_prof;
+      return {
+        ...prev,
+        prof_username: nouveauProf,
+        membres: (prev.membres || []).map((m) => {
+          if (m.username === nouveauProf) return { ...m, role: "prof", siege_index: null };
+          if (m.username === ancienProf) return { ...m, role: "membre", siege_index: info.ancien_prof_siege ?? m.siege_index };
+          return m;
+        }),
+      };
+    });
+  }
+
   async function chargerAvatar(identity) {
     if (avatarsCacheRef.current[identity]) return avatarsCacheRef.current[identity];
     const res = await obtenirAvatarDe(identity);
@@ -86,7 +113,13 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     const avatarConfig = await chargerAvatar(identity);
     setParticipants((prev) => {
       if (prev.some((p) => p.identity === identity)) return prev;
-      return [...prev, { identity, avatarConfig, micActif: true }];
+      const membreClasse = membresSalleRef.current[identity];
+      return [...prev, {
+        identity,
+        avatarConfig,
+        micActif: false,
+        microAutorise: membreClasse?.micro_autorise !== false,
+      }];
     });
   }
 
@@ -110,25 +143,74 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       return reste;
     });
     setDemandesRecues((prev) => prev.filter((u) => u !== identity));
-    mesViewersRef.current.delete(identity);
-    setMesViewers(new Set(mesViewersRef.current));
   }
 
   useEffect(() => {
     let arrete = false;
 
     async function demarrer() {
-      // ---- WebSocket : feuille + transfert de prof ----
-      const socket = new WebSocket(urlSession(sessionToken, demandeId));
+      // L'état initial vient du serveur : roster, pupitre stable, feuille persistante et tableau.
+      let etatInitial;
+      try {
+        etatInitial = await obtenirEtatSalle(sessionToken, demandeId);
+        if (arrete) return;
+        setEtatSalle(etatInitial);
+        membresSalleRef.current = Object.fromEntries(
+          (etatInitial.membres || []).map((m) => [m.username, m])
+        );
+        setProfActuel(etatInitial.prof_username || profInitial);
+        setMonTexte(etatInitial.ma_feuille || "");
+        mesViewersRef.current = new Set(etatInitial.mes_viewers || []);
+        setMesViewers(new Set(mesViewersRef.current));
+        setFeuillesAutorisees(etatInitial.feuilles_autorisees || {});
+        setTableauTexte(etatInitial.tableau || "");
+        const monMembre = (etatInitial.membres || []).find((m) => m.username === monUsername);
+        const droitMicro = monMembre?.micro_autorise !== false;
+        setMicroAutoriseParProf(droitMicro);
+        if (!droitMicro) {
+          setMicroActif(false);
+          setMicroMessage("Le professeur a temporairement coupé ton micro. Tu peux toujours écouter la classe.");
+        }
+      } catch (err) {
+        setErreur(err.message || "Impossible de charger les données de la salle.");
+        setConnexion("echec");
+        return;
+      }
+
+      // ---- WebSocket sécurisé : accès membre vérifié côté serveur ----
+      const socket = new WebSocket(urlSession(sessionToken, demandeId, true));
       socketRef.current = socket;
 
       socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
 
+        if (msg.type === "micro-permission" && msg.autorise === false) {
+          setMicroAutoriseParProf(false);
+          if (membresSalleRef.current[monUsername]) membresSalleRef.current[monUsername].micro_autorise = false;
+          roomRef.current?.localParticipant.setMicrophoneEnabled(false).catch(() => {});
+          setMicroActif(false);
+          setMicroMessage("Le professeur a coupé ton micro. Tu peux continuer à écouter.");
+        }
+        if (msg.type === "micro-permission" && msg.autorise === true) {
+          // Le droit est rétabli, mais l'élève choisit lui-même de rallumer son micro.
+          setMicroAutoriseParProf(true);
+          if (membresSalleRef.current[monUsername]) membresSalleRef.current[monUsername].micro_autorise = true;
+          setMicroActif(false);
+          setMicroMessage("Ton droit de parole est rétabli. Appuie sur le micro pour parler.");
+        }
         if (msg.type === "sheet-update") {
           setFeuillesAutorisees((prev) =>
             prev[msg.sender] !== undefined ? { ...prev, [msg.sender]: msg.contenu } : prev
           );
+        }
+        if (msg.type === "feuille-acces-revoque") {
+          setFeuillesAutorisees((prev) => {
+            const { [msg.sender]: _retire, ...reste } = prev;
+            return reste;
+          });
+        }
+        if (msg.type === "blackboard-update") {
+          setTableauTexte(msg.contenu || "");
         }
         if (msg.type === "demande-voir-feuille") {
           setDemandesRecues((prev) => (prev.includes(msg.sender) ? prev : [...prev, msg.sender]));
@@ -140,7 +222,12 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
             return s;
           });
           if (msg.autorise) {
-            setFeuillesAutorisees((prev) => ({ ...prev, [msg.sender]: "" }));
+            setFeuillesAutorisees((prev) => ({ ...prev, [msg.sender]: msg.contenu || "" }));
+          } else {
+            setFeuillesAutorisees((prev) => {
+              const { [msg.sender]: _retire, ...reste } = prev;
+              return reste;
+            });
           }
         }
         if (msg.type === "demande-devenir-prof") {
@@ -148,14 +235,25 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         }
         if (msg.type === "reponse-devenir-prof") {
           setDemandeProfEnvoyee(false);
-          if (msg.accepte) {
-            setProfActuel(monUsername);
-          }
+          if (msg.accepte) appliquerTransfertProf(msg);
         }
         if (msg.type === "prof-change") {
-          setProfActuel(msg.nouveau_prof);
+          appliquerTransfertProf(msg);
         }
       };
+
+      try {
+        await new Promise((resolve, reject) => {
+          const timeout = window.setTimeout(() => reject(new Error("Le canal sécurisé de la classe ne répond pas.")), 12000);
+          socket.addEventListener("open", () => { window.clearTimeout(timeout); resolve(); }, { once: true });
+          socket.addEventListener("error", () => { window.clearTimeout(timeout); reject(new Error("Connexion au canal de classe impossible.")); }, { once: true });
+        });
+      } catch (err) {
+        setErreur(err.message);
+        setConnexion("echec");
+        return;
+      }
+      if (arrete) return;
 
       // ---- LiveKit : audio à N personnes ----
       let jetonData;
@@ -190,6 +288,16 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         track.detach().forEach((el) => el.remove());
       });
 
+      room.on(RoomEvent.TrackPublished, (publication, participant) => {
+        if (publication.kind === Track.Kind.Audio) {
+          setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: !publication.isMuted } : p)));
+        }
+      });
+      room.on(RoomEvent.TrackUnpublished, (publication, participant) => {
+        if (publication.kind === Track.Kind.Audio) {
+          setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: false } : p)));
+        }
+      });
       room.on(RoomEvent.TrackMuted, (_pub, participant) => {
         setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: false } : p)));
       });
@@ -215,11 +323,19 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         ajouterParticipant(p.identity);
       }
 
-      try {
-        await room.localParticipant.setMicrophoneEnabled(true);
+      if (etatInitial.membres?.find((m) => m.username === monUsername)?.micro_autorise === false) {
+        // Ne pas demander ni publier le micro tant que le professeur l'interdit.
         setPermission("accordee");
-      } catch {
-        setPermission("refusee");
+        setMicroActif(false);
+      } else {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(true);
+          setPermission("accordee");
+          setMicroActif(true);
+          setMicroAutoriseParProf(true);
+        } catch {
+          setPermission("refusee");
+        }
       }
     }
 
@@ -231,24 +347,39 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       roomRef.current?.disconnect();
       Object.values(elementsAudioRef.current).forEach((el) => el.remove());
       clearTimeout(delaiEnvoiRef.current);
+      clearTimeout(delaiTableauRef.current);
     };
   }, []);
 
   async function demanderMicro() {
+    if (!microAutoriseParProf) {
+      setMicroMessage("Le professeur doit d'abord rétablir ton droit de parole.");
+      return;
+    }
     try {
       await roomRef.current?.localParticipant.setMicrophoneEnabled(true);
       setPermission("accordee");
       setMicroActif(true);
+      setMicroMessage("");
     } catch {
       setPermission("refusee");
     }
   }
 
   async function basculerMicro() {
-    if (permission !== "accordee") return;
+    if (permission !== "accordee" || !microAutoriseParProf) {
+      if (!microAutoriseParProf) setMicroMessage("Le professeur a suspendu ton droit de parole.");
+      return;
+    }
     const nouvelEtat = !microActif;
-    setMicroActif(nouvelEtat);
-    await roomRef.current?.localParticipant.setMicrophoneEnabled(nouvelEtat);
+    try {
+      await roomRef.current?.localParticipant.setMicrophoneEnabled(nouvelEtat);
+      setMicroActif(nouvelEtat);
+      setMicroMessage("");
+    } catch (err) {
+      setMicroActif(false);
+      setMicroMessage(err?.message || "Le micro n'a pas pu être activé.");
+    }
   }
 
   function raccrocher() {
@@ -262,17 +393,23 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     setMonTexte(valeur);
     clearTimeout(delaiEnvoiRef.current);
     delaiEnvoiRef.current = setTimeout(() => {
-      mesViewersRef.current.forEach((cible) => {
-        envoyer({ type: "sheet-update", cible, contenu: valeur });
-      });
-    }, 200);
+      envoyer({ type: "sheet-update", contenu: valeur });
+    }, 220);
+  }
+
+  function gererTableau(valeur) {
+    if (!estProf) return;
+    setTableauTexte(valeur);
+    clearTimeout(delaiTableauRef.current);
+    delaiTableauRef.current = setTimeout(() => {
+      envoyer({ type: "blackboard-update", contenu: valeur });
+    }, 140);
   }
 
   function autoriserDemande(demandeur) {
     mesViewersRef.current.add(demandeur);
     setMesViewers(new Set(mesViewersRef.current));
     envoyer({ type: "autorisation-voir-feuille", cible: demandeur, autorise: true });
-    envoyer({ type: "sheet-update", cible: demandeur, contenu: monTexte });
     setDemandesRecues((prev) => prev.filter((u) => u !== demandeur));
   }
 
@@ -284,6 +421,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   function retirerAcces(viewer) {
     mesViewersRef.current.delete(viewer);
     setMesViewers(new Set(mesViewersRef.current));
+    envoyer({ type: "sheet-revoke", cible: viewer });
   }
 
   function demanderAVoir(identity) {
@@ -300,11 +438,9 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   async function accepterTransfertProf() {
     const nouveau = demandeProfRecue;
     try {
-      await transfererProf(sessionToken, demandeId, nouveau);
-      setProfActuel(nouveau);
+      const resultat = await transfererProf(sessionToken, demandeId, nouveau);
+      appliquerTransfertProf({ ...resultat, ancien_prof: monUsername });
       setDemandeProfRecue(null);
-      envoyer({ type: "reponse-devenir-prof", cible: nouveau, accepte: true });
-      envoyer({ type: "prof-change", nouveau_prof: nouveau });
     } catch (err) {
       setErreur(err.message);
     }
@@ -340,21 +476,10 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     setPanneauOuvert(true);
   }
 
-  // ---- Sièges : chacun garde sa place tant qu'il reste dans la salle ----
-  // Le prof n'occupe pas de pupitre d'élève : il a son propre bureau devant le tableau.
+  // ---- Sièges : le serveur attribue un index persistant à chaque membre. ----
+  // Tous les appareils voient donc exactement la même place ; l'ordre WebSocket n'intervient plus.
+  const membresParNom = new Map((etatSalle?.membres || []).map((m) => [m.username, m]));
   const presents = [monUsername, ...participants.map((p) => p.identity)].filter((id) => id !== profActuel);
-  for (const id of Object.keys(placesRef.current)) {
-    if (!presents.includes(id)) delete placesRef.current[id];
-  }
-  const prises = new Set(Object.values(placesRef.current));
-  for (const id of presents) {
-    if (placesRef.current[id] === undefined) {
-      let i = 0;
-      while (prises.has(i)) i += 1;
-      placesRef.current[id] = i;
-      prises.add(i);
-    }
-  }
 
   function infosDe(id) {
     if (id === monUsername) {
@@ -363,16 +488,17 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         config: monAvatarConfig || avatarsCacheRef.current[id] || null,
         parle: parlants.has(id),
         micActif: microActif,
+        microAutorise: microAutoriseParProf,
       };
     }
     const p = participants.find((x) => x.identity === id);
-    return p ? { identity: id, config: p.avatarConfig, parle: parlants.has(id), micActif: p.micActif } : null;
+    return p ? { identity: id, config: p.avatarConfig, parle: parlants.has(id), micActif: p.micActif, microAutorise: p.microAutorise } : null;
   }
 
   const occupants = Array.from({ length: NB_SIEGES }, () => null);
   presents.forEach((id) => {
-    const i = placesRef.current[id];
-    if (i < NB_SIEGES) occupants[i] = infosDe(id);
+    const i = membresParNom.get(id)?.siege_index;
+    if (Number.isInteger(i) && i >= 0 && i < NB_SIEGES) occupants[i] = infosDe(id);
   });
   const profInfos = profActuel ? infosDe(profActuel) : null;
 
@@ -386,6 +512,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         occupants={occupants}
         prof={profInfos}
         nomClasse={nomClasse}
+        texteTableau={tableauTexte}
         monUsername={monUsername}
         selection={participantSelectionne}
         onSelection={choisirSiege}
@@ -406,9 +533,10 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
           <i className="fa-solid fa-file-lines"></i> Feuille
           {demandesRecues.length > 0 && <span className="hud-badge">{demandesRecues.length}</span>}
         </button>
+        {estProf && <span className="hud-pastille hud-role-prof"><i className="fa-solid fa-chalkboard-user"></i> Professeur{estOwner ? " · propriétaire" : ""}</span>}
         {!estProf && !demandeProfEnvoyee && (
           <button type="button" className="hud-bouton" onClick={demanderDevenirProf}>
-            <i className="fa-solid fa-chalkboard-user"></i> Devenir prof
+            <i className="fa-solid fa-chalkboard-user"></i> Demander le rôle prof
           </button>
         )}
         {demandeProfEnvoyee && (
@@ -418,7 +546,15 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
 
       {/* ---- Notifications au centre ---- */}
       <div className="hud-notifs">
-        {permission === "refusee" && (
+        {microMessage && (
+          <div className="banniere-demande banniere-micro-info" role="status">
+            <i className="fa-solid fa-microphone-slash"></i> {microMessage}
+            <button type="button" className="hud-bouton" onClick={() => setMicroMessage("")} aria-label="Fermer">
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        )}
+        {permission === "refusee" && microAutoriseParProf && (
           <div className="banniere-demande">
             <i className="fa-solid fa-circle-info"></i> Micro refusé — tu peux écouter, pas parler.
             <button type="button" className="hud-bouton" onClick={demanderMicro}>Autoriser le micro</button>
@@ -443,7 +579,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       {/* ---- Contrôles d'appel, en bas ---- */}
       <div className="hud hud-controles">
         <div className="controles-appel">
-          <button className={classeMicro} onClick={basculerMicro} type="button" disabled={permission === "attente"}>
+          <button className={classeMicro} onClick={basculerMicro} type="button" disabled={permission === "attente" || !microAutoriseParProf} aria-label={!microAutoriseParProf ? "Micro suspendu par le professeur" : microActif ? "Couper mon micro" : "Activer mon micro"}>
             <i className={iconeMicro}></i>
           </button>
           <button className="bouton-appel bouton-raccrocher" onClick={raccrocher} type="button">
@@ -470,11 +606,16 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
               <button className={ongletFeuille === "autres" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autres")} type="button">
                 <i className="fa-solid fa-eye"></i> Feuilles
               </button>
+              {estProf && (
+                <button className={ongletFeuille === "tableau" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("tableau")} type="button">
+                  <i className="fa-solid fa-chalkboard"></i> Tableau
+                </button>
+              )}
             </div>
 
             {ongletFeuille === "moi" && (
               <>
-                <textarea className="feuille-textarea" value={monTexte} onChange={(e) => gererSaisie(e.target.value)} placeholder="Écris ici — privé, sauf si tu autorises quelqu'un" rows={6} />
+                <FeuillePapier value={monTexte} onChange={gererSaisie} placeholder="Écris tes notes ici…" label="Ma feuille personnelle" />
                 {mesViewers.size > 0 ? (
                   <div className="choix-categorie" style={{ flexWrap: "wrap" }}>
                     {[...mesViewers].map((v) => (
@@ -489,19 +630,61 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
               </>
             )}
 
+            {ongletFeuille === "tableau" && estProf && (
+              <div className="editeur-tableau-classe">
+                <div className="editeur-tableau-entete">
+                  <i className="fa-solid fa-chalkboard"></i>
+                  <strong>Tableau de la classe</strong>
+                  <span className="tableau-etat-direct"><i className="fa-solid fa-circle"></i> En direct</span>
+                </div>
+                <div className="tableau-apercu-panneau">{tableauTexte || "Le tableau est prêt pour le cours."}</div>
+                <textarea
+                  className="tableau-saisie-prof"
+                  value={tableauTexte}
+                  onChange={(event) => gererTableau(event.target.value)}
+                  maxLength={3000}
+                  rows={5}
+                  placeholder="Écris le cours ici… Les élèves verront le texte apparaître sur le tableau noir."
+                />
+                <div className="info"><i className="fa-solid fa-eye"></i> Seul le professeur actuel peut écrire. Tous les élèves voient le tableau en temps réel.</div>
+              </div>
+            )}
+
             {ongletFeuille === "autres" && (
               <>
                 {participants.length === 0 && <div className="info">Personne d'autre dans la salle.</div>}
                 {autresOrdonnes.map((p) => (
-                  <div key={p.identity} className="carte-post" style={{ marginBottom: 10 }}>
+                  <div key={p.identity} className="carte-post carte-participant-salle" style={{ marginBottom: 10 }}>
                     <div className="auteur-post">{p.identity}</div>
                     {feuillesAutorisees[p.identity] !== undefined ? (
-                      <textarea className="feuille-textarea" value={feuillesAutorisees[p.identity]} readOnly rows={4} />
+                      <FeuillePapier value={feuillesAutorisees[p.identity]} readOnly label={`Feuille de ${p.identity}`} />
                     ) : demandesEnvoyees.has(p.identity) ? (
                       <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> En attente...</div>
                     ) : (
                       <button type="button" onClick={() => demanderAVoir(p.identity)}>
                         <i className="fa-solid fa-eye"></i> Demander à voir sa feuille
+                      </button>
+                    )}
+                    {estProf && p.identity !== monUsername && (
+                      <button
+                        type="button"
+                        className="bouton-moderation-micro"
+                        disabled={!!moderationEnCours[p.identity]}
+                        onClick={async () => {
+                          const couper = p.microAutorise !== false;
+                          setModerationEnCours((prev) => ({ ...prev, [p.identity]: true }));
+                          try {
+                            await modererMicroClasse(sessionToken, demandeId, p.identity, couper);
+                            setParticipants((prev) => prev.map((participant) => participant.identity === p.identity ? { ...participant, microAutorise: !couper, ...(couper ? { micActif: false } : {}) } : participant));
+                          } catch (err) {
+                            setErreur(err.message || "Modération micro impossible");
+                          } finally {
+                            setModerationEnCours((prev) => ({ ...prev, [p.identity]: false }));
+                          }
+                        }}
+                      >
+                        <i className={`fa-solid ${moderationEnCours[p.identity] ? "fa-spinner fa-spin" : p.microAutorise === false ? "fa-microphone" : "fa-microphone-slash"}`}></i>
+                        {moderationEnCours[p.identity] ? "Application…" : p.microAutorise === false ? "Rétablir le droit de parole" : "Suspendre le droit de parole"}
                       </button>
                     )}
                   </div>

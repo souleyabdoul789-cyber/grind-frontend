@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { listerPosts, creerPost, uploaderMedia, uploaderDocument } from "../api.js";
+import { useState, useEffect, useRef } from "react";
+import { listerPosts, creerPost, uploaderMedia, uploaderDocument, listerCategoriesLibrary } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
 import EditeurPhoto from "../components/EditeurPhoto.jsx";
@@ -17,6 +17,12 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [filtre, setFiltre] = useState(null);
   const [chargement, setChargement] = useState(true);
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
+  const [menuPiecesOuvert, setMenuPiecesOuvert] = useState(false);
+  const [categoriesLibrary, setCategoriesLibrary] = useState([]);
+  const [erreurCatalogueLibrary, setErreurCatalogueLibrary] = useState("");
+  const imagesInputRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const documentInputRef = useRef(null);
 
   const [categorie, setCategorie] = useState("demonstration");
   const [contenu, setContenu] = useState("");
@@ -27,6 +33,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [editeurOuvert, setEditeurOuvert] = useState(null); // "photo" | "video" | null
   const [fichierFinal, setFichierFinal] = useState(null); // Blob (photo) ou File original (video)
   const [documentFinal, setDocumentFinal] = useState(null);
+  const [documentCategorie, setDocumentCategorie] = useState("");
   const [etablissementChoisi, setEtablissementChoisi] = useState("");
   const [decoupeVideo, setDecoupeVideo] = useState(null);
   const [apercuMedia, setApercuMedia] = useState(null);
@@ -35,6 +42,14 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [progressionUpload, setProgressionUpload] = useState(0);
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
+
+  useEffect(() => {
+    let actif = true;
+    listerCategoriesLibrary()
+      .then(data => { if (actif) { setCategoriesLibrary(data.categories || []); setErreurCatalogueLibrary(""); } })
+      .catch(() => { if (actif) { setCategoriesLibrary([]); setErreurCatalogueLibrary("Le catalogue des matières est momentanément indisponible."); } });
+    return () => { actif = false; };
+  }, [sessionToken]);
 
   useEffect(() => {
     const url = apercuMedia?.url;
@@ -78,6 +93,8 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
 
   function gererChoixFichier(e) {
     const selection = Array.from(e.target.files || []);
+    e.currentTarget.value = "";
+    setMenuPiecesOuvert(false);
     if (!selection.length) return;
     if (selection.length > 1) {
       if (selection.length > 10 || selection.some(f => !f.type.startsWith("image/"))) {
@@ -117,7 +134,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     if (!valide || fichier.size > 15 * 1024 * 1024) {
       setErreur("Ajoute un PDF ou DOCX de 15 Mo maximum.");
     } else {
-      setDocumentFinal(fichier); setErreur(null);
+      setDocumentFinal(fichier); setDocumentCategorie(""); setErreur(null); setMenuPiecesOuvert(false);
     }
     e.target.value = "";
   }
@@ -143,7 +160,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   function retirerMedia() {
     setFichiersGalerie([]); setFichierBrut(null); setFichierFinal(null); setDecoupeVideo(null); setApercuMedia(null);
   }
-  function retirerDocument() { setDocumentFinal(null); }
+  function retirerDocument() { setDocumentFinal(null); setDocumentCategorie(""); }
 
   async function gererCreation(e) {
     e.preventDefault();
@@ -151,6 +168,10 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
 
     if (categorie === "probleme" && !dateLimite) {
       setErreur("Indique une date limite pour ce problème");
+      return;
+    }
+    if (documentFinal && !categoriesLibrary.includes(documentCategorie.trim())) {
+      setErreur("Choisis une matière existante dans le catalogue pour classer ce document dans la Library.");
       return;
     }
 
@@ -183,6 +204,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
         media_url: media.media_url, media_type: media.media_type, media_items,
         document_url: document.document_url, document_name: document.document_name,
         document_type: document.document_type,
+        document_categorie: documentFinal ? documentCategorie.trim() : undefined,
         etablissement_id: modeInstitutionnel && etablissementChoisi ? Number(etablissementChoisi) : undefined,
       });
 
@@ -190,6 +212,8 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
       setDateLimite(null);
       retirerMedia();
       setDocumentFinal(null);
+      setDocumentCategorie("");
+      setMenuPiecesOuvert(false);
       setFormulaireOuvert(false);
       charger();
     } catch (err) {
@@ -277,9 +301,25 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
             <button type="button" className="bouton-retirer-media" onClick={retirerMedia} aria-label="Retirer le média"><i className="fa-solid fa-xmark" /></button>
           </div>}
           <div className="publication-attachments-picker">
-            {!apercuMedia && <label className="bouton-ajouter-media"><i className="fa-solid fa-images" /> Ajouter images / vidéo<input type="file" multiple accept="image/*,video/*" onChange={gererChoixFichier} hidden /></label>}
-            {!documentFinal ? <label className="bouton-ajouter-media"><i className="fa-solid fa-file-lines" /> Joindre un document<input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={gererChoixDocument} hidden /></label> : <div className="apercu-document"><i className="fa-solid fa-file-lines" /><span>{documentFinal.name}</span><button type="button" onClick={retirerDocument} aria-label="Retirer le document"><i className="fa-solid fa-xmark" /></button></div>}
+            <input ref={imagesInputRef} type="file" accept="image/*" multiple hidden onChange={gererChoixFichier} />
+            <input ref={videoInputRef} type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden onChange={gererChoixFichier} />
+            <input ref={documentInputRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={gererChoixDocument} />
+            <button type="button" className={`publication-attachment-trigger ${menuPiecesOuvert ? "actif" : ""}`} onClick={() => setMenuPiecesOuvert(v => !v)} aria-expanded={menuPiecesOuvert} aria-label="Ajouter une pièce jointe">
+              <i className="fa-solid fa-paperclip" /><span>Pièces jointes</span><i className={`fa-solid fa-chevron-${menuPiecesOuvert ? "up" : "down"}`} />
+            </button>
+            {menuPiecesOuvert && <div className="publication-attachment-menu" role="group" aria-label="Choisir le type de pièce jointe">
+              <button type="button" onClick={() => imagesInputRef.current?.click()}><span className="publication-attachment-icon"><i className="fa-regular fa-image" /></span><strong>Images</strong><small>Jusqu'à 10 photos</small></button>
+              <button type="button" onClick={() => videoInputRef.current?.click()}><span className="publication-attachment-icon"><i className="fa-solid fa-video" /></span><strong>Vidéo</strong><small>Jusqu'à 59 min</small></button>
+              <button type="button" onClick={() => documentInputRef.current?.click()}><span className="publication-attachment-icon"><i className="fa-solid fa-file-lines" /></span><strong>Document</strong><small>PDF ou DOCX</small></button>
+            </div>}
+            {!documentFinal ? null : <div className="apercu-document publication-document-selected"><i className="fa-solid fa-file-lines" /><span>{documentFinal.name}</span><button type="button" onClick={retirerDocument} aria-label="Retirer le document"><i className="fa-solid fa-xmark" /></button></div>}
           </div>
+          {documentFinal && <div className="publication-document-categorie">
+            <label htmlFor="publication-library-category"><i className="fa-solid fa-book-open" /> Classer ce document dans la Library</label>
+            <input id="publication-library-category" type="text" list="publication-library-categories" value={documentCategorie} onChange={event => setDocumentCategorie(event.target.value)} placeholder="Saisis ou choisis une matière…" autoComplete="off" required />
+            <datalist id="publication-library-categories">{categoriesLibrary.map(cat => <option key={cat} value={cat} />)}</datalist>
+            <small>{erreurCatalogueLibrary || (categoriesLibrary.length ? "Le document sera automatiquement ajouté au playsit public de cette matière après publication." : "Chargement du catalogue des matières…")}</small>
+          </div>}
 
           {categorie === "probleme" && !modeInstitutionnel && (
             <>
