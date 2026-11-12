@@ -158,7 +158,7 @@ export default function ContactSupport({ sessionToken, onFermer }) {
             />
             <div className="actions-admin" style={{ marginTop: 10 }}>
               <button type="button" className="bouton-admin" onClick={envoyer} disabled={envoi || !texte.trim()}>
-                <i className="fa-solid fa-paper-plane"></i> {envoi ? "..." : "Envoyer"}
+                <i className="fa-solid fa-paper-plane"></i> {envoi ? <span className="grind-spinner" aria-label="Envoi" /> : "Envoyer"}
               </button>
               {ouverte && (
                 <>

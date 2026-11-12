@@ -46,7 +46,7 @@ export default function ModaleAcceptationCgu({ sessionToken, onAccepte, onRefuse
               Se déconnecter
             </button>
             <button type="button" onClick={accepter} disabled={envoi}>
-              {envoi ? "..." : "J'accepte"}
+              {envoi ? <span className="grind-spinner" aria-label="Enregistrement" /> : "J'accepte"}
             </button>
           </div>
         </div>

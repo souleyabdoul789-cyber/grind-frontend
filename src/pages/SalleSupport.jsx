@@ -57,7 +57,7 @@ function EtatAssistant({ sessionToken }) {
           </div>
         </span>
         <button type="button" className="bouton-admin bouton-admin-doux" onClick={tester} disabled={essai}>
-          <i className="fa-solid fa-vial"></i> {essai ? "Test..." : "Tester"}
+          <i className="fa-solid fa-vial"></i> {essai ? <><span className="grind-spinner" /> Test…</> : "Tester"}
         </button>
       </div>
     </div>
@@ -183,7 +183,7 @@ function Discussion({ sessionToken, conversationId, onRetour }) {
           </div>
           <div className="actions-admin">
             <button type="button" className="bouton-admin" onClick={repondre} disabled={envoi || !texte.trim()}>
-              <i className="fa-solid fa-paper-plane"></i> {envoi ? "..." : "Répondre"}
+              <i className="fa-solid fa-paper-plane"></i> {envoi ? <span className="grind-spinner" aria-label="Envoi" /> : "Répondre"}
             </button>
             <button
               type="button"

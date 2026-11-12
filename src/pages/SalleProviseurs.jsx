@@ -105,8 +105,8 @@ export default function SalleProviseurs({ sessionToken }) {
                   Autoriser la modération locale dans cet établissement
                 </label>
                 <div className="admin-prov-actions">
-                  <button type="button" disabled={!!action} onClick={() => traiter(c, "approuver")}>{action === `${c.id}:approuver` ? "..." : "Approuver"}</button>
-                  <button type="button" className="bouton-admin bouton-admin-doux" disabled={!!action} onClick={() => traiter(c, "rejeter")}>{action === `${c.id}:rejeter` ? "..." : "Rejeter"}</button>
+                  <button type="button" disabled={!!action} onClick={() => traiter(c, "approuver")}>{action === `${c.id}:approuver` ? <span className="grind-spinner" aria-label="Traitement" /> : "Approuver"}</button>
+                  <button type="button" className="bouton-admin bouton-admin-doux" disabled={!!action} onClick={() => traiter(c, "rejeter")}>{action === `${c.id}:rejeter` ? <span className="grind-spinner" aria-label="Traitement" /> : "Rejeter"}</button>
                 </div>
               </div>
             )}

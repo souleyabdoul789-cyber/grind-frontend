@@ -14,6 +14,10 @@ import FondAnime from "./components/FondAnime.jsx";
 import EspaceProviseur from "./pages/EspaceProviseur.jsx";
 import VerrouPin from "./components/VerrouPin.jsx";
 import GestionComptes from "./components/GestionComptes.jsx";
+import Library from "./pages/Library.jsx";
+import BienvenueGrind from "./components/BienvenueGrind.jsx";
+import PaysIndisponible from "./components/PaysIndisponible.jsx";
+import { statutBienvenue, verifierAccesPays } from "./api.js";
 
 function extraireCodeDepuisUrl() {
   const correspondance = window.location.pathname.match(/^\/rejoindre\/(.+)$/);
@@ -34,8 +38,16 @@ export default function App() {
   const [pinStatus, setPinStatus] = useState(null);
   const [changementCompteEnCours, setChangementCompteEnCours] = useState(false);
   const [gestionComptesOuverte, setGestionComptesOuverte] = useState(false);
+  const [paysAccess, setPaysAccess] = useState({ loading: true, blocked: false });
+  const [forcerConnexionAdmin, setForcerConnexionAdmin] = useState(false);
+  const [bienvenueOuverte, setBienvenueOuverte] = useState(false);
+  const [bienvenueVerifiee, setBienvenueVerifiee] = useState(false);
+  const [documentLibraryAouvrir, setDocumentLibraryAouvrir] = useState(null);
+  const [postAouvrir, setPostAouvrir] = useState(null);
 
   async function initialiserSession(token, donnees = {}) {
+    setBienvenueOuverte(false);
+    setBienvenueVerifiee(false);
     const nouveauRole = donnees.role ?? localStorage.getItem("grind_role") ?? null;
     const nouveauType = donnees.type_compte ?? localStorage.getItem("grind_type_compte") ?? "eleve";
     const nouveauUsername = donnees.username ?? localStorage.getItem("grind_username");
@@ -83,6 +95,30 @@ export default function App() {
       setProfilPret(true);
     }
   }
+
+  useEffect(() => {
+    const ouvrirDocument = (event) => { setDocumentLibraryAouvrir(Number(event.detail)); setOnglet("library"); };
+    const ouvrirPublication = (event) => { setPostAouvrir(event.detail); setOnglet("fil"); };
+    window.addEventListener("grind-open-library-doc", ouvrirDocument);
+    window.addEventListener("grind-navigate-post", ouvrirPublication);
+    return () => { window.removeEventListener("grind-open-library-doc", ouvrirDocument); window.removeEventListener("grind-navigate-post", ouvrirPublication); };
+  }, []);
+
+  useEffect(() => {
+    let actif = true;
+    verifierAccesPays().then((r) => {
+      if (actif) setPaysAccess({ loading: false, blocked: r.allowed === false, country: r.country_name, message: r.message });
+    }).catch(() => { if (actif) setPaysAccess({ loading: false, blocked: false }); });
+    return () => { actif = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionToken || !profilComplet || role === "admin" || bienvenueVerifiee) return;
+    let actif = true;
+    statutBienvenue(sessionToken).then((r) => { if (actif) { setBienvenueOuverte(r.a_afficher === true); setBienvenueVerifiee(true); } })
+      .catch(() => { if (actif) setBienvenueVerifiee(true); });
+    return () => { actif = false; };
+  }, [sessionToken, profilComplet, role, typeCompte, bienvenueVerifiee]);
 
   useEffect(() => {
     const tokenSauvegarde = localStorage.getItem("grind_session_token");
@@ -193,6 +229,9 @@ export default function App() {
     setStatut(null);
     setRole(null);
     setTypeCompte("eleve");
+    setBienvenueOuverte(false);
+    setBienvenueVerifiee(false);
+    setForcerConnexionAdmin(false);
     setOnglet("fil");
   }
 
@@ -253,6 +292,18 @@ export default function App() {
     window.history.replaceState({}, "", "/");
   }
 
+  if (paysAccess.loading) {
+    return <div className="country-check" role="status"><span className="grind-spinner" /><p>Vérification de la disponibilité de GRIND…</p></div>;
+  }
+
+  if (paysAccess.blocked && role !== "admin" && (!forcerConnexionAdmin || !!sessionToken)) {
+    return <PaysIndisponible
+      pays={paysAccess.country}
+      message={paysAccess.message}
+      onAdmin={() => { if (sessionToken) deconnecter(); setForcerConnexionAdmin(true); }}
+    />;
+  }
+
   if (!sessionToken) {
     return (
       <Connexion
@@ -299,12 +350,13 @@ export default function App() {
       <div className="app-shell">
         <FondAnime />
         <EspaceProviseur sessionToken={sessionToken} onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
+        {bienvenueOuverte && <BienvenueGrind sessionToken={sessionToken} onTermine={() => setBienvenueOuverte(false)} />}
       </div>
     );
   }
 
   if (!profilPret) {
-    return <div className="app-shell"><FondAnime /><div className="info profil-verification-chargement">Vérification du profil GRIND…</div></div>;
+    return <div className="app-shell"><FondAnime /><div className="info profil-verification-chargement"><span className="grind-spinner" aria-hidden="true" /> Vérification du profil GRIND…</div></div>;
   }
 
   if (profilErreur) {
@@ -334,13 +386,16 @@ export default function App() {
       <FondAnime />
       <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />
 
-      {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} />}
+      {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
+      {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}
       {onglet === "classes" && (
         <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} />
       )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
       {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}
       {onglet === "admin" && statut?.est_equipe && <BureauAdmin sessionToken={sessionToken} role={statut.role} />}
+
+      {bienvenueOuverte && <BienvenueGrind sessionToken={sessionToken} onTermine={() => setBienvenueOuverte(false)} />}
 
       {statut?.cgu_a_accepter && (
         <ModaleAcceptationCgu

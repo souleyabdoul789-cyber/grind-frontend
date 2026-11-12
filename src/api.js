@@ -133,18 +133,87 @@ export async function listerPosts(categorie, sessionToken) {
   return res.json();
 }
 
-export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, document_url, document_name, document_type, etablissement_id }) {
+export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, media_items, document_url, document_name, document_type, etablissement_id }) {
   return poster(`${GRIND_URL}/api/posts`, {
     session_token: sessionToken, categorie, contenu, date_limite,
-    media_url, media_type, document_url, document_name, document_type, etablissement_id,
+    media_url, media_type, media_items, document_url, document_name, document_type, etablissement_id,
   });
 }
 
 // ---------- Média (upload direct vers Cloudinary) ----------
 
-export async function uploaderMedia(sessionToken, fichier, decoupeVideo) {
+function envoyerXHR(url, formulaire, { headers = {}, onProgress = null, timeout = 15 * 60 * 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.timeout = timeout;
+    Object.entries(headers).forEach(([nom, valeur]) => xhr.setRequestHeader(nom, valeur));
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(event.loaded, event.total);
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* réponse non JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(typeof data.detail === "string" ? data.detail : data.error?.message || `Échec du transfert (${xhr.status || "réseau"}).`));
+    };
+    xhr.onerror = () => reject(new Error("La connexion a été interrompue pendant l'envoi. Réessaie avec une connexion stable."));
+    xhr.ontimeout = () => reject(new Error("Le transfert a dépassé le délai autorisé. Réessaie avec une connexion plus stable."));
+    xhr.send(formulaire);
+  });
+}
+
+async function uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress) {
+  const nom = fichier.name || (fichier.type === "video/webm" ? "cours.webm" : fichier.type === "video/quicktime" ? "cours.mov" : "cours.mp4");
+  const signature = await poster(`${GRIND_URL}/api/media/upload/signature`, {
+    session_token: sessionToken, file_name: nom, file_size: fichier.size,
+    content_type: fichier.type || "application/octet-stream",
+    debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin,
+  });
+  const chunkSize = signature.taille_chunk_octets;
+  if (!chunkSize || chunkSize < 5 * 1024 * 1024) throw new Error("Configuration des segments Cloudinary invalide.");
+  const uploadId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let resultatFinal = null;
+  for (let debut = 0; debut < fichier.size; debut += chunkSize) {
+    const finExclusive = Math.min(debut + chunkSize, fichier.size);
+    const fin = finExclusive - 1;
+    const morceau = fichier.slice(debut, finExclusive);
+    const formulaire = new FormData();
+    formulaire.append("file", morceau, nom);
+    formulaire.append("api_key", signature.api_key);
+    formulaire.append("timestamp", signature.timestamp);
+    formulaire.append("signature", signature.signature);
+    Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, valeur));
+    const resultat = await envoyerXHR(signature.upload_url, formulaire, {
+      headers: {
+        "Content-Range": `bytes ${debut}-${fin}/${fichier.size}`,
+        "X-Unique-Upload-Id": uploadId,
+      },
+      onProgress: (charge, total) => onProgress?.(Math.min(99, Math.round((debut + Math.min(charge, total)) / fichier.size * 100))),
+    });
+    const dernierSegment = finExclusive === fichier.size;
+    if (!dernierSegment && resultat.done !== false) throw new Error("Cloudinary n'a pas confirmé la réception d'un segment intermédiaire.");
+    if (dernierSegment) {
+      if (resultat.done !== true) throw new Error("Cloudinary n'a pas confirmé la fin du transfert.");
+      resultatFinal = resultat;
+    }
+  }
+  if (!resultatFinal?.secure_url || !resultatFinal?.signature) throw new Error("Cloudinary n'a pas confirmé le dernier segment du fichier.");
+  onProgress?.(99);
+  const confirmation = await poster(`${GRIND_URL}/api/media/upload/confirm`, {
+    session_token: sessionToken, asset: resultatFinal,
+    debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin,
+  });
+  onProgress?.(100);
+  return confirmation;
+}
+
+export async function uploaderMedia(sessionToken, fichier, decoupeVideo, onProgress = null) {
   if (!fichier) throw new Error("Choisis un média avant de publier.");
-  if (fichier.size > 25 * 1024 * 1024) throw new Error("Le média ne doit pas dépasser 25 Mo.");
+  const estVideo = fichier.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "");
+  const limiteMo = estVideo ? 300 : 25;
+  if (fichier.size <= 0 || fichier.size > limiteMo * 1024 * 1024) throw new Error(`Le média doit être non vide et ne pas dépasser ${limiteMo} Mo${estVideo ? " pour une vidéo" : " pour une image"}.`);
+  if (estVideo && fichier.size > 90 * 1024 * 1024) return uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress);
   const formulaire = new FormData();
   formulaire.append("session_token", sessionToken);
   formulaire.append("file", fichier, fichier.name || "media");
@@ -152,9 +221,8 @@ export async function uploaderMedia(sessionToken, fichier, decoupeVideo) {
     formulaire.append("debut_video", String(decoupeVideo.debut));
     formulaire.append("fin_video", String(decoupeVideo.fin));
   }
-  const res = await fetch(`${GRIND_URL}/api/media/upload`, { method: "POST", body: formulaire });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Échec de l'envoi du média.");
+  const data = await envoyerXHR(`${GRIND_URL}/api/media/upload`, formulaire, { onProgress: (charge, total) => onProgress?.(total ? Math.round(charge / total * 100) : 0) });
+  onProgress?.(100);
   return data;
 }
 
@@ -189,11 +257,8 @@ export async function listerCommentaires(postId, sessionToken) {
   return res.json();
 }
 
-export function ajouterCommentaire(sessionToken, postId, contenu) {
-  return poster(`${GRIND_URL}/api/posts/${postId}/commentaires`, {
-    session_token: sessionToken,
-    contenu,
-  });
+export function ajouterCommentaire(sessionToken, postId, contenu, pieces = {}) {
+  return poster(`${GRIND_URL}/api/posts/${postId}/commentaires`, { session_token: sessionToken, contenu, ...pieces });
 }
 
 export function resoudrePost(sessionToken, postId) {
@@ -658,4 +723,80 @@ export function listerNotifications(sessionToken) {
 }
 export function marquerNotificationLue(sessionToken, id) {
   return poster(`${GRIND_URL}/api/notifications/${id}/lue`, { session_token: sessionToken });
+}
+
+// ---------- Bibliothèque publique GRIND ----------
+export async function listerCategoriesLibrary() {
+  const r = await fetchApi(`${GRIND_URL}/api/library/categories`);
+  const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Catégories indisponibles."); return d;
+}
+export async function listerPlaylistsLibrary(sessionToken, categorie = "", q = "") {
+  const u = new URL(`${GRIND_URL}/api/library/playlists`);
+  u.searchParams.set("session_token", sessionToken); if (categorie) u.searchParams.set("categorie", categorie); if (q) u.searchParams.set("q", q);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Playlists indisponibles."); return d;
+}
+export async function creerPlaylistLibrary(sessionToken, payload) {
+  return poster(`${GRIND_URL}/api/library/playlists`, { session_token: sessionToken, ...payload });
+}
+export async function uploaderDocumentLibrary(sessionToken, categorie, fichier, playlistId, titre, description) {
+  const f = new FormData(); f.append("session_token", sessionToken); f.append("categorie", categorie); f.append("file", fichier, fichier.name);
+  f.append("titre", titre || fichier.name); f.append("description", description || ""); if (playlistId) f.append("playlist_id", String(playlistId));
+  const r = await fetchApi(`${GRIND_URL}/api/library/documents`, { method: "POST", body: f }); const d = await r.json(); if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Envoi du document impossible."); return d;
+}
+export async function rechercherDocumentsLibrary(sessionToken, q = "", categorie = "") {
+  const u = new URL(`${GRIND_URL}/api/library/documents`);
+  u.searchParams.set("session_token", sessionToken);
+  if (q) u.searchParams.set("q", q);
+  if (categorie) u.searchParams.set("categorie", categorie);
+  const r = await fetchApi(u); const d = await r.json();
+  if (!r.ok) throw new Error(d.detail || "Recherche de documents indisponible.");
+  return d;
+}
+export async function listerDocumentsLibrary(sessionToken, playlistId, q = "") {
+  const u = new URL(`${GRIND_URL}/api/library/playlists/${playlistId}/documents`); u.searchParams.set("session_token", sessionToken); if (q) u.searchParams.set("q", q);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Documents indisponibles."); return d;
+}
+export function voterDocumentLibrary(sessionToken, id, valeur) { return poster(`${GRIND_URL}/api/library/documents/${id}/vote`, { session_token: sessionToken, valeur }); }
+export function commenterDocumentLibrary(sessionToken, id, contenu) { return poster(`${GRIND_URL}/api/library/documents/${id}/commentaires`, { session_token: sessionToken, contenu }); }
+export async function listerCommentairesDocumentLibrary(sessionToken, id) {
+  const u = new URL(`${GRIND_URL}/api/library/documents/${id}/commentaires`); u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Avis indisponibles."); return d;
+}
+export async function statutBienvenue(sessionToken) {
+  const u = new URL(`${GRIND_URL}/api/compte/bienvenue`); u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Accueil indisponible."); return d;
+}
+export function terminerBienvenue(sessionToken) { return poster(`${GRIND_URL}/api/compte/bienvenue/terminer`, { session_token: sessionToken }); }
+export async function verifierAccesPays() {
+  const r = await fetchApi(`${GRIND_URL}/api/country-access`); const d = await r.json(); if (!r.ok) throw new Error("Vérification géographique indisponible."); return d;
+}
+export async function listerPaysBloques(sessionToken) {
+  const u = new URL(`${GRIND_URL}/api/admin/countries`); u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Liste indisponible."); return d;
+}
+export function definirPaysBloque(sessionToken, payload) { return poster(`${GRIND_URL}/api/admin/countries`, { session_token: sessionToken, ...payload }); }
+export async function supprimerPaysBloque(sessionToken, code) {
+  const u = new URL(`${GRIND_URL}/api/admin/countries/${encodeURIComponent(code)}`); u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u, { method: "DELETE" }); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Suppression impossible."); return d;
+}
+export async function rechercherMentions(sessionToken, q = "") {
+  const u = new URL(`${GRIND_URL}/api/utilisateurs/suggestions`); u.searchParams.set("session_token", sessionToken); u.searchParams.set("q", q);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Recherche de membres indisponible."); return d;
+}
+export function likerCommentaire(sessionToken, commentaireId) { return poster(`${GRIND_URL}/api/commentaires/${commentaireId}/like`, { session_token: sessionToken }); }
+export function modifierPost(sessionToken, postId, contenu) { return poster(`${GRIND_URL}/api/posts/${postId}/modifier`, { session_token: sessionToken, contenu }); }
+
+export async function obtenirDocumentLibrary(sessionToken, id) {
+  const u = new URL(`${GRIND_URL}/api/library/documents/${id}`); u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Document introuvable."); return d;
+}
+export async function chargerApercuDocumentLibrary(sessionToken, id, signal) {
+  const u = new URL(`${GRIND_URL}/api/library/documents/${id}/preview`);
+  u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u, { signal });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(typeof d.detail === "string" ? d.detail : "Impossible de prévisualiser ce document.");
+  }
+  return r.blob();
 }

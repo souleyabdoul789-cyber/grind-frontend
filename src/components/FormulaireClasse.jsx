@@ -108,7 +108,7 @@ export default function FormulaireClasse({ sessionToken, onCree }) {
         </div>
       )}
 
-      <button type="submit" disabled={envoi}>{envoi ? "..." : "Créer"}</button>
+      <button type="submit" disabled={envoi}>{envoi ? <span className="grind-spinner" aria-label="Création" /> : "Créer"}</button>
       {erreur && <div className="erreur" role="alert"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
     </form>
   );

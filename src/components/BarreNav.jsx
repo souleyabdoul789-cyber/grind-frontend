@@ -5,6 +5,7 @@ import MenuPrincipal from "./MenuPrincipal.jsx";
 const ONGLETS = [
   { cle: "fil", icone: "fa-solid fa-house", label: "Fil" },
   { cle: "classes", icone: "fa-solid fa-chalkboard", label: "Classes" },
+  { cle: "library", icone: "fa-solid fa-book-open", label: "Library" },
 ];
 
 // Le reste vit dans le menu à côté de la cloche. Pour ajouter la Bibliothèque ou le Shop,

@@ -7,10 +7,11 @@ import EditeurVideo from "../components/EditeurVideo.jsx";
 import EtatVide from "../components/EtatVide.jsx";
 import ProfilPublic from "../components/ProfilPublic.jsx";
 import BandeauAnnonces from "../components/BandeauAnnonces.jsx";
+import ChampMention from "../components/ChampMention.jsx";
 
 const LIMITE_LEGENDE = 500;
 
-export default function FilActu({ sessionToken, monUsername, modeInstitutionnel = false, etablissements = [] }) {
+export default function FilActu({ sessionToken, monUsername, modeInstitutionnel = false, etablissements = [], postAouvrir = null }) {
   const [profilConsulte, setProfilConsulte] = useState(null);
   const [posts, setPosts] = useState([]);
   const [filtre, setFiltre] = useState(null);
@@ -22,6 +23,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [dateLimite, setDateLimite] = useState(null);
 
   const [fichierBrut, setFichierBrut] = useState(null);
+  const [fichiersGalerie, setFichiersGalerie] = useState([]);
   const [editeurOuvert, setEditeurOuvert] = useState(null); // "photo" | "video" | null
   const [fichierFinal, setFichierFinal] = useState(null); // Blob (photo) ou File original (video)
   const [documentFinal, setDocumentFinal] = useState(null);
@@ -30,6 +32,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [apercuMedia, setApercuMedia] = useState(null);
 
   const [uploadEnCours, setUploadEnCours] = useState(false);
+  const [progressionUpload, setProgressionUpload] = useState(0);
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
 
@@ -50,6 +53,20 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   }, [filtre]);
 
   useEffect(() => {
+    if (!postAouvrir?.post_id || !posts.length) return;
+    const timer = window.setTimeout(() => {
+      const cible = document.getElementById(`grind-post-${postAouvrir.post_id}`);
+      if (cible) {
+        cible.scrollIntoView({ behavior: "smooth", block: "center" });
+        cible.classList.add("post-cible-notification");
+        window.setTimeout(() => cible.classList.remove("post-cible-notification"), 1800);
+        if (postAouvrir.commentaire_id) window.setTimeout(() => window.dispatchEvent(new CustomEvent("grind-open-comment", { detail: postAouvrir.commentaire_id })), 220);
+      }
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [postAouvrir, posts]);
+
+  useEffect(() => {
     const ouvrirPost = (event) => {
       const id = event.detail;
       const cible = document.getElementById(`grind-post-${id}`);
@@ -60,35 +77,59 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   }, [posts]);
 
   function gererChoixFichier(e) {
-    const fichier = e.target.files[0];
-    if (!fichier) return;
+    const selection = Array.from(e.target.files || []);
+    if (!selection.length) return;
+    if (selection.length > 1) {
+      if (selection.length > 10 || selection.some(f => !f.type.startsWith("image/"))) {
+        setErreur("Sélectionne au maximum 10 images. Les vidéos et documents se publient séparément.");
+        e.target.value = "";
+        return;
+      }
+      setFichiersGalerie(selection);
+      setFichierBrut(null); setFichierFinal(null); setDecoupeVideo(null);
+      setApercuMedia({ estGalerie: true, items: selection.map(f => ({ nom: f.name, url: URL.createObjectURL(f) })) });
+      return;
+    }
+    const fichier = selection[0];
+    setFichiersGalerie([]);
+    if ((fichier.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "")) && fichier.size > 300 * 1024 * 1024) {
+      setFichierBrut(null); setFichierFinal(null); setApercuMedia(null);
+      setErreur("La vidéo ne doit pas dépasser 300 Mo.");
+      e.target.value = "";
+      return;
+    }
     setFichierBrut(fichier);
-    if (fichier.type.startsWith("video/")) setEditeurOuvert("video");
+    if (fichier.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "")) setEditeurOuvert("video");
     else if (fichier.type.startsWith("image/")) setEditeurOuvert("photo");
-    else if (["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(fichier.type) ||
-      ((fichier.type === "" || fichier.type === "application/octet-stream") && /\.(pdf|docx)$/i.test(fichier.name))) {
-      setDocumentFinal(fichier);
-      setFichierFinal(null);
-      setApercuMedia({ estDocument: true, nom: fichier.name });
-    } else {
+    else {
       setFichierBrut(null);
-      setDocumentFinal(null);
       setFichierFinal(null);
       setApercuMedia(null);
-      setErreur("Format non accepté. Choisis une image, une vidéo, un PDF ou un DOCX.");
+      setErreur("Pour un média, choisis une image ou une vidéo. Les documents disposent de leur propre bouton.");
     }
+  }
+
+  function gererChoixDocument(e) {
+    const fichier = e.target.files?.[0];
+    if (!fichier) return;
+    const extension = fichier.name.split(".").pop().toLowerCase();
+    const valide = ["pdf", "docx"].includes(extension) && (fichier.type === "application/pdf" || fichier.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || !fichier.type || fichier.type === "application/octet-stream");
+    if (!valide || fichier.size > 15 * 1024 * 1024) {
+      setErreur("Ajoute un PDF ou DOCX de 15 Mo maximum.");
+    } else {
+      setDocumentFinal(fichier); setErreur(null);
+    }
+    e.target.value = "";
   }
 
   function validerEditionPhoto(blob) {
     setFichierFinal(blob);
-    setDocumentFinal(null);
     setApercuMedia({ url: URL.createObjectURL(blob), estVideo: false });
     setEditeurOuvert(null);
   }
 
   function validerEditionVideo({ debut, fin }) {
     setFichierFinal(fichierBrut);
-    setDocumentFinal(null);
     setDecoupeVideo({ debut, fin });
     setApercuMedia({ url: URL.createObjectURL(fichierBrut), estVideo: true });
     setEditeurOuvert(null);
@@ -100,12 +141,9 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   }
 
   function retirerMedia() {
-    setFichierBrut(null);
-    setFichierFinal(null);
-    setDocumentFinal(null);
-    setDecoupeVideo(null);
-    setApercuMedia(null);
+    setFichiersGalerie([]); setFichierBrut(null); setFichierFinal(null); setDecoupeVideo(null); setApercuMedia(null);
   }
+  function retirerDocument() { setDocumentFinal(null); }
 
   async function gererCreation(e) {
     e.preventDefault();
@@ -120,19 +158,29 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     try {
       let media = {};
       let document = {};
-      if (fichierFinal) {
-        setUploadEnCours(true);
-        media = await uploaderMedia(sessionToken, fichierFinal, decoupeVideo);
-      } else if (documentFinal) {
+      let media_items = [];
+      if (fichiersGalerie.length) {
+        setUploadEnCours(true); setProgressionUpload(0);
+        for (let i = 0; i < fichiersGalerie.length; i += 1) {
+          const photo = fichiersGalerie[i];
+          const resultat = await uploaderMedia(sessionToken, photo, null, pct => setProgressionUpload(Math.round(((i + pct / 100) / fichiersGalerie.length) * 100)));
+          media_items.push({ url: resultat.media_url, type: "image" });
+        }
+      } else if (fichierFinal) {
+        setUploadEnCours(true); setProgressionUpload(0);
+        media = await uploaderMedia(sessionToken, fichierFinal, decoupeVideo, setProgressionUpload);
+      }
+      if (documentFinal) {
         setUploadEnCours(true);
         document = await uploaderDocument(sessionToken, documentFinal);
       }
       setUploadEnCours(false);
+      setProgressionUpload(100);
 
       const dateLimiteIso = categorie === "probleme" ? dateLimite.toISOString() : null;
       await creerPost(sessionToken, {
         categorie, contenu, date_limite: dateLimiteIso,
-        media_url: media.media_url, media_type: media.media_type,
+        media_url: media.media_url, media_type: media.media_type, media_items,
         document_url: document.document_url, document_name: document.document_name,
         document_type: document.document_type,
         etablissement_id: modeInstitutionnel && etablissementChoisi ? Number(etablissementChoisi) : undefined,
@@ -141,6 +189,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
       setContenu("");
       setDateLimite(null);
       retirerMedia();
+      setDocumentFinal(null);
       setFormulaireOuvert(false);
       charger();
     } catch (err) {
@@ -148,6 +197,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     } finally {
       setEnvoiEnCours(false);
       setUploadEnCours(false);
+      setProgressionUpload(0);
     }
   }
 
@@ -212,36 +262,24 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
           </div>
 
           {modeInstitutionnel && etablissements.length > 1 && <label className="select-etablissement-post">Publier dans <select value={etablissementChoisi} onChange={(e) => setEtablissementChoisi(e.target.value)} required><option value="">Choisir un établissement</option>{etablissements.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}</select></label>}
-          <textarea
+          <ChampMention
+            sessionToken={sessionToken}
             rows={3}
-            maxLength={LIMITE_LEGENDE}
+            className="composer-mention-textarea"
             value={contenu}
-            onChange={(e) => setContenu(e.target.value)}
+            onChange={setContenu}
             placeholder={categorie === "probleme" ? "Décris ce que tu n'arrives pas à résoudre..." : "Partage quelque chose..."}
-            required
           />
           <div className="compteur-caracteres">{contenu.length} / {LIMITE_LEGENDE}</div>
 
-          {apercuMedia ? (
-            <div className="apercu-media-form">
-              {apercuMedia.estDocument ? (
-                <div className="apercu-document"><i className="fa-solid fa-file-lines"></i><span>{apercuMedia.nom}</span></div>
-              ) : apercuMedia.estVideo ? (
-                <video src={apercuMedia.url} muted playsInline />
-              ) : (
-                <img src={apercuMedia.url} alt="" />
-              )}
-              <button type="button" className="bouton-retirer-media" onClick={retirerMedia}>
-                <i className="fa-solid fa-xmark"></i>
-              </button>
-            </div>
-          ) : (
-            <label className="bouton-ajouter-media">
-              <i className="fa-solid fa-paperclip"></i>
-              Ajouter un média ou document
-              <input type="file" accept="image/*,video/*,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={gererChoixFichier} hidden />
-            </label>
-          )}
+          {apercuMedia && <div className="apercu-media-form">
+            {apercuMedia.estGalerie ? <div className="publication-gallery-preview">{apercuMedia.items.slice(0, 4).map((item, i) => <div key={item.nom}><img src={item.url} alt="" />{i === 3 && apercuMedia.items.length > 4 && <span>+{apercuMedia.items.length - 4}</span>}</div>)}<small>{apercuMedia.items.length} images sélectionnées</small></div> : apercuMedia.estVideo ? <video src={apercuMedia.url} muted playsInline /> : <img src={apercuMedia.url} alt="" />}
+            <button type="button" className="bouton-retirer-media" onClick={retirerMedia} aria-label="Retirer le média"><i className="fa-solid fa-xmark" /></button>
+          </div>}
+          <div className="publication-attachments-picker">
+            {!apercuMedia && <label className="bouton-ajouter-media"><i className="fa-solid fa-images" /> Ajouter images / vidéo<input type="file" multiple accept="image/*,video/*" onChange={gererChoixFichier} hidden /></label>}
+            {!documentFinal ? <label className="bouton-ajouter-media"><i className="fa-solid fa-file-lines" /> Joindre un document<input type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={gererChoixDocument} hidden /></label> : <div className="apercu-document"><i className="fa-solid fa-file-lines" /><span>{documentFinal.name}</span><button type="button" onClick={retirerDocument} aria-label="Retirer le document"><i className="fa-solid fa-xmark" /></button></div>}
+          </div>
 
           {categorie === "probleme" && !modeInstitutionnel && (
             <>
@@ -255,10 +293,11 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
               Annuler
             </button>
             <button type="submit" disabled={envoiEnCours}>
-              {uploadEnCours ? "Envoi du média..." : envoiEnCours ? "..." : "Publier"}
+              {uploadEnCours ? <><span className="grind-spinner" /> Envoi des fichiers… {progressionUpload}%</> : envoiEnCours ? <span className="grind-spinner" /> : "Publier"}
             </button>
           </div>
 
+          {uploadEnCours && <div className="grind-upload-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progressionUpload}><span style={{ width: `${progressionUpload}%` }} /></div>}
           {erreur && (
             <div className="erreur">
               <i className="fa-solid fa-triangle-exclamation"></i>

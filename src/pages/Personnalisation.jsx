@@ -135,7 +135,7 @@ export default function Personnalisation({ sessionToken, onRetour }) {
       <div className="rangee-boutons" style={{ marginTop: 20 }}>
         <button type="button" className="bouton-retour" onClick={onRetour}>Annuler</button>
         <button type="button" onClick={sauvegarder} disabled={enregistrementEnCours}>
-          {enregistrementEnCours ? "..." : "Enregistrer"}
+          {enregistrementEnCours ? <span className="grind-spinner" aria-label="Enregistrement" /> : "Enregistrer"}
         </button>
       </div>
 

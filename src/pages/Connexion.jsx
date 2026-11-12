@@ -303,7 +303,7 @@ export default function Connexion({ onConnecte }) {
                 <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
               </div>
               {erreur && <div className="erreur" role="alert">{erreur}</div>}
-              <button type="submit" disabled={chargement || !cgu || !usernameGoogle.trim()}>{chargement ? "Validation..." : "Créer mon compte"}</button>
+              <button type="submit" disabled={chargement || !cgu || !usernameGoogle.trim()}>{chargement ? <><span className="grind-spinner" /> Validation…</> : "Créer mon compte"}</button>
             </form>
           ) : ecran === "formulaire" && (
             <form onSubmit={soumettre} noValidate>
@@ -359,7 +359,7 @@ export default function Connexion({ onConnecte }) {
               )}
 
               <button type="submit" disabled={chargement}>
-                {chargement ? "..." : mode === "login" ? "Se connecter" : "Créer mon compte"}
+                {chargement ? <span className="grind-spinner" aria-label="Connexion" /> : mode === "login" ? "Se connecter" : "Créer mon compte"}
               </button>
 
               {mode === "login" && (
@@ -416,7 +416,7 @@ export default function Connexion({ onConnecte }) {
               </p>
               <ChampAvecIcone icone="fa-solid fa-envelope" type="email" valeur={email} onChange={setEmail} placeholder="Adresse e-mail" autoComplete="email" inputMode="email" autoFocus />
               {erreur && <div className="erreur" role="alert"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
-              <button type="submit" disabled={chargement || !email}>{chargement ? "Envoi..." : "Recevoir le code"}</button>
+              <button type="submit" disabled={chargement || !email}>{chargement ? <><span className="grind-spinner" /> Envoi…</> : "Recevoir le code"}</button>
               <button type="button" className="lien" onClick={() => retourConnexion()}><i className="fa-solid fa-arrow-left"></i> Retour</button>
             </form>
           )}
@@ -430,7 +430,7 @@ export default function Connexion({ onConnecte }) {
               </p>
               <ChampAvecIcone icone="fa-solid fa-envelope" type="email" valeur={email} onChange={setEmail} placeholder="Adresse e-mail" autoComplete="email" inputMode="email" autoFocus />
               {erreur && <div className="erreur" role="alert"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
-              <button type="submit" disabled={chargement || !email}>{chargement ? "Envoi..." : "Envoyer le code"}</button>
+              <button type="submit" disabled={chargement || !email}>{chargement ? <><span className="grind-spinner" /> Envoi…</> : "Envoyer le code"}</button>
               <button type="button" className="lien" onClick={() => retourConnexion()}><i className="fa-solid fa-arrow-left"></i> Retour</button>
             </form>
           )}

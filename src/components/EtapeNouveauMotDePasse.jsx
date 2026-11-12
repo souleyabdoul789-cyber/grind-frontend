@@ -73,7 +73,7 @@ export default function EtapeNouveauMotDePasse({ jeton, onTermine, onAnnuler }) 
       )}
 
       <button type="submit" disabled={envoi || !mdp || !confirmation}>
-        {envoi ? "Enregistrement..." : "Changer le mot de passe"}
+        {envoi ? <><span className="grind-spinner" /> Enregistrement…</> : "Changer le mot de passe"}
       </button>
       <button type="button" className="lien" onClick={onAnnuler}>
         <i className="fa-solid fa-arrow-left"></i> Annuler

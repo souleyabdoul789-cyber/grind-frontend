@@ -228,7 +228,7 @@ export default function Questionnaire({ sessionToken, onTermine }) {
         <div className="rangee-boutons">
           {etapeIndex > 0 && <button className="bouton-retour" onClick={precedent} type="button"><i className="fa-solid fa-arrow-left"></i></button>}
           <button onClick={suivant} disabled={chargement} type="button">
-            {chargement ? "..." : derniereEtape ? "Terminer" : "Continuer"}
+            {chargement ? <span className="grind-spinner" aria-label="Enregistrement" /> : derniereEtape ? "Terminer" : "Continuer"}
           </button>
         </div>
 

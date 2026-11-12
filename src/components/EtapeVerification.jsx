@@ -127,7 +127,7 @@ export default function EtapeVerification({ objet, emailMasque, jeton, onVerifie
         <>
           <button type="button" className="lien" onClick={renvoyer} disabled={attente > 0 || renvoiEnCours}>
             {renvoiEnCours
-              ? "Envoi..."
+              ? <><span className="grind-spinner" aria-hidden="true" /> Envoi en cours</>
               : attente > 0
               ? `Renvoyer le code dans ${attente} s`
               : codeAnnule

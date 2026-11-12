@@ -102,7 +102,7 @@ export function SalleEquipe({ sessionToken }) {
             : "Associé : tout ce que fait un contrôleur, plus les bannissements, la levée des sanctions et la certification."}
         </div>
         <button type="button" className="bouton-admin" onClick={nommer} disabled={envoi}>
-          {envoi ? "..." : "Nommer"}
+          {envoi ? <span className="grind-spinner" aria-label="Envoi" /> : "Nommer"}
         </button>
         {message && <div className="info" style={{ color: "var(--succes)", marginTop: 10 }}>{message}</div>}
         {erreur && <div className="erreur" style={{ marginTop: 10 }}>{erreur}</div>}
@@ -322,7 +322,7 @@ export function SalleAnnonces({ sessionToken }) {
         <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} placeholder="Légende ou message officiel..." rows={5} maxLength={3000} style={{ resize: "vertical", marginBottom: 12 }} />
         <div className="compteur-caracteres">{contenu.length} / 3 000</div>
         {editionPhoto && <div className="annonce-editeur-photo"><p className="info">Ajuste la photo officielle avant publication.</p><EditeurPhoto fichier={editionPhoto} onValider={(blob) => { const photo = new File([blob], "annonce-grind.jpg", { type: "image/jpeg" }); setFichier(photo); setApercu({ url: URL.createObjectURL(photo), type: "image", nom: photo.name }); setEditionPhoto(null); }} onAnnuler={() => { setFichier(null); setEditionPhoto(null); }} /></div>}
-        {editionVideo && <div className="annonce-editeur-video"><p className="info">Prépare le clip de l'annonce (120 secondes maximum).</p><EditeurVideo fichier={editionVideo} onValider={({ debut, fin }) => { setDecoupeVideo({ debut, fin }); setEditionVideo(null); setApercu({ url: URL.createObjectURL(fichier), type: "video", nom: fichier.name }); }} onAnnuler={() => { setFichier(null); setEditionVideo(null); setDecoupeVideo(null); }} /></div>}
+        {editionVideo && <div className="annonce-editeur-video"><p className="info">Prépare le clip de l'annonce (59 minutes maximum).</p><EditeurVideo fichier={editionVideo} onValider={({ debut, fin }) => { setDecoupeVideo({ debut, fin }); setEditionVideo(null); setApercu({ url: URL.createObjectURL(fichier), type: "video", nom: fichier.name }); }} onAnnuler={() => { setFichier(null); setEditionVideo(null); setDecoupeVideo(null); }} /></div>}
         {apercu && <div className="apercu-media-form annonce-apercu-admin">
           {apercu.type === "image" ? <img src={apercu.url} alt="Aperçu de l'annonce" /> : apercu.type === "video" ? <video src={apercu.url} controls playsInline preload="metadata" /> : <div className="apercu-document"><i className="fa-solid fa-file-lines"></i><span>{apercu.nom}</span></div>}
           <button type="button" className="bouton-retirer-media" onClick={() => { setFichier(null); setApercu(null); setEditionVideo(null); setDecoupeVideo(null); }} aria-label="Retirer la pièce jointe"><i className="fa-solid fa-xmark"></i></button>
@@ -332,7 +332,7 @@ export function SalleAnnonces({ sessionToken }) {
           <label><input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} /> <span><strong>Important</strong><small>Reste visible dans la cloche ; ne peut pas être masquée.</small></span></label>
           <label><input type="checkbox" checked={epinglee} onChange={(e) => setEpinglee(e.target.checked)} /> <span><strong>Épingler</strong><small>Priorité d'affichage dans la liste des annonces.</small></span></label>
         </div>
-        <button type="button" className="bouton-admin" onClick={publier} disabled={envoi || !!editionVideo || !!editionPhoto || titre.trim().length < 3 || (!contenu.trim() && !fichier)}><i className="fa-solid fa-paper-plane"></i> {envoi ? "Publication..." : "Publier à tous"}</button>
+        <button type="button" className="bouton-admin" onClick={publier} disabled={envoi || !!editionVideo || !!editionPhoto || titre.trim().length < 3 || (!contenu.trim() && !fichier)}><i className="fa-solid fa-paper-plane"></i> {envoi ? <><span className="grind-spinner" aria-hidden="true" /> Publication en cours</> : "Publier à tous"}</button>
         {message && <div className="info" style={{ color: "var(--succes)", marginTop: 10 }}>{message}</div>}
         {erreur && <div className="erreur" style={{ marginTop: 10 }}>{erreur}</div>}
       </div>

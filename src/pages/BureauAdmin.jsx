@@ -7,6 +7,7 @@ import SalleSupport from "./SalleSupport.jsx";
 import SalleExamens from "./SalleExamens.jsx";
 import SalleProviseurs from "./SalleProviseurs.jsx";
 import { libelleRole } from "../moderationInfos.js";
+import SallePays from "./SallePays.jsx";
 
 const NOM_PAR_DEFAUT = "GRIND Admin";
 
@@ -20,6 +21,7 @@ const SALLES = [
   { cle: "equipe", titre: "Équipe", desc: "Nommer des associés et des contrôleurs.", icone: "fa-solid fa-people-group", permission: "equipe" },
   { cle: "annonces", titre: "Annonces", desc: "Publier un message à tous les utilisateurs.", icone: "fa-solid fa-bullhorn", permission: "annonces" },
   { cle: "proviseurs", titre: "Candidatures établissement", desc: "Vérifier les pièces privées et autoriser les directions.", icone: "fa-solid fa-school-circle-check", permission: "equipe" },
+  { cle: "pays", titre: "Disponibilité par pays", desc: "Suspendre l’accès régional à GRIND selon l’IP.", icone: "fa-solid fa-earth-africa", permission: "pays" },
 ];
 
 /* ----------------------- Première entrée de l'administrateur ----------------------- */
@@ -61,7 +63,7 @@ function EcranEntree({ sessionToken, onTermine }) {
         aria-label="Nom d'administrateur"
       />
       <button type="submit" disabled={envoi}>
-        {envoi ? "..." : "Entrer dans le bureau"}
+        {envoi ? <span className="grind-spinner" aria-label="Ouverture" /> : "Entrer dans le bureau"}
       </button>
       {erreur && <div className="erreur" style={{ marginTop: 10 }}>{erreur}</div>}
     </form>
@@ -72,25 +74,25 @@ function EcranEntree({ sessionToken, onTermine }) {
 function ScenePupitre({ alerte }) {
   return (
     <svg viewBox="0 0 600 150" role="img" aria-label="Salle de contrôle">
-      <rect x="70" y="112" width="460" height="14" rx="7" fill="#3a3347" />
-      <rect x="96" y="124" width="8" height="22" fill="#2c2738" />
-      <rect x="496" y="124" width="8" height="22" fill="#2c2738" />
+      <rect x="70" y="112" width="460" height="14" rx="7" fill="#4b4034" />
+      <rect x="96" y="124" width="8" height="22" fill="#3d3329" />
+      <rect x="496" y="124" width="8" height="22" fill="#3d3329" />
 
       {[110, 250, 390].map((x, i) => (
         <g key={x}>
-          <rect x={x} y="36" width="100" height="62" rx="7" fill="#12131c" stroke="#c9b6e4" strokeWidth="1.5" />
-          <rect x={x + 6} y="42" width="88" height="50" rx="4" fill="#1b1d2b" />
+          <rect x={x} y="36" width="100" height="62" rx="7" fill="#201b16" stroke="#e8ddd0" strokeWidth="1.5" />
+          <rect x={x + 6} y="42" width="88" height="50" rx="4" fill="#2b241d" />
           <rect x={x + 12} y="50" width={52 - i * 8} height="5" rx="2.5" fill="#d8bfa6" opacity="0.85" />
-          <rect x={x + 12} y="60" width={70 - i * 10} height="5" rx="2.5" fill="#c9b6e4" opacity="0.7" />
-          <rect x={x + 12} y="70" width={40 + i * 12} height="5" rx="2.5" fill="#c9b6e4" opacity="0.45" />
+          <rect x={x + 12} y="60" width={70 - i * 10} height="5" rx="2.5" fill="#e8ddd0" opacity="0.7" />
+          <rect x={x + 12} y="70" width={40 + i * 12} height="5" rx="2.5" fill="#e8ddd0" opacity="0.45" />
           <rect x={x + 12} y="80" width={58 - i * 6} height="5" rx="2.5" fill="#d8bfa6" opacity="0.4" />
-          <rect x={x + 40} y="98" width="20" height="8" fill="#2c2738" />
+          <rect x={x + 40} y="98" width="20" height="8" fill="#3d3329" />
         </g>
       ))}
 
       {/* Voyant : rouge et clignotant s'il y a des signalements à traiter, vert sinon */}
       <circle cx="300" cy="22" r="7" fill={alerte ? "#e08a8a" : "#9fd8b0"} className={alerte ? "voyant-alerte" : undefined} />
-      <rect x="296" y="29" width="8" height="6" rx="2" fill="#2c2738" />
+      <rect x="296" y="29" width="8" height="6" rx="2" fill="#3d3329" />
 
       {/* Lampe de bureau */}
       <path d="M 540 112 L 556 70 L 574 58" stroke="#d8bfa6" strokeWidth="3" fill="none" strokeLinecap="round" />
@@ -145,7 +147,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
 
   const monRole = statut.role || role;
   const permissions = statut.permissions || [];
-  const sallesVisibles = SALLES.filter((s) => permissions.includes(s.permission));
+  const sallesVisibles = SALLES.filter((s) => s.permission === "pays" ? monRole === "admin" : permissions.includes(s.permission));
   const nom = statut.nom_affiche || statut.username;
   const salleActive = SALLES.find((s) => s.cle === salle);
   const alerte =
@@ -186,6 +188,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
           {salle === "equipe" && <SalleEquipe sessionToken={sessionToken} />}
           {salle === "annonces" && <SalleAnnonces sessionToken={sessionToken} />}
           {salle === "proviseurs" && <SalleProviseurs sessionToken={sessionToken} />}
+          {salle === "pays" && monRole === "admin" && <SallePays sessionToken={sessionToken} />}
         </>
       ) : (
         <>

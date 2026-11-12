@@ -38,11 +38,11 @@ export default function Notifications({ sessionToken }) {
       try {
         const res = await listerNotifications(sessionToken);
         if (!actif) return;
-        const mentions = (res.notifications || []).map(n => ({ ...n, id: `mention-${n.id}`, notificationId: n.id, type: "mention" }));
+        const persistantes = (res.notifications || []).map(n => ({ ...n, id: `persist-${n.id}`, notificationId: n.id, eventType: n.type, type: "persistante" }));
         setNotifs(prev => {
-          const autres = prev.filter(n => n.type !== "mention");
+          const autres = prev.filter(n => n.type !== "persistante");
           const deja = new Set(autres.map(n => n.id));
-          return [...mentions.filter(n => !deja.has(n.id)), ...autres].slice(0, 50);
+          return [...persistantes.filter(n => !deja.has(n.id)), ...autres].slice(0, 50);
         });
       } catch {}
     };
@@ -129,7 +129,17 @@ export default function Notifications({ sessionToken }) {
   }
 
   function texteNotif(n) {
-    if (n.type === "mention") return `@${n.acteur} t’a mentionné dans une publication`;
+    if (n.type === "persistante") {
+      const nom = n.acteur_nom || n.acteur;
+      if (n.eventType === "mention") return `${nom} t’a mentionné`;
+      if (n.eventType === "like_publication") return `${nom} a aimé ta publication`;
+      if (n.eventType === "commentaire") return `${nom} a commenté ta publication`;
+      if (n.eventType === "reponse_commentaire") return `${nom} a répondu à ton commentaire`;
+      if (n.eventType === "like_commentaire") return `${nom} a aimé ton commentaire`;
+      if (n.eventType === "avis_doc") return `${nom} a évalué un document de ta Library`;
+      if (n.eventType === "commentaire_doc") return `${nom} a donné son avis sur un document de ta Library`;
+      return `${nom} a interagi avec ton contenu`;
+    }
     if (n.type === "nouvelle_demande") return `${n.demandeur} a besoin d'aide en ${n.sujet}`;
     if (n.type === "participant_rejoint") return `${n.username} a rejoint ta demande d'aide`;
     if (n.type === "nouveau_membre_classe") return `${n.nouveau_membre} a rejoint ta classe "${n.nom_classe}"`;
@@ -153,14 +163,15 @@ export default function Notifications({ sessionToken }) {
             </div>
           ) : (
             notifs.map((n) =>
-              n.type === "mention" ? (
-                <button key={n.id} type="button" className="ligne-notif" onClick={async () => {
+              n.type === "persistante" ? (
+                <button key={n.id} type="button" className={`ligne-notif ${n.lu ? "" : "notification-non-lue"}`} onClick={async () => {
                   if (!n.lu) marquerNotificationLue(sessionToken, n.notificationId).catch(() => {});
                   setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, lu: true } : x));
                   setOuvert(false);
-                  window.dispatchEvent(new CustomEvent("grind-open-post", { detail: n.post_id }));
+                  if (n.resource_type === "library_document") window.dispatchEvent(new CustomEvent("grind-open-library-doc", { detail: n.resource_id }));
+                  else if (n.post_id) window.dispatchEvent(new CustomEvent("grind-navigate-post", { detail: { post_id: n.post_id, commentaire_id: n.commentaire_id || null } }));
                 }}>
-                  <i className="fa-solid fa-at"></i><span>{texteNotif(n)}<small>{n.extrait || "Ouvrir la publication"}</small></span>
+                  <i className={n.eventType === "mention" ? "fa-solid fa-at" : n.eventType?.includes("like") || n.eventType === "avis_doc" ? "fa-solid fa-heart" : "fa-solid fa-comment"}></i><span>{texteNotif(n)}<small>{n.extrait || "Ouvrir le contenu"}</small></span>
                 </button>
               ) : n.type === "annonce" ? (
                 <button key={n.id} type="button" className={`ligne-notif ligne-notif-annonce ${n.important ? "ligne-notif-importante" : ""}`} onClick={() => ouvrirAnnonce(n)}>
