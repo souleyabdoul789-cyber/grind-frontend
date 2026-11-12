@@ -33,7 +33,12 @@ jobs:
           node-version: '22'
 
       - name: Prepare Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: '15859902'
+          accept-android-sdk-licenses: 'true'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: ''
 
       # Le keystore debug est conservé entre les builds afin que le SHA-1 Google
       # Android reste stable. Cette clé sert uniquement aux APK de test.
@@ -69,6 +74,18 @@ jobs:
 
       - name: Generate Capacitor Android project
         run: npx cap add android
+
+      - name: Configure Firebase Android (optional until FCM is configured)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            python3 -m json.tool android/app/google-services.json >/dev/null
+            echo "Firebase Android configuration installed."
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON is not configured. The APK can be built, but Android push registration will not work until Firebase is configured."
+          fi
 
       - name: Sync Capacitor plugins and web bundle
         run: npx cap sync android

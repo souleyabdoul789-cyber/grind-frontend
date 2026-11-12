@@ -756,7 +756,18 @@ export function reinitialiserMotDePasse(jetonVerification, motDePasse) {
   });
 }
 
-export function deconnecterGrind(sessionToken) {
+export function enregistrerJetonPush(sessionToken, token) {
+  return poster(`${GRIND_URL}/api/push/register`, { session_token: sessionToken, token, platform: "android" });
+}
+export function retirerJetonPush(sessionToken, token) {
+  return poster(`${GRIND_URL}/api/push/unregister`, { session_token: sessionToken, token, platform: "android" });
+}
+export async function deconnecterGrind(sessionToken) {
+  const pushToken = localStorage.getItem("grind_push_token");
+  if (pushToken) {
+    try { await retirerJetonPush(sessionToken, pushToken); } catch {}
+    localStorage.removeItem("grind_push_token");
+  }
   return poster(`${GRIND_URL}/api/compte/deconnexion`, { session_token: sessionToken });
 }
 
@@ -846,9 +857,10 @@ export async function listerCategoriesLibrary() {
   const r = await fetchApi(`${GRIND_URL}/api/library/categories`);
   const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Catégories indisponibles."); return d;
 }
-export async function listerPlaylistsLibrary(sessionToken, categorie = "", q = "") {
+export async function listerPlaylistsLibrary(sessionToken, categorie = "", q = "", offset = 0, limit = 100) {
   const u = new URL(`${GRIND_URL}/api/library/playlists`);
   u.searchParams.set("session_token", sessionToken); if (categorie) u.searchParams.set("categorie", categorie); if (q) u.searchParams.set("q", q);
+  u.searchParams.set("offset", String(offset)); u.searchParams.set("limit", String(limit));
   const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Playlists indisponibles."); return d;
 }
 export async function creerPlaylistLibrary(sessionToken, payload) {
@@ -859,17 +871,20 @@ export async function uploaderDocumentLibrary(sessionToken, categorie, fichier, 
   f.append("titre", titre || fichier.name); f.append("description", description || ""); if (playlistId) f.append("playlist_id", String(playlistId));
   const r = await fetchApi(`${GRIND_URL}/api/library/documents`, { method: "POST", body: f }); const d = await r.json(); if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Envoi du document impossible."); return d;
 }
-export async function rechercherDocumentsLibrary(sessionToken, q = "", categorie = "") {
+export async function rechercherDocumentsLibrary(sessionToken, q = "", categorie = "", offset = 0, limit = 100) {
   const u = new URL(`${GRIND_URL}/api/library/documents`);
   u.searchParams.set("session_token", sessionToken);
   if (q) u.searchParams.set("q", q);
-  if (categorie) u.searchParams.set("categorie", categorie);
+  u.searchParams.set("offset", String(offset));
+  u.searchParams.set("limit", String(limit));
   const r = await fetchApi(u); const d = await r.json();
   if (!r.ok) throw new Error(d.detail || "Recherche de documents indisponible.");
   return d;
 }
-export async function listerDocumentsLibrary(sessionToken, playlistId, q = "") {
-  const u = new URL(`${GRIND_URL}/api/library/playlists/${playlistId}/documents`); u.searchParams.set("session_token", sessionToken); if (q) u.searchParams.set("q", q);
+export async function listerDocumentsLibrary(sessionToken, playlistId, q = "", offset = 0, limit = 100) {
+  const u = new URL(`${GRIND_URL}/api/library/playlists/${playlistId}/documents`);
+  u.searchParams.set("session_token", sessionToken); if (q) u.searchParams.set("q", q);
+  u.searchParams.set("offset", String(offset)); u.searchParams.set("limit", String(limit));
   const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Documents indisponibles."); return d;
 }
 export function voterDocumentLibrary(sessionToken, id, valeur) { return poster(`${GRIND_URL}/api/library/documents/${id}/vote`, { session_token: sessionToken, valeur }); }

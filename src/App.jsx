@@ -53,8 +53,19 @@ export default function App() {
       setDiscussionAouvrir(cible);
       setOnglet("classes");
     };
+    const ouvrirClasse = () => setOnglet("classes");
+    const ouvrirSupport = () => setOnglet("reglages");
+    const ouvrirAide = () => setOnglet("fil");
     window.addEventListener("grind-open-discussion", ouvrirDiscussion);
-    return () => window.removeEventListener("grind-open-discussion", ouvrirDiscussion);
+    window.addEventListener("grind-open-class", ouvrirClasse);
+    window.addEventListener("grind-open-support", ouvrirSupport);
+    window.addEventListener("grind-open-help-request", ouvrirAide);
+    return () => {
+      window.removeEventListener("grind-open-discussion", ouvrirDiscussion);
+      window.removeEventListener("grind-open-class", ouvrirClasse);
+      window.removeEventListener("grind-open-support", ouvrirSupport);
+      window.removeEventListener("grind-open-help-request", ouvrirAide);
+    };
   }, []);
 
   async function initialiserSession(token, donnees = {}) {
