@@ -34,6 +34,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [fichierFinal, setFichierFinal] = useState(null); // Blob (photo) ou File original (video)
   const [documentFinal, setDocumentFinal] = useState(null);
   const [documentCategorie, setDocumentCategorie] = useState("");
+  const [documentCategorieAutre, setDocumentCategorieAutre] = useState("");
   const [etablissementChoisi, setEtablissementChoisi] = useState("");
   const [decoupeVideo, setDecoupeVideo] = useState(null);
   const [apercuMedia, setApercuMedia] = useState(null);
@@ -134,7 +135,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     if (!valide || fichier.size > 15 * 1024 * 1024) {
       setErreur("Ajoute un PDF ou DOCX de 15 Mo maximum.");
     } else {
-      setDocumentFinal(fichier); setDocumentCategorie(""); setErreur(null); setMenuPiecesOuvert(false);
+      setDocumentFinal(fichier); setDocumentCategorie(""); setDocumentCategorieAutre(""); setErreur(null); setMenuPiecesOuvert(false);
     }
     e.target.value = "";
   }
@@ -160,7 +161,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   function retirerMedia() {
     setFichiersGalerie([]); setFichierBrut(null); setFichierFinal(null); setDecoupeVideo(null); setApercuMedia(null);
   }
-  function retirerDocument() { setDocumentFinal(null); setDocumentCategorie(""); }
+  function retirerDocument() { setDocumentFinal(null); setDocumentCategorie(""); setDocumentCategorieAutre(""); }
 
   async function gererCreation(e) {
     e.preventDefault();
@@ -170,8 +171,8 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
       setErreur("Indique une date limite pour ce problème");
       return;
     }
-    if (documentFinal && !categoriesLibrary.includes(documentCategorie.trim())) {
-      setErreur("Choisis une matière existante dans le catalogue pour classer ce document dans la Library.");
+    if (documentFinal && documentCategorie === "__autre__" && !documentCategorieAutre.trim()) {
+      setErreur("Saisis le nom de la catégorie ou choisis une autre option.");
       return;
     }
 
@@ -204,7 +205,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
         media_url: media.media_url, media_type: media.media_type, media_items,
         document_url: document.document_url, document_name: document.document_name,
         document_type: document.document_type,
-        document_categorie: documentFinal ? documentCategorie.trim() : undefined,
+        document_categorie: documentFinal ? (documentCategorie === "__autre__" ? documentCategorieAutre.trim() : documentCategorie.trim()) : undefined,
         etablissement_id: modeInstitutionnel && etablissementChoisi ? Number(etablissementChoisi) : undefined,
       });
 
@@ -315,10 +316,14 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
             {!documentFinal ? null : <div className="apercu-document publication-document-selected"><i className="fa-solid fa-file-lines" /><span>{documentFinal.name}</span><button type="button" onClick={retirerDocument} aria-label="Retirer le document"><i className="fa-solid fa-xmark" /></button></div>}
           </div>
           {documentFinal && <div className="publication-document-categorie">
-            <label htmlFor="publication-library-category"><i className="fa-solid fa-book-open" /> Classer ce document dans la Library</label>
-            <input id="publication-library-category" type="text" list="publication-library-categories" value={documentCategorie} onChange={event => setDocumentCategorie(event.target.value)} placeholder="Saisis ou choisis une matière…" autoComplete="off" required />
-            <datalist id="publication-library-categories">{categoriesLibrary.map(cat => <option key={cat} value={cat} />)}</datalist>
-            <small>{erreurCatalogueLibrary || (categoriesLibrary.length ? "Le document sera automatiquement ajouté au playsit public de cette matière après publication." : "Chargement du catalogue des matières…")}</small>
+            <label htmlFor="publication-library-category"><i className="fa-solid fa-book-open" /> Catégorie du document <span>(facultatif)</span></label>
+            <select id="publication-library-category" value={documentCategorie} onChange={event => { setDocumentCategorie(event.target.value); setDocumentCategorieAutre(""); }}>
+              <option value="">Aucune catégorie</option>
+              {categoriesLibrary.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              <option value="__autre__">Autre — saisir une catégorie</option>
+            </select>
+            {documentCategorie === "__autre__" && <input value={documentCategorieAutre} onChange={event => setDocumentCategorieAutre(event.target.value)} maxLength={120} placeholder="Saisis librement la catégorie du document…" />}
+            <small>{erreurCatalogueLibrary || "Le document sera ajouté à la Library publique. La catégorie décrit le document ; elle ne détermine pas son playsit."}</small>
           </div>}
 
           {categorie === "probleme" && !modeInstitutionnel && (

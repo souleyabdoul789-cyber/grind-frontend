@@ -583,6 +583,10 @@ export function adminLeverSanction(sessionToken, username) {
   return poster(`${GRIND_URL}/api/admin/lever-sanction`, { session_token: sessionToken, username });
 }
 
+export function adminSupprimerCompte(sessionToken, username, confirmationUsername) {
+  return poster(`${GRIND_URL}/api/admin/comptes/supprimer`, { session_token: sessionToken, username, confirmation_username: confirmationUsername });
+}
+
 // ---------- Bureau d'administration : équipe, certification, annonces ----------
 
 export function adminApercu(sessionToken) {
@@ -851,7 +855,7 @@ export async function creerPlaylistLibrary(sessionToken, payload) {
   return poster(`${GRIND_URL}/api/library/playlists`, { session_token: sessionToken, ...payload });
 }
 export async function uploaderDocumentLibrary(sessionToken, categorie, fichier, playlistId, titre, description) {
-  const f = new FormData(); f.append("session_token", sessionToken); f.append("categorie", categorie); f.append("file", fichier, fichier.name);
+  const f = new FormData(); f.append("session_token", sessionToken); if (categorie) f.append("categorie", categorie); f.append("file", fichier, fichier.name);
   f.append("titre", titre || fichier.name); f.append("description", description || ""); if (playlistId) f.append("playlist_id", String(playlistId));
   const r = await fetchApi(`${GRIND_URL}/api/library/documents`, { method: "POST", body: f }); const d = await r.json(); if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Envoi du document impossible."); return d;
 }

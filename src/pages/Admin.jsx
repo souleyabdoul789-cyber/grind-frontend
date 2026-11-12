@@ -5,6 +5,7 @@ import {
   adminChercherUtilisateurs,
   adminSanctionner,
   adminLeverSanction,
+  adminSupprimerCompte,
 } from "../api.js";
 import LecteurMedia from "../components/LecteurMedia.jsx";
 import BadgeCompte from "../components/BadgeCompte.jsx";
@@ -227,6 +228,8 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
   const [examenPossible, setExamenPossible] = useState(true);
   const [envoi, setEnvoi] = useState(false);
   const [erreur, setErreur] = useState(null);
+  const [suppressionOuverte, setSuppressionOuverte] = useState(false);
+  const [confirmationSuppression, setConfirmationSuppression] = useState("");
 
   async function sanctionner(type) {
     if (!motif.trim()) {
@@ -254,6 +257,20 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
     setEnvoi(true);
     try {
       await adminLeverSanction(sessionToken, u.username);
+      onChange();
+    } catch (err) {
+      setErreur(err.message);
+      setEnvoi(false);
+    }
+  }
+
+  async function supprimerDefinitivement() {
+    if (confirmationSuppression.trim() !== u.username) return;
+    setEnvoi(true);
+    setErreur(null);
+    try {
+      await adminSupprimerCompte(sessionToken, u.username, confirmationSuppression.trim());
+      setSuppressionOuverte(false);
       onChange();
     } catch (err) {
       setErreur(err.message);
@@ -336,6 +353,27 @@ function CarteUtilisateur({ u, sessionToken, role, onChange }) {
         </div>
       )}
 
+      {role === "admin" && !suppressionOuverte && (
+        <div className="actions-admin" style={{ marginTop: 12 }}>
+          <button type="button" className="bouton-admin bouton-admin-danger" onClick={() => { setConfirmationSuppression(""); setSuppressionOuverte(true); }} disabled={envoi}>
+            <i className="fa-solid fa-trash-can" /> Supprimer définitivement le compte
+          </button>
+        </div>
+      )}
+      {suppressionOuverte && role === "admin" && (
+        <div className="panneau-sanction" style={{ border: "1px solid var(--danger, #b94a48)", marginTop: 12 }}>
+          <strong>Suppression irréversible</strong>
+          <p className="info">Le compte, ses publications, commentaires, documents partagés, playsits créés, classes créées, feuilles, messages, réactions, notifications et sessions seront supprimés. Les adhésions de ce compte aux classes des autres seront retirées.</p>
+          <label htmlFor={`confirmation-suppression-${u.username}`}>Saisis exactement <strong>{u.username}</strong> pour confirmer.</label>
+          <input id={`confirmation-suppression-${u.username}`} value={confirmationSuppression} onChange={e => setConfirmationSuppression(e.target.value)} autoComplete="off" />
+          <div className="rangee-boutons">
+            <button type="button" className="bouton-admin bouton-admin-doux" onClick={() => setSuppressionOuverte(false)} disabled={envoi}>Annuler</button>
+            <button type="button" className="bouton-admin bouton-admin-danger" onClick={supprimerDefinitivement} disabled={envoi || confirmationSuppression.trim() !== u.username}>
+              {envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Confirmer la suppression définitive"}
+            </button>
+          </div>
+        </div>
+      )}
       {erreur && <div className="erreur" style={{ marginTop: 8 }}>{erreur}</div>}
     </div>
   );
