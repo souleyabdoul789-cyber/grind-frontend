@@ -1,15 +1,16 @@
 import { useState, useEffect } from "react";
-import { listerPosts, creerPost, uploaderMedia } from "../api.js";
+import { listerPosts, creerPost, uploaderMedia, uploaderDocument } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
 import EditeurPhoto from "../components/EditeurPhoto.jsx";
 import EditeurVideo from "../components/EditeurVideo.jsx";
 import EtatVide from "../components/EtatVide.jsx";
 import ProfilPublic from "../components/ProfilPublic.jsx";
+import BandeauAnnonces from "../components/BandeauAnnonces.jsx";
 
 const LIMITE_LEGENDE = 500;
 
-export default function FilActu({ sessionToken, monUsername }) {
+export default function FilActu({ sessionToken, monUsername, modeInstitutionnel = false, etablissements = [] }) {
   const [profilConsulte, setProfilConsulte] = useState(null);
   const [posts, setPosts] = useState([]);
   const [filtre, setFiltre] = useState(null);
@@ -23,12 +24,19 @@ export default function FilActu({ sessionToken, monUsername }) {
   const [fichierBrut, setFichierBrut] = useState(null);
   const [editeurOuvert, setEditeurOuvert] = useState(null); // "photo" | "video" | null
   const [fichierFinal, setFichierFinal] = useState(null); // Blob (photo) ou File original (video)
+  const [documentFinal, setDocumentFinal] = useState(null);
+  const [etablissementChoisi, setEtablissementChoisi] = useState("");
   const [decoupeVideo, setDecoupeVideo] = useState(null);
   const [apercuMedia, setApercuMedia] = useState(null);
 
   const [uploadEnCours, setUploadEnCours] = useState(false);
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
+
+  useEffect(() => {
+    const url = apercuMedia?.url;
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [apercuMedia?.url]);
 
   async function charger() {
     setChargement(true);
@@ -41,21 +49,46 @@ export default function FilActu({ sessionToken, monUsername }) {
     charger();
   }, [filtre]);
 
+  useEffect(() => {
+    const ouvrirPost = (event) => {
+      const id = event.detail;
+      const cible = document.getElementById(`grind-post-${id}`);
+      if (cible) { cible.scrollIntoView({ behavior: "smooth", block: "center" }); cible.classList.add("post-cible-notification"); window.setTimeout(() => cible.classList.remove("post-cible-notification"), 1800); }
+    };
+    window.addEventListener("grind-open-post", ouvrirPost);
+    return () => window.removeEventListener("grind-open-post", ouvrirPost);
+  }, [posts]);
+
   function gererChoixFichier(e) {
     const fichier = e.target.files[0];
     if (!fichier) return;
     setFichierBrut(fichier);
-    setEditeurOuvert(fichier.type.startsWith("video/") ? "video" : "photo");
+    if (fichier.type.startsWith("video/")) setEditeurOuvert("video");
+    else if (fichier.type.startsWith("image/")) setEditeurOuvert("photo");
+    else if (["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(fichier.type) ||
+      ((fichier.type === "" || fichier.type === "application/octet-stream") && /\.(pdf|docx)$/i.test(fichier.name))) {
+      setDocumentFinal(fichier);
+      setFichierFinal(null);
+      setApercuMedia({ estDocument: true, nom: fichier.name });
+    } else {
+      setFichierBrut(null);
+      setDocumentFinal(null);
+      setFichierFinal(null);
+      setApercuMedia(null);
+      setErreur("Format non accepté. Choisis une image, une vidéo, un PDF ou un DOCX.");
+    }
   }
 
   function validerEditionPhoto(blob) {
     setFichierFinal(blob);
+    setDocumentFinal(null);
     setApercuMedia({ url: URL.createObjectURL(blob), estVideo: false });
     setEditeurOuvert(null);
   }
 
   function validerEditionVideo({ debut, fin }) {
     setFichierFinal(fichierBrut);
+    setDocumentFinal(null);
     setDecoupeVideo({ debut, fin });
     setApercuMedia({ url: URL.createObjectURL(fichierBrut), estVideo: true });
     setEditeurOuvert(null);
@@ -69,6 +102,7 @@ export default function FilActu({ sessionToken, monUsername }) {
   function retirerMedia() {
     setFichierBrut(null);
     setFichierFinal(null);
+    setDocumentFinal(null);
     setDecoupeVideo(null);
     setApercuMedia(null);
   }
@@ -85,19 +119,23 @@ export default function FilActu({ sessionToken, monUsername }) {
     setEnvoiEnCours(true);
     try {
       let media = {};
+      let document = {};
       if (fichierFinal) {
         setUploadEnCours(true);
         media = await uploaderMedia(sessionToken, fichierFinal, decoupeVideo);
-        setUploadEnCours(false);
+      } else if (documentFinal) {
+        setUploadEnCours(true);
+        document = await uploaderDocument(sessionToken, documentFinal);
       }
+      setUploadEnCours(false);
 
       const dateLimiteIso = categorie === "probleme" ? dateLimite.toISOString() : null;
       await creerPost(sessionToken, {
-        categorie,
-        contenu,
-        date_limite: dateLimiteIso,
-        media_url: media.media_url,
-        media_type: media.media_type,
+        categorie, contenu, date_limite: dateLimiteIso,
+        media_url: media.media_url, media_type: media.media_type,
+        document_url: document.document_url, document_name: document.document_name,
+        document_type: document.document_type,
+        etablissement_id: modeInstitutionnel && etablissementChoisi ? Number(etablissementChoisi) : undefined,
       });
 
       setContenu("");
@@ -119,6 +157,7 @@ export default function FilActu({ sessionToken, monUsername }) {
 
   return (
     <div className="fil-actu">
+      <BandeauAnnonces sessionToken={sessionToken} />
       <div className="filtres-fil">
         <button className={filtre === null ? "filtre-actif" : "filtre"} onClick={() => setFiltre(null)}>
           Tout
@@ -142,19 +181,19 @@ export default function FilActu({ sessionToken, monUsername }) {
       </div>
 
       {editeurOuvert === "photo" && (
-        <div className="carte-post formulaire-post">
+        <div className="carte-post formulaire-post publication-composer">
           <EditeurPhoto fichier={fichierBrut} onValider={validerEditionPhoto} onAnnuler={annulerEdition} />
         </div>
       )}
 
       {editeurOuvert === "video" && (
-        <div className="carte-post formulaire-post">
+        <div className="carte-post formulaire-post publication-composer">
           <EditeurVideo fichier={fichierBrut} onValider={validerEditionVideo} onAnnuler={annulerEdition} />
         </div>
       )}
 
       {formulaireOuvert && !editeurOuvert && (
-        <form className="carte-post formulaire-post" onSubmit={gererCreation}>
+        <form className={`carte-post formulaire-post publication-composer ${modeInstitutionnel ? "publication-institutionnelle" : ""}`} onSubmit={gererCreation}>
           <div className="choix-categorie">
             <button
               type="button"
@@ -163,15 +202,16 @@ export default function FilActu({ sessionToken, monUsername }) {
             >
               <i className="fa-solid fa-star"></i> Démonstration
             </button>
-            <button
+            {!modeInstitutionnel && <button
               type="button"
               className={categorie === "probleme" ? "chip chip-actif" : "chip"}
               onClick={() => setCategorie("probleme")}
             >
               <i className="fa-solid fa-circle-question"></i> Problème
-            </button>
+            </button>}
           </div>
 
+          {modeInstitutionnel && etablissements.length > 1 && <label className="select-etablissement-post">Publier dans <select value={etablissementChoisi} onChange={(e) => setEtablissementChoisi(e.target.value)} required><option value="">Choisir un établissement</option>{etablissements.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}</select></label>}
           <textarea
             rows={3}
             maxLength={LIMITE_LEGENDE}
@@ -184,7 +224,9 @@ export default function FilActu({ sessionToken, monUsername }) {
 
           {apercuMedia ? (
             <div className="apercu-media-form">
-              {apercuMedia.estVideo ? (
+              {apercuMedia.estDocument ? (
+                <div className="apercu-document"><i className="fa-solid fa-file-lines"></i><span>{apercuMedia.nom}</span></div>
+              ) : apercuMedia.estVideo ? (
                 <video src={apercuMedia.url} muted playsInline />
               ) : (
                 <img src={apercuMedia.url} alt="" />
@@ -196,12 +238,12 @@ export default function FilActu({ sessionToken, monUsername }) {
           ) : (
             <label className="bouton-ajouter-media">
               <i className="fa-solid fa-paperclip"></i>
-              Ajouter une photo ou vidéo
-              <input type="file" accept="image/*,video/*" onChange={gererChoixFichier} hidden />
+              Ajouter un média ou document
+              <input type="file" accept="image/*,video/*,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={gererChoixFichier} hidden />
             </label>
           )}
 
-          {categorie === "probleme" && (
+          {categorie === "probleme" && !modeInstitutionnel && (
             <>
               <label><i className="fa-solid fa-stopwatch"></i> Date limite pour être aidé</label>
               <SelecteurDate valeur={dateLimite} onChange={setDateLimite} />
@@ -240,11 +282,13 @@ export default function FilActu({ sessionToken, monUsername }) {
             onSupprime={(id) => setPosts((prev) => prev.filter((p) => p.id !== id))}
             onClicAuteur={setProfilConsulte}
             onChange={() => charger()}
+            modeInstitutionnel={modeInstitutionnel}
+            etablissements={etablissements}
           />
         ))
       )}
 
-      <button className="bouton-flottant" onClick={() => setFormulaireOuvert(!formulaireOuvert)} type="button">
+      <button className={`bouton-flottant ${modeInstitutionnel ? "bouton-flottant-institution" : ""}`} onClick={() => setFormulaireOuvert(!formulaireOuvert)} type="button" aria-label="Nouvelle publication">
         <i className={formulaireOuvert ? "fa-solid fa-xmark" : "fa-solid fa-plus"}></i>
       </button>
     </div>

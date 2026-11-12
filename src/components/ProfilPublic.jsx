@@ -62,10 +62,19 @@ export default function ProfilPublic({ username, onRetour, sessionToken, monUser
       </button>
 
       <div className="carte-post entete-profil">
-        <div className="apercu-avatar" style={{ padding: 0, background: "none", marginBottom: 8 }}>
-          <AvatarPersonnage config={avatarConfig} taille={120} />
-        </div>
-        <div className="auteur-post" style={{ fontSize: 20 }}>{username}<BadgeCompte badge={profil?.badge} taille={18} /></div>
+        {profil?.proviseur ? (
+          <div className="profil-prov-logo" aria-label="Logo de l'établissement">
+            {profil.proviseur.logo_url
+              ? <img src={profil.proviseur.logo_url} alt={`Logo de ${profil.proviseur.etablissements?.[0] || "l'établissement"}`} />
+              : <i className="fa-solid fa-school" aria-hidden="true"></i>}
+          </div>
+        ) : (
+          <div className="apercu-avatar" style={{ padding: 0, background: "none", marginBottom: 8 }}>
+            <AvatarPersonnage config={avatarConfig} taille={120} />
+          </div>
+        )}
+        <div className="auteur-post" style={{ fontSize: 20 }}>{profil?.proviseur ? `${profil.proviseur.nom_etablissement || profil.proviseur.etablissements?.[0] || "Établissement"}` : username}<BadgeCompte badge={profil?.badge} taille={18} />{profil?.proviseur && <span className="chip">@{username}</span>}</div>
+        {profil?.proviseur?.etablissements?.map((nom, i) => <div className="info" key={`${nom}-${i}`}><i className="fa-solid fa-school"></i> {nom}</div>)}
         {sessionToken && username !== monUsername && (
           <div className="menu-profil">
             <ActionsCompte sessionToken={sessionToken} username={username} direction="bas" />
@@ -84,6 +93,8 @@ export default function ProfilPublic({ username, onRetour, sessionToken, monUser
               <i className="fa-solid fa-graduation-cap"></i>
               <span>{profil.niveau}</span>
             </div>
+            {profil.filiere && <div className="ligne-info"><i className="fa-solid fa-book-open"></i><span>{profil.filiere}</span></div>}
+            {profil.etablissement && <div className="ligne-info"><i className="fa-solid fa-school"></i><span>{profil.etablissement}</span></div>}
           </div>
 
           {difficultesListe.length > 0 && (

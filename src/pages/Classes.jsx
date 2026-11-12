@@ -9,6 +9,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [classes, setClasses] = useState([]);
   const [chargement, setChargement] = useState(true);
   const [salleActive, setSalleActive] = useState(null); // classe_id ou null
+  const [ouvertureSalleId, setOuvertureSalleId] = useState(null);
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
   const [codeInvitation, setCodeInvitation] = useState(codeAttente || "");
@@ -46,6 +47,15 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     } finally {
       setEnvoiEnCours(false);
     }
+  }
+
+  function ouvrirSalle(classeId) {
+    if (ouvertureSalleId !== null) return;
+    setOuvertureSalleId(classeId);
+    window.setTimeout(() => {
+      setSalleActive(classeId);
+      setOuvertureSalleId(null);
+    }, 250);
   }
 
   function copierLien(code) {
@@ -142,7 +152,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
             placeholder="colle juste le code (pas besoin du lien entier)"
             required
           />
-          <button type="submit" disabled={envoiEnCours}>{envoiEnCours ? "..." : "Rejoindre"}</button>
+          <button type="submit" disabled={envoiEnCours}>{envoiEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Connexion...</> : "Rejoindre"}</button>
           {erreur && <div className="erreur"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
         </form>
       )}
@@ -204,8 +214,8 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
                 <i className="fa-solid fa-circle-pause"></i> Classe suspendue par l'administration de GRIND
               </div>
             ) : (
-              <button className="action-post" onClick={() => setSalleActive(c.classe_id)} type="button">
-                <i className="fa-solid fa-phone"></i> Entrer dans la classe
+              <button className="action-post" onClick={() => ouvrirSalle(c.classe_id)} disabled={ouvertureSalleId !== null} type="button">
+                {ouvertureSalleId === c.classe_id ? <><i className="fa-solid fa-spinner fa-spin"></i> Ouverture de la classe...</> : <><i className="fa-solid fa-phone"></i> Entrer dans la classe</>}
               </button>
             )}
           </div>

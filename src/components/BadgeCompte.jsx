@@ -14,11 +14,12 @@ const ROLES = {
 export default function BadgeCompte({ badge, taille = 14 }) {
   if (!badge) return null;
   const role = badge.role && ROLES[badge.role];
-  if (!role && !badge.certifie) return null;
+  if (!role && !badge.certifie && !badge.proviseur) return null;
 
   return (
     <span className="badges-compte" style={{ fontSize: taille }}>
       {role && <i className={`${role.icone} badge-compte ${role.classe}`} title={role.titre} aria-label={role.titre}></i>}
+      {badge.proviseur && <i className="fa-solid fa-school badge-compte badge-proviseur" title="Proviseur d'établissement autorisé" aria-label="Proviseur d'établissement autorisé"></i>}
       {badge.certifie && (
         <i className="fa-solid fa-circle-check badge-compte badge-certifie" title="Compte certifié" aria-label="Compte certifié"></i>
       )}

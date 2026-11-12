@@ -1,8 +1,5 @@
 // GRIND_URL = seul serveur que le frontend appelle directement.
-// Pluton (G-SOCIETY) n'est plus contacté ici : la clé G-SOCIETY est
-// collée manuellement par l'utilisateur au moment de l'inscription
-// GRIND, GRIND se charge lui-même de la vérifier auprès de Pluton
-// côté serveur.
+// Les comptes sont autonomes : aucune clé G-SOCIETY n'est demandée à l'inscription.
 export const GRIND_URL = import.meta.env.VITE_GRIND_URL || "https://grind-4vsz.onrender.com";
 
 async function poster(url, body) {
@@ -24,12 +21,11 @@ async function poster(url, body) {
 
 // ---------- Compte GRIND (propre à GRIND, distinct de G-SOCIETY) ----------
 
-export function inscrireGrind(username, email, password, apiKeyGSociety, cguAcceptees) {
+export function inscrireGrind(username, email, password, cguAcceptees) {
   return poster(`${GRIND_URL}/api/compte/signup`, {
     username,
     email,
     password,
-    api_key: apiKeyGSociety,
     cgu_acceptees: !!cguAcceptees,
   });
 }
@@ -38,14 +34,65 @@ export function connecterGrind(username, password) {
   return poster(`${GRIND_URL}/api/compte/login`, { username, password });
 }
 
+export function connecterGoogle(credential, username = null, cguAcceptees = false) {
+  return poster(`${GRIND_URL}/api/compte/google`, { credential, username, cgu_acceptees: !!cguAcceptees });
+}
+
+export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
+
+export function obtenirDeviceId() {
+  let id = localStorage.getItem("grind_device_id");
+  if (!id) {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    localStorage.setItem("grind_device_id", id);
+  }
+  return id;
+}
+
+export function associerCompteAppareil(sessionToken) {
+  return poster(`${GRIND_URL}/api/compte/appareils/associer`, { session_token: sessionToken, device_id: obtenirDeviceId() });
+}
+
+export function oublierCompteAppareil(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/compte/appareils/oublier`, { session_token: sessionToken, username, device_id: obtenirDeviceId() });
+}
+
+export function statutPin(sessionToken) {
+  return poster(`${GRIND_URL}/api/security/pin/status`, { session_token: sessionToken });
+}
+export function configurerPin(sessionToken, pin) {
+  return poster(`${GRIND_URL}/api/security/pin/configurer`, { session_token: sessionToken, pin });
+}
+export function verifierPin(sessionToken, pin) {
+  return poster(`${GRIND_URL}/api/security/pin/verifier`, { session_token: sessionToken, pin });
+}
+
+export function relockerPin(sessionToken) {
+  return poster(`${GRIND_URL}/api/security/pin/relocker`, { session_token: sessionToken });
+}
+
+export function reinitialiserPin(sessionToken, password, nouveauPin) {
+  return poster(`${GRIND_URL}/api/security/pin/reinitialiser`, { session_token: sessionToken, password, nouveau_pin: nouveauPin });
+}
+export function demanderReinitialisationPin(sessionToken) {
+  return poster(`${GRIND_URL}/api/security/pin/reinitialiser/demander`, { session_token: sessionToken });
+}
+export function reinitialiserPinParEmail(sessionToken, jetonVerification, nouveauPin) {
+  return poster(`${GRIND_URL}/api/security/pin/reinitialiser/email`, { session_token: sessionToken, jeton_verification: jetonVerification, nouveau_pin: nouveauPin });
+}
+
 // ---------- Profil GRIND (questionnaire) ----------
 
-export function enregistrerProfil(sessionToken, { age, pays, niveau, difficultes }) {
+export function enregistrerProfil(sessionToken, { age, pays, niveau, filiere, etablissement, difficultes }) {
   return poster(`${GRIND_URL}/api/profil`, {
     session_token: sessionToken,
     age,
     pays,
     niveau,
+    filiere,
+    etablissement,
     difficultes,
   });
 }
@@ -60,56 +107,49 @@ export async function listerPosts(categorie, sessionToken) {
   return res.json();
 }
 
-export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type }) {
+export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, document_url, document_name, document_type, etablissement_id }) {
   return poster(`${GRIND_URL}/api/posts`, {
-    session_token: sessionToken,
-    categorie,
-    contenu,
-    date_limite,
-    media_url,
-    media_type,
+    session_token: sessionToken, categorie, contenu, date_limite,
+    media_url, media_type, document_url, document_name, document_type, etablissement_id,
   });
 }
 
 // ---------- Média (upload direct vers Cloudinary) ----------
 
 export async function uploaderMedia(sessionToken, fichier, decoupeVideo) {
-  const sigRes = await fetch(`${GRIND_URL}/api/media/signature-upload`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      session_token: sessionToken,
-      debut_video: decoupeVideo?.debut,
-      fin_video: decoupeVideo?.fin,
-    }),
-  });
-  const sig = await sigRes.json();
-  if (!sigRes.ok) throw new Error(sig.detail || "Impossible de préparer l'upload");
-
-  if (fichier.size > sig.poids_max_mo * 1024 * 1024) {
-    throw new Error(`Fichier trop lourd (max ${sig.poids_max_mo} Mo)`);
+  if (!fichier) throw new Error("Choisis un média avant de publier.");
+  if (fichier.size > 25 * 1024 * 1024) throw new Error("Le média ne doit pas dépasser 25 Mo.");
+  const formulaire = new FormData();
+  formulaire.append("session_token", sessionToken);
+  formulaire.append("file", fichier, fichier.name || "media");
+  if (decoupeVideo?.debut !== undefined && decoupeVideo?.fin !== undefined) {
+    formulaire.append("debut_video", String(decoupeVideo.debut));
+    formulaire.append("fin_video", String(decoupeVideo.fin));
   }
+  const res = await fetch(`${GRIND_URL}/api/media/upload`, { method: "POST", body: formulaire });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Échec de l'envoi du média.");
+  return data;
+}
 
-  const estVideo = fichier.type.startsWith("video/");
-  const formData = new FormData();
-  formData.append("file", fichier, fichier.name || (estVideo ? "video.mp4" : "photo.jpg"));
-  formData.append("api_key", sig.api_key);
-  formData.append("timestamp", sig.timestamp);
-  formData.append("signature", sig.signature);
-  formData.append("folder", sig.folder);
-  formData.append("eager", sig.eager);
-
-  const urlCloudinary = `https://api.cloudinary.com/v1_1/${sig.cloud_name}/${estVideo ? "video" : "image"}/upload`;
-  const uploadRes = await fetch(urlCloudinary, { method: "POST", body: formData });
-  const resultat = await uploadRes.json();
-  if (!uploadRes.ok) throw new Error(resultat.error?.message || "Échec de l'upload");
-
-  // resultat.secure_url = fichier original brut, sans watermark.
-  // resultat.eager[0].secure_url = version transformée (compressée +
-  // watermark incrusté) — c'est celle-là qu'on veut afficher.
-  const urlFinale = resultat.eager?.[0]?.secure_url || resultat.secure_url;
-
-  return { media_url: urlFinale, media_type: estVideo ? "video" : "image" };
+export async function uploaderDocument(sessionToken, fichier) {
+  const formats = [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
+  const extension = String(fichier?.name || "").split(".").pop().toLowerCase();
+  const typeOk = formats.includes(fichier?.type) ||
+    (extension === "pdf" && (!fichier.type || fichier.type === "application/octet-stream")) ||
+    (extension === "docx" && (!fichier.type || fichier.type === "application/octet-stream"));
+  if (!fichier || !typeOk) throw new Error("Seuls les documents PDF et DOCX sont acceptés.");
+  if (fichier.size <= 0 || fichier.size > 15 * 1024 * 1024) throw new Error("Le document doit être non vide et ne pas dépasser 15 Mo.");
+  const formulaire = new FormData();
+  formulaire.append("session_token", sessionToken);
+  formulaire.append("file", fichier, fichier.name || "document");
+  const res = await fetch(`${GRIND_URL}/api/media/document`, { method: "POST", body: formulaire });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Échec de l'envoi du document.");
+  return data;
 }
 
 export function togglerLike(sessionToken, postId) {
@@ -364,8 +404,11 @@ export function adminCertifier(sessionToken, username, certifie) {
   return poster(`${GRIND_URL}/api/admin/certifier`, { session_token: sessionToken, username, certifie });
 }
 
-export function adminPublierAnnonce(sessionToken, titre, contenu) {
-  return poster(`${GRIND_URL}/api/admin/annonces/publier`, { session_token: sessionToken, titre, contenu });
+export function adminPublierAnnonce(sessionToken, { titre, contenu, media_url, media_type, document_url, document_name, document_type, important, epinglee }) {
+  return poster(`${GRIND_URL}/api/admin/annonces/publier`, {
+    session_token: sessionToken, titre, contenu, media_url, media_type,
+    document_url, document_name, document_type, important: !!important, epinglee: !!epinglee,
+  });
 }
 
 export function adminSupprimerAnnonce(sessionToken, annonceId) {
@@ -515,4 +558,72 @@ export async function catalogueScolaire() {
   if (!res.ok) throw new Error("Catalogue indisponible");
   _catalogue = await res.json();
   return _catalogue;
+}
+
+// ---------- Candidature proviseur / direction ----------
+
+export async function inscrireProviseur(formData) {
+  const res = await fetch(`${GRIND_URL}/api/proviseur/candidature`, { method: "POST", body: formData });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Candidature impossible");
+  return data;
+}
+
+export function obtenirMaCandidatureProviseur(sessionToken) {
+  return poster(`${GRIND_URL}/api/proviseur/moi`, { session_token: sessionToken });
+}
+
+
+export async function uploaderLogoProviseur(sessionToken, fichier) {
+  if (!fichier || !["image/jpeg", "image/png"].includes(fichier.type)) throw new Error("Le logo doit être une image JPEG ou PNG.");
+  if (fichier.size > 5 * 1024 * 1024) throw new Error("Le logo ne doit pas dépasser 5 Mo.");
+  const formulaire = new FormData();
+  formulaire.append("session_token", sessionToken);
+  formulaire.append("file", fichier, fichier.name || "logo.png");
+  const res = await fetch(`${GRIND_URL}/api/proviseur/logo/upload`, { method: "POST", body: formulaire });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Échec de l'envoi du logo.");
+  return data.logo_url;
+}
+
+export function changerLogoProviseur(sessionToken, logoUrl) {
+  return poster(`${GRIND_URL}/api/proviseur/logo`, { session_token: sessionToken, logo_url: logoUrl });
+}
+
+export function listerCandidaturesProviseurs(sessionToken, statut = "en_attente") {
+  return poster(`${GRIND_URL}/api/admin/proviseurs/liste`, { session_token: sessionToken, statut });
+}
+
+export function traiterCandidatureProviseur(sessionToken, { candidature_id, decision, etablissements, etablissement, note_admin, message_candidat, moderation_locale }) {
+  return poster(`${GRIND_URL}/api/admin/proviseurs/traiter`, {
+    session_token: sessionToken, candidature_id, decision, etablissements, etablissement, note_admin, message_candidat, moderation_locale,
+  });
+}
+
+export async function telechargerDocumentProviseur(sessionToken, documentId) {
+  const res = await fetch(`${GRIND_URL}/api/admin/proviseurs/document/${documentId}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(typeof data.detail === "string" ? data.detail : "Lecture du document impossible");
+  }
+  return res.blob();
+}
+
+
+export function modererPostInstitution(sessionToken, postId) {
+  return poster(`${GRIND_URL}/api/proviseur/posts/${postId}/moderation`, { session_token: sessionToken });
+}
+
+
+export function modifierNomProfil(sessionToken, nouveauUsername) {
+  return poster(`${GRIND_URL}/api/profil/nom-utilisateur`, { session_token: sessionToken, nouveau_username: nouveauUsername });
+}
+export function listerNotifications(sessionToken) {
+  return fetch(`${GRIND_URL}/api/notifications?session_token=${encodeURIComponent(sessionToken)}`).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Notifications indisponibles"); return d; });
+}
+export function marquerNotificationLue(sessionToken, id) {
+  return poster(`${GRIND_URL}/api/notifications/${id}/lue`, { session_token: sessionToken });
 }

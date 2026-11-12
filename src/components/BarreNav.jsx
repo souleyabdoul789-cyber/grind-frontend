@@ -14,7 +14,7 @@ const ENTREES_MENU = [
   { cle: "reglages", icone: "fa-solid fa-gear", label: "Paramètres", desc: "Contact, conditions, déconnexion" },
 ];
 
-export default function BarreNav({ sessionToken, monUsername, ongletActif, onChangerOnglet, estEquipe = false }) {
+export default function BarreNav({ sessionToken, monUsername, ongletActif, onChangerOnglet, estEquipe = false, onChangerCompte, changementCompteEnCours = false }) {
   const onglets = estEquipe
     ? [...ONGLETS, { cle: "admin", icone: "fa-solid fa-building-shield", label: "Bureau" }]
     : ONGLETS;
@@ -27,6 +27,7 @@ export default function BarreNav({ sessionToken, monUsername, ongletActif, onCha
           <span>GRIND</span>
         </div>
         <div className="barre-nav-droite">
+          {onChangerCompte && <button className="bouton-changer-compte" type="button" onClick={onChangerCompte} disabled={changementCompteEnCours} title="Changer de compte" aria-label="Changer de compte">{changementCompteEnCours ? <i className="fa-solid fa-spinner fa-spin"></i> : <i className="fa-solid fa-users"></i>}</button>}
           <Notifications sessionToken={sessionToken} />
           <MenuPrincipal
             sessionToken={sessionToken}

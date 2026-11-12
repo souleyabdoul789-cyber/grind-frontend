@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  connecterGrind, inscrireGrind, motDePasseOublie, associerEmail,
+  connecterGrind, inscrireGrind, motDePasseOublie, associerEmail, connecterGoogle, GOOGLE_CLIENT_ID, relockerPin,
 } from "../api.js";
 import FondAnime from "../components/FondAnime.jsx";
 import PageCgu from "../components/PageCgu.jsx";
@@ -8,8 +8,8 @@ import EcranSanction from "../components/EcranSanction.jsx";
 import ChampAvecIcone from "../components/ChampAvecIcone.jsx";
 import EtapeVerification from "../components/EtapeVerification.jsx";
 import EtapeNouveauMotDePasse, { IndicateurForce } from "../components/EtapeNouveauMotDePasse.jsx";
+import CandidatureProviseur from "./CandidatureProviseur.jsx";
 
-const URL_GSOCIETY = "https://g-society.onrender.com/";
 
 /**
  * Connexion — entrée de GRIND.
@@ -28,24 +28,82 @@ export default function Connexion({ onConnecte }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
-  const [apiKey, setApiKey] = useState("");
   const [cgu, setCgu] = useState(false);
   const [cguOuvertes, setCguOuvertes] = useState(false);
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState(null);
   const [message, setMessage] = useState(null);
   const [sanction, setSanction] = useState(null);
+  const [credentialGoogle, setCredentialGoogle] = useState(null);
+  const [usernameGoogle, setUsernameGoogle] = useState("");
+  const [accountsRemembered, setAccountsRemembered] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("grind_accounts") || "[]"); } catch { return []; }
+  });
+  const googleButtonRef = useRef(null);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || !googleButtonRef.current) return;
+    const render = () => {
+      if (!window.google?.accounts?.id || !googleButtonRef.current) return;
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async (response) => {
+          setErreur(null); setChargement(true);
+          try {
+            const result = await connecterGoogle(response.credential);
+            if (result.username_requis) setCredentialGoogle(response.credential);
+            else terminer(result);
+          } catch (err) { setErreur(err.message); }
+          finally { setChargement(false); }
+        },
+      });
+      window.google.accounts.id.renderButton(googleButtonRef.current, { theme: "outline", size: "large", shape: "pill", text: "continue_with", width: 280 });
+    };
+    if (window.google?.accounts?.id) { render(); return; }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client"; script.async = true; script.defer = true;
+    script.onload = render; document.head.appendChild(script);
+    return () => { if (script.parentNode) script.parentNode.removeChild(script); };
+  }, [mode]);
 
   function terminer(res) {
     localStorage.setItem("grind_session_token", res.session_token);
     localStorage.setItem("grind_username", res.username);
     localStorage.setItem("grind_role", res.role || "");
+    localStorage.setItem("grind_type_compte", res.type_compte || "eleve");
+    if (res.type_compte === "proviseur") localStorage.setItem("grind_profil_complet", "1");
     onConnecte(res.session_token);
   }
 
   function aller(nouvelEcran) {
     setErreur(null);
     setEcran(nouvelEcran);
+  }
+
+  async function terminerGoogle(e) {
+    e.preventDefault(); setErreur(null); setChargement(true);
+    try {
+      const result = await connecterGoogle(credentialGoogle, usernameGoogle, cgu);
+      if (result.username_requis) { setErreur("Choisis un nom de profil pour continuer."); return; }
+      setCredentialGoogle(null); terminer(result);
+    } catch (err) { setErreur(err.message); }
+    finally { setChargement(false); }
+  }
+
+  async function reprendreCompte(compte) {
+    setErreur(null); setChargement(true);
+    try {
+      await relockerPin(compte.token);
+      localStorage.setItem("grind_session_token", compte.token);
+      localStorage.setItem("grind_username", compte.username);
+      localStorage.setItem("grind_role", compte.role || "");
+      localStorage.setItem("grind_type_compte", compte.type_compte || "eleve");
+      onConnecte(compte.token);
+    } catch (err) {
+      const restants = accountsRemembered.filter((a) => a.username !== compte.username);
+      setAccountsRemembered(restants); localStorage.setItem("grind_accounts", JSON.stringify(restants));
+      setErreur("Session mémorisée expirée. Connecte-toi de nouveau avec ton mot de passe.");
+    } finally { setChargement(false); }
   }
 
   async function soumettre(e) {
@@ -67,7 +125,7 @@ export default function Connexion({ onConnecte }) {
     setChargement(true);
     try {
       if (mode === "signup") {
-        const res = await inscrireGrind(username, email, password, apiKey, cgu);
+        const res = await inscrireGrind(username, email, password, cgu);
         setFlux({ jeton: res.jeton_verification, emailMasque: res.email_masque });
         aller("verification");
       } else {
@@ -128,6 +186,10 @@ export default function Connexion({ onConnecte }) {
     aller("formulaire");
   }
 
+  if (mode === "proviseur") {
+    return <CandidatureProviseur onRetour={() => setMode("login")} onConnecte={terminer} />;
+  }
+
   if (sanction) {
     return (
       <>
@@ -147,19 +209,31 @@ export default function Connexion({ onConnecte }) {
         </div>
 
         <div key={ecran} className="etape-auth">
-          {ecran === "formulaire" && (
+          {credentialGoogle ? (
+            <form onSubmit={terminerGoogle} noValidate>
+              <div className="sous-titre">Finaliser ton compte Google</div>
+              <p className="info">Ton adresse e-mail a été vérifiée par Google. Choisis un nom de profil unique.</p>
+              <ChampAvecIcone icone="fa-solid fa-user" valeur={usernameGoogle} onChange={setUsernameGoogle} placeholder="Nom de profil" maxLength={24} autoFocus />
+              <div className="ligne-cgu">
+                <button type="button" className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`} onClick={() => setCgu((v) => !v)} aria-label="Accepter les conditions"><span className="curseur-interrupteur"></span></button>
+                <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
+              </div>
+              {erreur && <div className="erreur" role="alert">{erreur}</div>}
+              <button type="submit" disabled={chargement || !cgu || !usernameGoogle.trim()}>{chargement ? "Validation..." : "Créer mon compte"}</button>
+            </form>
+          ) : ecran === "formulaire" && (
             <form onSubmit={soumettre} noValidate>
               <div className="sous-titre">
                 {mode === "login" ? "Connecte-toi pour continuer" : "Crée ton compte GRIND"}
               </div>
 
-              <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder="Nom d'utilisateur" autoComplete="username" maxLength={24} autoFocus />
+              <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder={mode === "login" ? "E-mail ou nom d'utilisateur" : "Nom d'utilisateur"} autoComplete="username" maxLength={mode === "login" ? 254 : 24} autoFocus />
 
               {mode === "signup" && (
                 <>
                   <ChampAvecIcone icone="fa-solid fa-envelope" type="email" valeur={email} onChange={setEmail} placeholder="Adresse e-mail" autoComplete="email" inputMode="email" maxLength={254} />
                   <div className="info champ-aide">
-                    <i className="fa-solid fa-shield-halved"></i> Un code de vérification te sera envoyé par <strong>G-SOCIETY</strong>.
+                    <i className="fa-solid fa-shield-halved"></i> Un code de vérification sera envoyé à cette adresse e-mail.
                   </div>
                 </>
               )}
@@ -173,13 +247,6 @@ export default function Connexion({ onConnecte }) {
               {mode === "signup" && (
                 <>
                   <ChampAvecIcone icone="fa-solid fa-lock" valeur={confirmation} onChange={setConfirmation} placeholder="Confirme le mot de passe" bascule autoComplete="new-password" />
-                  <ChampAvecIcone icone="fa-solid fa-key" valeur={apiKey} onChange={setApiKey} placeholder="Clé API G-SOCIETY (catégorie grind)" autoComplete="off" />
-                  <div className="info champ-aide">
-                    Génère cette clé sur le{" "}
-                    <a className="lien lien-en-ligne" href={URL_GSOCIETY} target="_blank" rel="noopener noreferrer">site G-SOCIETY</a>{" "}
-                    avant de continuer.
-                  </div>
-
                   <div className="ligne-cgu">
                     <button
                       type="button"
@@ -223,6 +290,13 @@ export default function Connexion({ onConnecte }) {
               >
                 {mode === "login" ? "Pas encore de compte ? Inscris-toi" : "Déjà un compte ? Connecte-toi"}
               </button>
+              {mode === "login" && (
+                <>
+                  {GOOGLE_CLIENT_ID && <div className="bloc-google-auth"><div className="separateur-auth"><span>ou</span></div><div ref={googleButtonRef} className="bouton-google" /></div>}
+                  {!GOOGLE_CLIENT_ID && <p className="info info-google">La connexion Google sera activée dès que GOOGLE_CLIENT_ID et VITE_GOOGLE_CLIENT_ID seront configurés.</p>}
+                  <button type="button" className="lien" onClick={() => setMode("proviseur")}>Candidater comme proviseur / directeur</button>
+                </>
+              )}
               <button type="button" className="lien" onClick={() => setCguOuvertes(true)}>
                 Conditions d'utilisation
               </button>
@@ -284,6 +358,18 @@ export default function Connexion({ onConnecte }) {
               onTermine={() => retourConnexion("Mot de passe modifié. Connecte-toi avec ton nouveau mot de passe.")}
               onAnnuler={() => retourConnexion()}
             />
+          )}
+          {ecran === "formulaire" && !credentialGoogle && mode === "login" && accountsRemembered.length > 0 && (
+            <section className="comptes-memorises">
+              <h3>Comptes mémorisés sur cet appareil</h3>
+              {accountsRemembered.map((compte) => (
+                <button key={compte.username} type="button" className="compte-memorise" disabled={chargement} onClick={() => reprendreCompte(compte)}>
+                  <span className="avatar-compte-memorise">{compte.username.slice(0, 1).toUpperCase()}</span>
+                  <span><strong>@{compte.username}</strong><small>{compte.type_compte === "proviseur" ? "Compte établissement" : compte.role === "admin" ? "Administration" : "Compte GRIND"}</small></span>
+                  <i className="fa-solid fa-arrow-right" />
+                </button>
+              ))}
+            </section>
           )}
         </div>
 

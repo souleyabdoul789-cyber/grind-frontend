@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost, supprimerPost, obtenirAvatarDe } from "../api.js";
+import { togglerLike, listerCommentaires, ajouterCommentaire, resoudrePost, supprimerPost, obtenirAvatarDe, modererPostInstitution } from "../api.js";
 import LecteurMedia from "./LecteurMedia.jsx";
 import TexteExtensible from "./TexteExtensible.jsx";
 import ConfirmModal from "./ConfirmModal.jsx";
@@ -7,6 +7,27 @@ import AvatarIcone from "./AvatarIcone.jsx";
 import ModaleSignalement from "./ModaleSignalement.jsx";
 import BadgeCompte from "./BadgeCompte.jsx";
 import ActionsCompte from "./ActionsCompte.jsx";
+
+function rendreTexteAvecMentions(texte, onClicAuteur) {
+  const morceaux = String(texte || "").split(/(@[A-Za-z_]{3,24})/g);
+  return morceaux.map((morceau, index) => {
+    if (/^@[A-Za-z_]{3,24}$/.test(morceau)) {
+      const username = morceau.slice(1);
+      return (
+        <button
+          key={`${username}-${index}`}
+          type="button"
+          className="mention-profil"
+          onClick={() => onClicAuteur && onClicAuteur(username)}
+          aria-label={`Ouvrir le profil de ${username}`}
+        >
+          {morceau}
+        </button>
+      );
+    }
+    return <span key={`texte-${index}`}>{morceau}</span>;
+  });
+}
 
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();
@@ -24,7 +45,7 @@ const STATUT_STYLE = {
   publiee: null,
 };
 
-export default function CartePost({ post, sessionToken, monUsername, onSupprime, onClicAuteur, onChange }) {
+export default function CartePost({ post, sessionToken, monUsername, onSupprime, onClicAuteur, onChange, modeInstitutionnel = false, etablissements = [] }) {
   const [avatarAuteur, setAvatarAuteur] = useState(null);
 
   useEffect(() => {
@@ -40,6 +61,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [confirmationOuverte, setConfirmationOuverte] = useState(false);
   const [signalement, setSignalement] = useState(null); // { type, id, libelle }
+  const [moderationEnCours, setModerationEnCours] = useState(false);
 
   async function gererLike() {
     setAime(!aime);
@@ -90,15 +112,23 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
 
   const statut = STATUT_STYLE[statutActuel];
   const estAuteur = post.auteur === monUsername;
+  const peutModerer = modeInstitutionnel && !estAuteur && etablissements.some((e) => Number(e.id) === Number(post.etablissement_id) && e.moderation_locale);
+
+  async function retirerPublicationLocale() {
+    setModerationEnCours(true);
+    try { await modererPostInstitution(sessionToken, post.id); if (onSupprime) onSupprime(post.id); }
+    catch { setModerationEnCours(false); }
+  }
 
   return (
-    <div className="carte-post">
+    <div className="carte-post" id={`grind-post-${post.id}`} data-post-id={post.id}>
       <div className="entete-post">
-        <AvatarIcone username={post.auteur} config={avatarAuteur} taille={40} onClic={onClicAuteur} />
+        {post.auteur_type === "proviseur" && post.logo_etablissement ? <img className="avatar-institution-post" src={post.logo_etablissement} alt="Logo de l'établissement" /> : <AvatarIcone username={post.auteur} config={avatarAuteur} taille={40} onClic={onClicAuteur} />}
         <div>
           <button type="button" className="auteur-post auteur-post-bouton" onClick={() => onClicAuteur && onClicAuteur(post.auteur)}>
             {post.auteur}<BadgeCompte badge={post.auteur_badge} />
           </button>
+          {post.auteur_type === "proviseur" && <div className="meta-etablissement-post"><i className="fa-solid fa-school"></i> {post.etablissement_nom || "Établissement"}</div>}
           <div className={`badge-categorie ${post.categorie}`}>
             <i className={post.categorie === "probleme" ? "fa-solid fa-circle-question" : "fa-solid fa-star"}></i>
             {post.categorie === "probleme" ? "Problème" : "Démonstration"}
@@ -114,7 +144,8 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
 
       {post.media_url && <LecteurMedia url={post.media_url} type={post.media_type} />}
 
-      <TexteExtensible texte={post.contenu} />
+      {post.document_url && <a className="piece-jointe-document" href={post.document_url} target="_blank" rel="noopener noreferrer" download><span className="icone-document"><i className="fa-solid fa-file-lines"></i></span><span><strong>{post.document_name || "Document"}</strong><small>{post.document_type === "application/pdf" ? "PDF" : "DOCX"} · Ouvrir ou télécharger</small></span><i className="fa-solid fa-download" /></a>}
+      {!!post.contenu && <TexteExtensible texte={post.contenu} rendreTexte={(texte) => rendreTexteAvecMentions(texte, onClicAuteur)} />}
 
       {post.categorie === "probleme" && statutActuel === "ouverte" && post.date_limite && (
         <div className="delai-post">
@@ -145,6 +176,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
             Marquer résolu
           </button>
         )}
+        {peutModerer && <button className="action-post action-danger" type="button" disabled={moderationEnCours} onClick={retirerPublicationLocale}><i className="fa-solid fa-shield-halved"></i> {moderationEnCours ? "Retrait..." : "Retirer du réseau"}</button>}
         {estAuteur && (
           <button className="action-post action-danger" onClick={gererSuppression} disabled={suppressionEnCours} type="button">
             <i className="fa-solid fa-trash"></i>
@@ -179,7 +211,7 @@ export default function CartePost({ post, sessionToken, monUsername, onSupprime,
                 <button type="button" className="auteur-commentaire auteur-commentaire-bouton" onClick={() => onClicAuteur && onClicAuteur(c.username)}>
                   {c.username}<BadgeCompte badge={c.badge} taille={12} />
                 </button>{" "}
-                {c.contenu}
+                {rendreTexteAvecMentions(c.contenu, onClicAuteur)}
               </div>
               {c.username !== monUsername && (
                 <button

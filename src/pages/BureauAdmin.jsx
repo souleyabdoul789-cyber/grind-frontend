@@ -5,6 +5,7 @@ import { SalleSignalements, SalleUtilisateurs } from "./Admin.jsx";
 import { SalleEquipe, SalleCertification, SalleAnnonces } from "./SallesEquipe.jsx";
 import SalleSupport from "./SalleSupport.jsx";
 import SalleExamens from "./SalleExamens.jsx";
+import SalleProviseurs from "./SalleProviseurs.jsx";
 import { libelleRole } from "../moderationInfos.js";
 
 const NOM_PAR_DEFAUT = "GRIND Admin";
@@ -18,6 +19,7 @@ const SALLES = [
   { cle: "certification", titre: "Certification", desc: "Accorder ou retirer le badge de certification.", icone: "fa-solid fa-circle-check", permission: "certification" },
   { cle: "equipe", titre: "Équipe", desc: "Nommer des associés et des contrôleurs.", icone: "fa-solid fa-people-group", permission: "equipe" },
   { cle: "annonces", titre: "Annonces", desc: "Publier un message à tous les utilisateurs.", icone: "fa-solid fa-bullhorn", permission: "annonces" },
+  { cle: "proviseurs", titre: "Candidatures établissement", desc: "Vérifier les pièces privées et autoriser les directions.", icone: "fa-solid fa-school-circle-check", permission: "equipe" },
 ];
 
 /* ----------------------- Première entrée de l'administrateur ----------------------- */
@@ -98,7 +100,7 @@ function ScenePupitre({ alerte }) {
 }
 
 /* ----------------------------------- Le bureau ----------------------------------- */
-export default function BureauAdmin({ sessionToken, role, autonome = false, onDeconnexion }) {
+export default function BureauAdmin({ sessionToken, role, autonome = false, onDeconnexion, onChangerCompte, changementCompteEnCours = false }) {
   const [statut, setStatut] = useState(null);
   const [apercu, setApercu] = useState(null);
   const [salle, setSalle] = useState(null);
@@ -159,11 +161,10 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
             <div className="bureau-role">{libelleRole(monRole)}</div>
           </div>
         </div>
-        {autonome && onDeconnexion && (
-          <button type="button" className="bouton-admin bouton-admin-doux" onClick={onDeconnexion}>
-            <i className="fa-solid fa-right-from-bracket"></i> Quitter
-          </button>
-        )}
+        {autonome && <div className="bureau-actions-session">
+          {onChangerCompte && <button type="button" className="bouton-admin bouton-admin-doux" onClick={onChangerCompte} disabled={changementCompteEnCours}>{changementCompteEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Changement...</> : <><i className="fa-solid fa-users"></i> Changer de compte</>}</button>}
+          {onDeconnexion && <button type="button" className="bouton-admin bouton-admin-doux" onClick={onDeconnexion}><i className="fa-solid fa-right-from-bracket"></i> Quitter</button>}
+        </div>}
       </header>
 
       {salleActive ? (
@@ -184,6 +185,7 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
           {salle === "certification" && <SalleCertification sessionToken={sessionToken} />}
           {salle === "equipe" && <SalleEquipe sessionToken={sessionToken} />}
           {salle === "annonces" && <SalleAnnonces sessionToken={sessionToken} />}
+          {salle === "proviseurs" && <SalleProviseurs sessionToken={sessionToken} />}
         </>
       ) : (
         <>
