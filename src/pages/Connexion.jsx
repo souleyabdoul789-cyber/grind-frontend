@@ -31,7 +31,9 @@ export default function Connexion({ onConnecte }) {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [ecran, setEcran] = useState("formulaire"); // "formulaire" | "verification" | "oubli_email" | "oubli_code" | "oubli_nouveau" | "email_requis"
   const [flux, setFlux] = useState(null); // { jeton, emailMasque }
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState(""); // nom de profil GRIND : flux historique conservé
+  const [nom, setNom] = useState("");
+  const [prenom, setPrenom] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -42,6 +44,9 @@ export default function Connexion({ onConnecte }) {
   const [message, setMessage] = useState(null);
   const [sanction, setSanction] = useState(null);
   const [credentialGoogle, setCredentialGoogle] = useState(null);
+  const [googleEtape, setGoogleEtape] = useState("mot_de_passe");
+  const [passwordGoogle, setPasswordGoogle] = useState("");
+  const [confirmationGoogle, setConfirmationGoogle] = useState("");
   const [usernameGoogle, setUsernameGoogle] = useState("");
   const [identiteGoogle, setIdentiteGoogle] = useState({ prenom: "", nom: "" });
   const [accountsRemembered, setAccountsRemembered] = useState(() => {
@@ -72,6 +77,9 @@ export default function Connexion({ onConnecte }) {
         if (result.username_requis) {
           setMessage(null);
           setCredentialGoogle(idToken);
+          setGoogleEtape("mot_de_passe");
+          setPasswordGoogle("");
+          setConfirmationGoogle("");
           setUsernameGoogle(result.suggested_username || "");
           setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
         } else {
@@ -179,12 +187,25 @@ export default function Connexion({ onConnecte }) {
     setEcran(nouvelEcran);
   }
 
+  function continuerGoogleVersUsername(e) {
+    e.preventDefault();
+    setErreur(null);
+    if (!passwordGoogle || passwordGoogle !== confirmationGoogle) {
+      setErreur("Les mots de passe ne correspondent pas.");
+      return;
+    }
+    setGoogleEtape("username");
+  }
+
   async function terminerGoogle(e) {
     e.preventDefault(); setErreur(null); setChargement(true);
     try {
-      const result = await connecterGoogle(credentialGoogle, usernameGoogle, cgu);
+      const result = await connecterGoogle(credentialGoogle, usernameGoogle, cgu, passwordGoogle);
       if (result.username_requis) { setErreur("Choisis un nom de profil pour continuer."); return; }
       setCredentialGoogle(null);
+      setGoogleEtape("mot_de_passe");
+      setPasswordGoogle("");
+      setConfirmationGoogle("");
       setIdentiteGoogle({ prenom: "", nom: "" });
       setUsernameGoogle("");
       terminer(result);
@@ -215,6 +236,10 @@ export default function Connexion({ onConnecte }) {
     setMessage(null);
 
     if (mode === "signup") {
+      if (!nom.trim() || !prenom.trim()) {
+        setErreur("Renseigne ton nom et ton prénom dans deux champs séparés.");
+        return;
+      }
       if (password !== confirmation) {
         setErreur("Les mots de passe ne correspondent pas.");
         return;
@@ -228,7 +253,7 @@ export default function Connexion({ onConnecte }) {
     setChargement(true);
     try {
       if (mode === "signup") {
-        const res = await inscrireGrind(username, email, password, cgu);
+        const res = await inscrireGrind(username, email, password, cgu, nom.trim(), prenom.trim());
         setFlux({ jeton: res.jeton_verification, emailMasque: res.email_masque });
         aller("verification");
       } else {
@@ -283,8 +308,13 @@ export default function Connexion({ onConnecte }) {
   function retourConnexion(texte) {
     setPassword("");
     setConfirmation("");
+    setNom("");
+    setPrenom("");
     setFlux(null);
     setCredentialGoogle(null);
+    setGoogleEtape("mot_de_passe");
+    setPasswordGoogle("");
+    setConfirmationGoogle("");
     setIdentiteGoogle({ prenom: "", nom: "" });
     setUsernameGoogle("");
     setMode("login");
@@ -316,21 +346,35 @@ export default function Connexion({ onConnecte }) {
 
         <div key={ecran} className="etape-auth">
           {credentialGoogle ? (
-            <form onSubmit={terminerGoogle} noValidate>
+            <form onSubmit={googleEtape === "mot_de_passe" ? continuerGoogleVersUsername : terminerGoogle} noValidate>
               <div className="sous-titre">Créer ton compte GRIND</div>
               <div className="google-identite-confirmee">
                 <span className="google-identite-libelle">Compte Google vérifié</span>
                 <strong>{[identiteGoogle.prenom, identiteGoogle.nom].filter(Boolean).join(" ") || "Identité Google"}</strong>
-                <span className="google-identite-note">Ton prénom et ton nom sont repris automatiquement depuis Google.</span>
+                <span className="google-identite-note">Ton identité Google est vérifiée.</span>
               </div>
-              <p className="info">Ton compte sera créé après acceptation des conditions. Un nom de profil unique t'est proposé automatiquement ; tu peux le modifier.</p>
-              <ChampAvecIcone icone="fa-solid fa-at" valeur={usernameGoogle} onChange={setUsernameGoogle} placeholder="Nom de profil" maxLength={24} autoFocus />
-              <div className="ligne-cgu">
-                <button type="button" className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`} onClick={() => setCgu((v) => !v)} aria-label="Accepter les conditions"><span className="curseur-interrupteur"></span></button>
-                <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
-              </div>
-              {erreur && <div className="erreur" role="alert">{erreur}</div>}
-              <button type="submit" disabled={chargement || !cgu || !usernameGoogle.trim()}>{chargement ? <><span className="grind-spinner" /> Validation…</> : "Créer mon compte"}</button>
+              {googleEtape === "mot_de_passe" ? (
+                <>
+                  <p className="info">Avant de choisir ton nom de profil, définis un mot de passe GRIND. Tu pourras ensuite te connecter avec Google ou avec ton nom de profil et ce mot de passe.</p>
+                  <ChampAvecIcone icone="fa-solid fa-lock" valeur={passwordGoogle} onChange={setPasswordGoogle} placeholder="Créer un mot de passe" bascule autoComplete="new-password" />
+                  <IndicateurForce mdp={passwordGoogle} />
+                  <ChampAvecIcone icone="fa-solid fa-lock" valeur={confirmationGoogle} onChange={setConfirmationGoogle} placeholder="Confirmer le mot de passe" bascule autoComplete="new-password" />
+                  {erreur && <div className="erreur" role="alert">{erreur}</div>}
+                  <button type="submit" disabled={chargement || !passwordGoogle || passwordGoogle !== confirmationGoogle}>Continuer</button>
+                </>
+              ) : (
+                <>
+                  <p className="info">Choisis maintenant ton nom de profil GRIND. Il sera ton identifiant public et pourra aussi servir à te connecter.</p>
+                  <button type="button" className="lien" onClick={() => { setErreur(null); setGoogleEtape("mot_de_passe"); }}>Modifier le mot de passe</button>
+                  <ChampAvecIcone icone="fa-solid fa-at" valeur={usernameGoogle} onChange={setUsernameGoogle} placeholder="Nom de profil" maxLength={24} autoFocus />
+                  <div className="ligne-cgu">
+                    <button type="button" className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`} onClick={() => setCgu((v) => !v)} aria-label="Accepter les conditions"><span className="curseur-interrupteur"></span></button>
+                    <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
+                  </div>
+                  {erreur && <div className="erreur" role="alert">{erreur}</div>}
+                  <button type="submit" disabled={chargement || !cgu || !usernameGoogle.trim()}>{chargement ? <><span className="grind-spinner" /> Validation…</> : "Créer mon compte"}</button>
+                </>
+              )}
             </form>
           ) : ecran === "formulaire" && (
             <form onSubmit={soumettre} noValidate>
@@ -338,10 +382,12 @@ export default function Connexion({ onConnecte }) {
                 {mode === "login" ? "Connecte-toi pour continuer" : "Crée ton compte GRIND"}
               </div>
 
-              <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder={mode === "login" ? "E-mail ou nom d'utilisateur" : "Nom d'utilisateur"} autoComplete="username" maxLength={mode === "login" ? 254 : 24} autoFocus />
+              <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder={mode === "login" ? "Nom de profil ou adresse e-mail" : "Nom de profil"} autoComplete="username" maxLength={mode === "login" ? 254 : 24} autoFocus />
 
               {mode === "signup" && (
                 <>
+                  <ChampAvecIcone icone="fa-solid fa-id-card" valeur={nom} onChange={setNom} placeholder="Nom" autoComplete="family-name" maxLength={80} />
+                  <ChampAvecIcone icone="fa-solid fa-id-card" valeur={prenom} onChange={setPrenom} placeholder="Prénom" autoComplete="given-name" maxLength={80} />
                   <ChampAvecIcone icone="fa-solid fa-envelope" type="email" valeur={email} onChange={setEmail} placeholder="Adresse e-mail" autoComplete="email" inputMode="email" maxLength={254} />
                   <div className="info champ-aide">
                     <i className="fa-solid fa-shield-halved"></i> Un code de vérification sera envoyé à cette adresse e-mail.

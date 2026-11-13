@@ -7,7 +7,7 @@ import {
   restreindreMembreDiscussion, leverRestrictionDiscussion, retirerMembreDiscussion,
   transfererProprietaireDiscussion, renouvelerInvitationDiscussion, uploaderMedia, uploaderDocument,
   envoyerVocalDiscussion, urlPieceDiscussion, modifierMessageDiscussion,
-  supprimerMessageDiscussionPourMoi, estGrindEnLigne,
+  supprimerMessageDiscussionPourMoi, supprimerMessageDiscussionPourTous, estGrindEnLigne,
 } from "../api.js";
 
 function heure(date) {
@@ -265,7 +265,18 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           setMentionsNonLues(value => value + 1);
         }
       } else if (data.type === "message_updated" && data.message) {
-        setMessages(prev => prev.map(m => m.id === data.message.id ? data.message : m));
+        setMessages(prev => {
+          const next = prev.map(m => m.id === data.message.id ? data.message : m);
+          messagesActuels.current = next;
+          return next;
+        });
+      } else if (data.type === "message_deleted" && data.message) {
+        setMessages(prev => {
+          const next = prev.map(m => m.id === data.message.id ? data.message : m);
+          messagesActuels.current = next;
+          return next;
+        });
+        setMessagesSelectionnes(prev => prev.filter(id => id !== data.message.id));
       } else if (data.type === "typing" && data.username) {
         setTyping(prev => data.typing
           ? (prev.includes(data.username) ? prev : [...prev, data.username])
@@ -828,9 +839,13 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   function messageEditable(message) {
-    if (!message || message.auteur !== monUsername || message.piece || !message.contenu) return false;
+    if (!message || message.supprime_pour_tous || message.auteur !== monUsername || message.piece || !message.contenu) return false;
     const date = Date.parse(message.created_at || "");
     return Number.isFinite(date) && Date.now() - date >= 0 && Date.now() - date <= 15 * 60 * 1000;
+  }
+
+  function peutSupprimerMessagePourTous(message) {
+    return !!message && !message.supprime_pour_tous && (message.auteur === monUsername || estAdmin);
   }
 
   function basculerSelectionMessage(messageId) {
@@ -894,6 +909,33 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     else window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Messages supprimés de ton historique." }));
   }
 
+  async function supprimerSelectionPourTous() {
+    if (messagesSelectionnes.length !== 1 || suppressionEnCours) return;
+    const messageId = messagesSelectionnes[0];
+    const cible = messages.find(message => message.id === messageId);
+    if (!peutSupprimerMessagePourTous(cible)) return;
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ce message pour tout le monde." }));
+      return;
+    }
+    if (!window.confirm("Supprimer définitivement ce message pour tous les membres du groupe ?")) return;
+    setSuppressionEnCours(true);
+    setMessageErreur("");
+    try {
+      const resultat = await supprimerMessageDiscussionPourTous(sessionToken, classe.classe_id, messageId);
+      if (resultat.message) {
+        setMessages(prev => prev.map(message => message.id === messageId ? resultat.message : message));
+      }
+      setMessagesSelectionnes([]);
+      setMenuSelectionOuvert(false);
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Message supprimé pour tout le monde." }));
+    } catch (error) {
+      setMessageErreur(error.message || "Impossible de supprimer ce message pour tout le monde.");
+    } finally {
+      setSuppressionEnCours(false);
+    }
+  }
+
   function ouvrirProfil(username) {
     window.dispatchEvent(new CustomEvent("grind-open-profil", { detail: username }));
   }
@@ -941,7 +983,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           <button type="button" onClick={() => setMenuSelectionOuvert(v => !v)} aria-label="Actions des messages sélectionnés"><i className="fa-solid fa-ellipsis-vertical" /></button>
           {menuSelectionOuvert && <div className="discussion-selection-menu">
             {messagesSelectionnes.length === 1 && messageEditable(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" onClick={modifierSelection}><i className="fa-solid fa-pen" /> Modifier</button>}
-            {messagesSelectionnes.length === 1 && <button type="button" onClick={() => { const cible = messages.find(m => m.id === messagesSelectionnes[0]); if (cible) commencerReponse(cible); setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }}><i className="fa-solid fa-reply" /> Répondre</button>}
+            {messagesSelectionnes.length === 1 && !messages.find(m => m.id === messagesSelectionnes[0])?.supprime_pour_tous && <button type="button" onClick={() => { const cible = messages.find(m => m.id === messagesSelectionnes[0]); if (cible) commencerReponse(cible); setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }}><i className="fa-solid fa-reply" /> Répondre</button>}
+            {messagesSelectionnes.length === 1 && peutSupprimerMessagePourTous(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" className="danger" onClick={supprimerSelectionPourTous} disabled={suppressionEnCours}><i className="fa-solid fa-trash-can" /> Supprimer pour tout le monde</button>}
             <button type="button" className="danger" onClick={supprimerSelectionPourMoi} disabled={suppressionEnCours}><i className="fa-solid fa-trash" /> {suppressionEnCours ? "Suppression…" : "Supprimer pour moi"}</button>
           </div>}
         </div>}
@@ -957,6 +1000,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
                 {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span>{message.reply.contenu || "Message"}</span></button>}
                 <div className={`discussion-bulle style-${message.style_texte || "normal"}`}>
+                  {message.supprime_pour_tous ? (
+                    <div className="discussion-message-supprime"><i className="fa-solid fa-ban" /> Ce message a été supprimé.</div>
+                  ) : <>
                   {!!message.contenu && <div className="discussion-texte"><TexteMessage texte={message.contenu} onProfil={ouvrirProfil} /></div>}
                   {message.piece && message.piece.type === "image" && <>
                     <button type="button" className="discussion-image" onClick={() => setLightbox(mediaPriveUrl)}><img src={mediaPriveUrl} alt={message.piece.nom || "Image partagée"} loading="lazy" /></button>
@@ -968,9 +1014,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   </>}
                   {message.piece && message.piece.type === "audio" && <LecteurVocal src={mediaPriveUrl} id={message.id} />}
                   {message.piece && message.piece.type === "document" && <a className="discussion-fichier" href={mediaPriveUrl} target="_blank" rel="noreferrer" download><span className="discussion-fichier-icone"><i className="fa-solid fa-file-pdf" /></span><span><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}</small></span><i className="fa-solid fa-download" /></a>}
+                  </>}
                   <span className="discussion-heure">{heure(message.created_at)}{message.modifie && <small className="discussion-message-modifie"> · modifié</small>}</span>
                 </div>
-                <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>
+                {!message.supprime_pour_tous && <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>}
               </div>
               {propre && <AvatarIcone username={message.auteur} taille={30} />}
             </article>

@@ -39,11 +39,13 @@ async function poster(url, body) {
 
 // ---------- Compte GRIND (propre à GRIND, distinct de G-SOCIETY) ----------
 
-export function inscrireGrind(username, email, password, cguAcceptees) {
+export function inscrireGrind(username, email, password, cguAcceptees, nom = null, prenom = null) {
   return poster(`${GRIND_URL}/api/compte/signup`, {
     username,
     email,
     password,
+    nom,
+    prenom,
     cgu_acceptees: !!cguAcceptees,
   });
 }
@@ -52,14 +54,14 @@ export function connecterGrind(username, password) {
   return poster(`${GRIND_URL}/api/compte/login`, { username, password });
 }
 
-export async function connecterGoogle(credential, username = null, cguAcceptees = false) {
+export async function connecterGoogle(credential, username = null, cguAcceptees = false, password = null) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 25000);
   try {
     const res = await fetchApi(`${GRIND_URL}/api/compte/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credential, username, cgu_acceptees: !!cguAcceptees }),
+      body: JSON.stringify({ credential, username, password, cgu_acceptees: !!cguAcceptees }),
       signal: controller.signal,
     });
     const data = await res.json().catch(() => ({}));
@@ -464,6 +466,18 @@ export async function supprimerMessageDiscussionPourMoi(sessionToken, classeId, 
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "Impossible de masquer ce message.");
+  return data;
+}
+
+export async function supprimerMessageDiscussionPourTous(sessionToken, classeId, messageId) {
+  const url = `${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/pour-tous`;
+  const res = await fetchApi(url, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "Impossible de supprimer ce message pour tout le monde.");
   return data;
 }
 
