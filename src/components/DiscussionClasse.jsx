@@ -150,6 +150,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [menuSelectionOuvert, setMenuSelectionOuvert] = useState(false);
   const [messageEnEdition, setMessageEnEdition] = useState(null);
   const [suppressionEnCours, setSuppressionEnCours] = useState(false);
+  const [confirmationSuppressionOuverte, setConfirmationSuppressionOuverte] = useState(false);
   const [dureesRestriction, setDureesRestriction] = useState({});
   const [renouvellementInvitation, setRenouvellementInvitation] = useState(false);
   const [transfertProprietaire, setTransfertProprietaire] = useState(null);
@@ -909,16 +910,26 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     else window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Messages supprimés de ton historique." }));
   }
 
-  async function supprimerSelectionPourTous() {
+  function demanderSuppressionSelectionPourTous() {
     if (messagesSelectionnes.length !== 1 || suppressionEnCours) return;
-    const messageId = messagesSelectionnes[0];
-    const cible = messages.find(message => message.id === messageId);
+    const cible = messages.find(message => message.id === messagesSelectionnes[0]);
     if (!peutSupprimerMessagePourTous(cible)) return;
     if (!estGrindEnLigne()) {
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ce message pour tout le monde." }));
       return;
     }
-    if (!window.confirm("Supprimer définitivement ce message pour tous les membres du groupe ?")) return;
+    setConfirmationSuppressionOuverte(true);
+  }
+
+  async function confirmerSuppressionSelectionPourTous() {
+    if (messagesSelectionnes.length !== 1 || suppressionEnCours) return;
+    const messageId = messagesSelectionnes[0];
+    const cible = messages.find(message => message.id === messageId);
+    if (!peutSupprimerMessagePourTous(cible)) {
+      setConfirmationSuppressionOuverte(false);
+      return;
+    }
+    setConfirmationSuppressionOuverte(false);
     setSuppressionEnCours(true);
     setMessageErreur("");
     try {
@@ -984,7 +995,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           {menuSelectionOuvert && <div className="discussion-selection-menu">
             {messagesSelectionnes.length === 1 && messageEditable(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" onClick={modifierSelection}><i className="fa-solid fa-pen" /> Modifier</button>}
             {messagesSelectionnes.length === 1 && !messages.find(m => m.id === messagesSelectionnes[0])?.supprime_pour_tous && <button type="button" onClick={() => { const cible = messages.find(m => m.id === messagesSelectionnes[0]); if (cible) commencerReponse(cible); setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }}><i className="fa-solid fa-reply" /> Répondre</button>}
-            {messagesSelectionnes.length === 1 && peutSupprimerMessagePourTous(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" className="danger" onClick={supprimerSelectionPourTous} disabled={suppressionEnCours}><i className="fa-solid fa-trash-can" /> Supprimer pour tout le monde</button>}
+            {messagesSelectionnes.length === 1 && peutSupprimerMessagePourTous(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" className="danger" onClick={demanderSuppressionSelectionPourTous} disabled={suppressionEnCours}><i className="fa-solid fa-trash-can" /> Supprimer pour tout le monde</button>}
             <button type="button" className="danger" onClick={supprimerSelectionPourMoi} disabled={suppressionEnCours}><i className="fa-solid fa-trash" /> {suppressionEnCours ? "Suppression…" : "Supprimer pour moi"}</button>
           </div>}
         </div>}
@@ -1116,6 +1127,20 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       </div>}
 
       {lightbox && <div className="discussion-lightbox" onClick={() => setLightbox(null)}><button type="button" aria-label="Fermer"><i className="fa-solid fa-xmark" /></button><img src={lightbox} alt="Image partagée en grand" onClick={event => event.stopPropagation()} /></div>}
+
+      {confirmationSuppressionOuverte && (
+        <div className="discussion-confirmation-fond" onMouseDown={event => { if (event.target === event.currentTarget && !suppressionEnCours) setConfirmationSuppressionOuverte(false); }}>
+          <div className="discussion-confirmation-carte" role="dialog" aria-modal="true" aria-labelledby="discussion-confirmation-suppression-titre">
+            <div className="discussion-confirmation-icone"><i className="fa-solid fa-trash-can" aria-hidden="true" /></div>
+            <strong id="discussion-confirmation-suppression-titre">Supprimer ce message pour tout le monde ?</strong>
+            <p>Ce message ne sera plus visible par les membres de la discussion. Cette action est définitive.</p>
+            <div className="discussion-confirmation-actions">
+              <button type="button" onClick={() => setConfirmationSuppressionOuverte(false)} disabled={suppressionEnCours}>Annuler</button>
+              <button type="button" className="discussion-confirmation-danger" onClick={confirmerSuppressionSelectionPourTous} disabled={suppressionEnCours}>{suppressionEnCours ? <><i className="fa-solid fa-circle-notch fa-spin" /> Suppression…</> : "Confirmer la suppression"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

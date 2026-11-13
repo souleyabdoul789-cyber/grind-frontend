@@ -39,14 +39,27 @@ async function poster(url, body) {
 
 // ---------- Compte GRIND (propre à GRIND, distinct de G-SOCIETY) ----------
 
-export function inscrireGrind(username, email, password, cguAcceptees, nom = null, prenom = null) {
+export function inscrireGrind(email, password, cguAcceptees, nom, prenom) {
+  // Le nom de profil n'est volontairement pas envoyé ici : il sera choisi
+  // après la vérification e-mail et la configuration du PIN à 4 chiffres.
   return poster(`${GRIND_URL}/api/compte/signup`, {
-    username,
-    email,
-    password,
-    nom,
-    prenom,
-    cgu_acceptees: !!cguAcceptees,
+    email, password, nom, prenom, cgu_acceptees: !!cguAcceptees,
+  });
+}
+
+export function configurerPinInscription(jetonInscription, pin) {
+  return poster(`${GRIND_URL}/api/compte/inscription/pin`, { jeton_inscription: jetonInscription, pin });
+}
+
+export function verifierNomProfilInscription(jetonInscription, username) {
+  return poster(`${GRIND_URL}/api/compte/inscription/nom-profil/disponibilite`, {
+    jeton_inscription: jetonInscription, username,
+  });
+}
+
+export function finaliserNomProfilInscription(jetonInscription, username) {
+  return poster(`${GRIND_URL}/api/compte/inscription/nom-profil/finaliser`, {
+    jeton_inscription: jetonInscription, username,
   });
 }
 

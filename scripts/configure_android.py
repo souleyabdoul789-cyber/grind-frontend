@@ -277,7 +277,7 @@ def configure_app_version() -> None:
     if depth:
         raise SystemExit("Bloc defaultConfig Gradle incomplet.")
     block = source[start:index - 1]
-    for key, value in (("versionCode", "21001"), ("versionName", '"2.10.1"')):
+    for key, value in (("versionCode", "21003"), ("versionName", '"2.10.3"')):
         pattern = rf"(?m)^([ \t]*){key}\s+[^\n]+$"
         if re.search(pattern, block):
             block = re.sub(pattern, lambda m: f"{m.group(1)}{key} {value}", block, count=1)
@@ -294,7 +294,7 @@ def main() -> int:
     configure_native_window_theme()
     configure_edge_to_edge()
     configure_launcher_icons()
-    print("Manifest, QR scanner ML Kit, version 2.10.1, thème natif, bord-à-bord, permissions et icône GRIND configurés.")
+    print("Manifest, QR scanner ML Kit, version 2.10.3, thème natif, bord-à-bord, permissions et icône GRIND configurés.")
     return 0
 
 

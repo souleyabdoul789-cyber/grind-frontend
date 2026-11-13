@@ -3,12 +3,14 @@ import { Capacitor } from "@capacitor/core";
 import { ErrorCode, GoogleSignIn } from "@capawesome/capacitor-google-sign-in";
 import {
   connecterGrind, inscrireGrind, motDePasseOublie, associerEmail, connecterGoogle, GOOGLE_CLIENT_ID, relockerPin,
+  configurerPinInscription,
 } from "../api.js";
 import FondAnime from "../components/FondAnime.jsx";
 import PageCgu from "../components/PageCgu.jsx";
 import EcranSanction from "../components/EcranSanction.jsx";
 import ChampAvecIcone from "../components/ChampAvecIcone.jsx";
 import EtapeVerification from "../components/EtapeVerification.jsx";
+import EtapeNomProfil from "../components/EtapeNomProfil.jsx";
 import EtapeNouveauMotDePasse, { IndicateurForce } from "../components/EtapeNouveauMotDePasse.jsx";
 import CandidatureProviseur from "./CandidatureProviseur.jsx";
 
@@ -22,16 +24,21 @@ let traiterCredentialGoogle = null;
  * Connexion — entrée de GRIND.
  *
  * Écrans (un seul visible à la fois, avec une transition douce) :
- *   formulaire (connexion / inscription) → vérification du code → connecté
+ *   inscription classique → code e-mail (7 chiffres) → PIN GRIND (4 chiffres) → nom de profil → session
+ *   nouveau compte Google → mot de passe GRIND + CGU → PIN (4 chiffres) → nom de profil → session
+ *   connexion → nom de profil ou e-mail + mot de passe
  *   mot de passe oublié → e-mail → code → nouveau mot de passe → retour à la connexion
- *   ancien compte sans e-mail → on lui demande une adresse → code → connecté
+ *   ancien compte sans e-mail → adresse → code e-mail → session
  * Le serveur décide de tout (validité, unicité, limites) : cette page ne fait que le montrer.
  */
 export default function Connexion({ onConnecte }) {
   const [mode, setMode] = useState("login"); // "login" | "signup"
-  const [ecran, setEcran] = useState("formulaire"); // "formulaire" | "verification" | "oubli_email" | "oubli_code" | "oubli_nouveau" | "email_requis"
+  const [ecran, setEcran] = useState("formulaire"); // formulaire, vérification e-mail, PIN, nom de profil, récupération
   const [flux, setFlux] = useState(null); // { jeton, emailMasque }
-  const [username, setUsername] = useState(""); // nom de profil GRIND : flux historique conservé
+  const [jetonInscription, setJetonInscription] = useState("");
+  const [pinInscription, setPinInscription] = useState("");
+  const [confirmationPinInscription, setConfirmationPinInscription] = useState("");
+  const [username, setUsername] = useState(""); // identifiant saisi uniquement à la connexion
   const [nom, setNom] = useState("");
   const [prenom, setPrenom] = useState("");
   const [email, setEmail] = useState("");
@@ -44,10 +51,8 @@ export default function Connexion({ onConnecte }) {
   const [message, setMessage] = useState(null);
   const [sanction, setSanction] = useState(null);
   const [credentialGoogle, setCredentialGoogle] = useState(null);
-  const [googleEtape, setGoogleEtape] = useState("mot_de_passe");
   const [passwordGoogle, setPasswordGoogle] = useState("");
   const [confirmationGoogle, setConfirmationGoogle] = useState("");
-  const [usernameGoogle, setUsernameGoogle] = useState("");
   const [identiteGoogle, setIdentiteGoogle] = useState({ prenom: "", nom: "" });
   const [accountsRemembered, setAccountsRemembered] = useState(() => {
     try { return JSON.parse(localStorage.getItem("grind_accounts") || "[]"); } catch { return []; }
@@ -77,10 +82,8 @@ export default function Connexion({ onConnecte }) {
         if (result.username_requis) {
           setMessage(null);
           setCredentialGoogle(idToken);
-          setGoogleEtape("mot_de_passe");
           setPasswordGoogle("");
           setConfirmationGoogle("");
-          setUsernameGoogle(result.suggested_username || "");
           setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
         } else {
           if (!result?.session_token || !result?.username) {
@@ -187,30 +190,70 @@ export default function Connexion({ onConnecte }) {
     setEcran(nouvelEcran);
   }
 
-  function continuerGoogleVersUsername(e) {
+  async function continuerGoogleVersPin(e) {
     e.preventDefault();
     setErreur(null);
     if (!passwordGoogle || passwordGoogle !== confirmationGoogle) {
-      setErreur("Les mots de passe ne correspondent pas.");
+      setErreur("Les deux mots de passe ne correspondent pas.");
       return;
     }
-    setGoogleEtape("username");
-  }
-
-  async function terminerGoogle(e) {
-    e.preventDefault(); setErreur(null); setChargement(true);
+    if (!cgu) {
+      setErreur("Tu dois accepter les conditions d'utilisation pour créer un compte.");
+      return;
+    }
+    setChargement(true);
     try {
-      const result = await connecterGoogle(credentialGoogle, usernameGoogle, cgu, passwordGoogle);
-      if (result.username_requis) { setErreur("Choisis un nom de profil pour continuer."); return; }
+      // Google a déjà vérifié l'adresse. Le nouveau compte passe directement
+      // à la configuration du PIN, puis au choix du nom de profil.
+      const result = await connecterGoogle(credentialGoogle, null, cgu, passwordGoogle);
+      if (result.inscription_en_attente && result.jeton_inscription) {
+        setJetonInscription(result.jeton_inscription);
+        setCredentialGoogle(null);
+        setPasswordGoogle("");
+        setConfirmationGoogle("");
+        setIdentiteGoogle({ prenom: "", nom: "" });
+        setEcran("inscription_pin");
+        return;
+      }
+      if (!result?.session_token || !result?.username) {
+        throw new Error("GRIND n'a pas renvoyé une session valide. Recommence la connexion Google.");
+      }
       setCredentialGoogle(null);
-      setGoogleEtape("mot_de_passe");
       setPasswordGoogle("");
       setConfirmationGoogle("");
       setIdentiteGoogle({ prenom: "", nom: "" });
-      setUsernameGoogle("");
       terminer(result);
-    } catch (err) { setErreur(err.message); }
-    finally { setChargement(false); }
+    } catch (err) {
+      setErreur(err.message || "La création du compte Google a échoué.");
+    } finally {
+      setChargement(false);
+    }
+  }
+
+  async function enregistrerPinInscription(e) {
+    e.preventDefault();
+    setErreur(null);
+    const pin = pinInscription.replace(/\D/g, "");
+    const confirmationPin = confirmationPinInscription.replace(/\D/g, "");
+    if (!/^\d{4}$/.test(pin)) {
+      setErreur("Le PIN de sécurité doit contenir exactement 4 chiffres.");
+      return;
+    }
+    if (pin !== confirmationPin) {
+      setErreur("Les deux PIN ne correspondent pas.");
+      return;
+    }
+    setChargement(true);
+    try {
+      await configurerPinInscription(jetonInscription, pin);
+      setPinInscription("");
+      setConfirmationPinInscription("");
+      setEcran("nom_profil");
+    } catch (err) {
+      setErreur(err.message || "Impossible d'enregistrer le PIN de sécurité.");
+    } finally {
+      setChargement(false);
+    }
   }
 
   async function reprendreCompte(compte) {
@@ -253,7 +296,7 @@ export default function Connexion({ onConnecte }) {
     setChargement(true);
     try {
       if (mode === "signup") {
-        const res = await inscrireGrind(username, email, password, cgu, nom.trim(), prenom.trim());
+        const res = await inscrireGrind(email, password, cgu, nom.trim(), prenom.trim());
         setFlux({ jeton: res.jeton_verification, emailMasque: res.email_masque });
         aller("verification");
       } else {
@@ -311,12 +354,13 @@ export default function Connexion({ onConnecte }) {
     setNom("");
     setPrenom("");
     setFlux(null);
+    setJetonInscription("");
+    setPinInscription("");
+    setConfirmationPinInscription("");
     setCredentialGoogle(null);
-    setGoogleEtape("mot_de_passe");
     setPasswordGoogle("");
     setConfirmationGoogle("");
     setIdentiteGoogle({ prenom: "", nom: "" });
-    setUsernameGoogle("");
     setMode("login");
     setMessage(texte || null);
     aller("formulaire");
@@ -346,35 +390,23 @@ export default function Connexion({ onConnecte }) {
 
         <div key={ecran} className="etape-auth">
           {credentialGoogle ? (
-            <form onSubmit={googleEtape === "mot_de_passe" ? continuerGoogleVersUsername : terminerGoogle} noValidate>
+            <form onSubmit={continuerGoogleVersPin} noValidate>
               <div className="sous-titre">Créer ton compte GRIND</div>
               <div className="google-identite-confirmee">
                 <span className="google-identite-libelle">Compte Google vérifié</span>
                 <strong>{[identiteGoogle.prenom, identiteGoogle.nom].filter(Boolean).join(" ") || "Identité Google"}</strong>
                 <span className="google-identite-note">Ton identité Google est vérifiée.</span>
               </div>
-              {googleEtape === "mot_de_passe" ? (
-                <>
-                  <p className="info">Avant de choisir ton nom de profil, définis un mot de passe GRIND. Tu pourras ensuite te connecter avec Google ou avec ton nom de profil et ce mot de passe.</p>
-                  <ChampAvecIcone icone="fa-solid fa-lock" valeur={passwordGoogle} onChange={setPasswordGoogle} placeholder="Créer un mot de passe" bascule autoComplete="new-password" />
-                  <IndicateurForce mdp={passwordGoogle} />
-                  <ChampAvecIcone icone="fa-solid fa-lock" valeur={confirmationGoogle} onChange={setConfirmationGoogle} placeholder="Confirmer le mot de passe" bascule autoComplete="new-password" />
-                  {erreur && <div className="erreur" role="alert">{erreur}</div>}
-                  <button type="submit" disabled={chargement || !passwordGoogle || passwordGoogle !== confirmationGoogle}>Continuer</button>
-                </>
-              ) : (
-                <>
-                  <p className="info">Choisis maintenant ton nom de profil GRIND. Il sera ton identifiant public et pourra aussi servir à te connecter.</p>
-                  <button type="button" className="lien" onClick={() => { setErreur(null); setGoogleEtape("mot_de_passe"); }}>Modifier le mot de passe</button>
-                  <ChampAvecIcone icone="fa-solid fa-at" valeur={usernameGoogle} onChange={setUsernameGoogle} placeholder="Nom de profil" maxLength={24} autoFocus />
-                  <div className="ligne-cgu">
-                    <button type="button" className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`} onClick={() => setCgu((v) => !v)} aria-label="Accepter les conditions"><span className="curseur-interrupteur"></span></button>
-                    <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
-                  </div>
-                  {erreur && <div className="erreur" role="alert">{erreur}</div>}
-                  <button type="submit" disabled={chargement || !cgu || !usernameGoogle.trim()}>{chargement ? <><span className="grind-spinner" /> Validation…</> : "Créer mon compte"}</button>
-                </>
-              )}
+              <p className="info">Ton adresse Google est déjà vérifiée. Définis ton mot de passe GRIND, puis crée ton PIN de sécurité. Tu choisiras ton nom de profil après le PIN.</p>
+              <ChampAvecIcone icone="fa-solid fa-lock" valeur={passwordGoogle} onChange={setPasswordGoogle} placeholder="Créer un mot de passe GRIND" bascule autoComplete="new-password" />
+              <IndicateurForce mdp={passwordGoogle} />
+              <ChampAvecIcone icone="fa-solid fa-lock" valeur={confirmationGoogle} onChange={setConfirmationGoogle} placeholder="Confirmer le mot de passe" bascule autoComplete="new-password" />
+              <div className="ligne-cgu">
+                <button type="button" className={`interrupteur ${cgu ? "interrupteur-actif" : ""}`} onClick={() => setCgu((v) => !v)} aria-label="Accepter les conditions"><span className="curseur-interrupteur"></span></button>
+                <span>J'accepte les <button type="button" className="lien lien-en-ligne" onClick={() => setCguOuvertes(true)}>conditions d'utilisation</button></span>
+              </div>
+              {erreur && <div className="erreur" role="alert">{erreur}</div>}
+              <button type="submit" disabled={chargement || !passwordGoogle || passwordGoogle !== confirmationGoogle || !cgu}>{chargement ? <><span className="grind-spinner" /> Préparation…</> : "Continuer vers la sécurité"}</button>
             </form>
           ) : ecran === "formulaire" && (
             <form onSubmit={soumettre} noValidate>
@@ -382,7 +414,7 @@ export default function Connexion({ onConnecte }) {
                 {mode === "login" ? "Connecte-toi pour continuer" : "Crée ton compte GRIND"}
               </div>
 
-              <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder={mode === "login" ? "Nom de profil ou adresse e-mail" : "Nom de profil"} autoComplete="username" maxLength={mode === "login" ? 254 : 24} autoFocus />
+              {mode === "login" && <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder="@nom_de_profil ou adresse e-mail" autoComplete="username" maxLength={254} autoFocus />}
 
               {mode === "signup" && (
                 <>
@@ -510,9 +542,35 @@ export default function Connexion({ onConnecte }) {
               objet="inscription"
               emailMasque={flux.emailMasque}
               jeton={flux.jeton}
-              onVerifie={terminer}
+              onVerifie={(resultat) => {
+                if (resultat?.inscription_en_attente && resultat.jeton_inscription) {
+                  setJetonInscription(resultat.jeton_inscription);
+                  setEcran("inscription_pin");
+                } else if (resultat?.session_token) {
+                  terminer(resultat);
+                } else {
+                  setErreur("La vérification a réussi, mais l'étape suivante n'a pas pu être ouverte. Recommence la procédure.");
+                }
+              }}
               onAnnuler={() => retourConnexion()}
             />
+          )}
+
+          {ecran === "inscription_pin" && (
+            <form className="etape-inscription-pin" onSubmit={enregistrerPinInscription} noValidate>
+              <div className="icone-etape"><i className="fa-solid fa-shield-halved" /></div>
+              <div className="etape-question">Protège ton compte GRIND</div>
+              <p className="verification-texte">Crée un PIN personnel de 4 chiffres. Il sera demandé lors des connexions et au moins toutes les 48 heures.</p>
+              <input type="password" className="champ-pin" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{4}" maxLength={4} value={pinInscription} onChange={(e) => setPinInscription(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="••••" aria-label="PIN de sécurité à 4 chiffres" required />
+              <input type="password" className="champ-pin" inputMode="numeric" autoComplete="new-password" pattern="[0-9]{4}" maxLength={4} value={confirmationPinInscription} onChange={(e) => setConfirmationPinInscription(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="Confirmer le PIN" aria-label="Confirmer le PIN à 4 chiffres" required />
+              {erreur && <div className="erreur" role="alert">{erreur}</div>}
+              <button type="submit" disabled={chargement || pinInscription.length !== 4 || confirmationPinInscription.length !== 4}>{chargement ? <><span className="grind-spinner" /> Enregistrement…</> : "Enregistrer mon PIN"}</button>
+              <p className="nom-profil-note"><i className="fa-solid fa-lock" /> Ton PIN est haché de manière sécurisée côté serveur et ne peut pas être relu ensuite.</p>
+            </form>
+          )}
+
+          {ecran === "nom_profil" && (
+            <EtapeNomProfil jetonInscription={jetonInscription} onTermine={terminer} />
           )}
 
           {ecran === "email_requis" && (
