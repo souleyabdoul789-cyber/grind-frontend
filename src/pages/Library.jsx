@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  listerPlaylistsLibrary, rechercherDocumentsLibrary, creerPlaylistLibrary,
-  uploaderDocumentLibrary, listerDocumentsLibrary, voterDocumentLibrary,
-  commenterDocumentLibrary, listerCommentairesDocumentLibrary, obtenirDocumentLibrary,
+  rechercherDocumentsLibrary,
+  uploaderDocumentLibrary,
+  commenterDocumentLibrary,
+  listerCommentairesDocumentLibrary,
+  obtenirDocumentLibrary,
 } from "../api.js";
-import AvatarIcone from "../components/AvatarIcone.jsx";
 import ProfilPublic from "../components/ProfilPublic.jsx";
 import ChargementGrind from "../components/ChargementGrind.jsx";
 import ApercuDocument from "../components/ApercuDocument.jsx";
@@ -14,242 +15,221 @@ function dateCourte(value) {
   const d = new Date(`${value}T00:00:00`);
   return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(d);
 }
+
 function taille(value) {
   if (!value) return "";
   return value >= 1048576 ? `${(value / 1048576).toFixed(1)} Mo` : `${Math.max(1, Math.round(value / 1024))} Ko`;
 }
 
+function iconeDocument(type = "") {
+  if (type === "application/pdf") return "fa-file-pdf";
+  if (type.includes("spreadsheet") || type.includes("excel") || type === "text/csv") return "fa-file-excel";
+  return "fa-file-word";
+}
+
 export default function Library({ sessionToken, monUsername, documentAouvrirId = null }) {
-  const [documentCible, setDocumentCible] = useState(null);
-  const [playlists, setPlaylists] = useState([]);
-  const [playlistsTotal, setPlaylistsTotal] = useState(0);
-  const [chargementPlusPlaylists, setChargementPlusPlaylists] = useState(false);
-  const [playlist, setPlaylist] = useState(null);
   const [documents, setDocuments] = useState([]);
-  const [documentsTotal, setDocumentsTotal] = useState(0);
-  const [chargementPlusDocuments, setChargementPlusDocuments] = useState(false);
-  const [documentsRecherche, setDocumentsRecherche] = useState([]);
-  const [documentsRechercheTotal, setDocumentsRechercheTotal] = useState(0);
-  const [chargementPlusRecherche, setChargementPlusRecherche] = useState(false);
+  const [total, setTotal] = useState(0);
   const [recherche, setRecherche] = useState("");
   const [chargement, setChargement] = useState(true);
+  const [chargementPlus, setChargementPlus] = useState(false);
   const [erreur, setErreur] = useState("");
   const [profil, setProfil] = useState(null);
-  const [creationOuverte, setCreationOuverte] = useState(false);
-  const [uploadOuvert, setUploadOuvert] = useState(false);
-  const [uploadGlobal, setUploadGlobal] = useState(false);
-  const [fichierGlobal, setFichierGlobal] = useState(null);
-  const [titreGlobal, setTitreGlobal] = useState("");
-  const [descriptionGlobal, setDescriptionGlobal] = useState("");
+
+  const [partageOuvert, setPartageOuvert] = useState(false);
+  const [fichier, setFichier] = useState(null);
   const [titre, setTitre] = useState("");
   const [description, setDescription] = useState("");
-  const [fichier, setFichier] = useState(null);
-  const [titreDoc, setTitreDoc] = useState("");
-  const [descriptionDoc, setDescriptionDoc] = useState("");
   const [envoi, setEnvoi] = useState(false);
+
   const [apercu, setApercu] = useState(null);
-  const [docCommentaires, setDocCommentaires] = useState({});
-  const [avisOuvert, setAvisOuvert] = useState(null);
-  const [avisTexte, setAvisTexte] = useState("");
-
-  const chargerPlaylists = useCallback(async () => {
-    const r = await listerPlaylistsLibrary(sessionToken, "", recherche);
-    setPlaylists(r.playlists || []);
-    setPlaylistsTotal(r.total ?? (r.playlists || []).length);
-    if (playlist && !(r.playlists || []).some(p => p.id === playlist.id)) setPlaylist(null);
-  }, [sessionToken, recherche, playlist]);
-
-  const chargerDocs = useCallback(async (p = playlist) => {
-    if (!p) { setDocuments([]); setDocumentsTotal(0); return; }
-    const r = await listerDocumentsLibrary(sessionToken, p.id, recherche, 0, 100);
-    setDocuments(r.documents || []);
-    setDocumentsTotal(r.total ?? (r.documents || []).length);
-  }, [sessionToken, playlist, recherche]);
+  const [documentCible, setDocumentCible] = useState(null);
+  const [commentaires, setCommentaires] = useState([]);
+  const [commentaire, setCommentaire] = useState("");
+  const [chargementCommentaires, setChargementCommentaires] = useState(false);
+  const [envoiCommentaire, setEnvoiCommentaire] = useState(false);
 
   useEffect(() => {
     let actif = true;
-    setChargement(true); setErreur("");
-    listerPlaylistsLibrary(sessionToken, "", recherche)
-      .then(r => { if (!actif) return; setPlaylists(r.playlists || []); setPlaylistsTotal(r.total ?? (r.playlists || []).length); })
-      .catch(e => { if (actif) setErreur(e.message); })
-      .finally(() => { if (actif) setChargement(false); });
-    return () => { actif = false; };
+    const timer = window.setTimeout(async () => {
+      setChargement(true);
+      setErreur("");
+      try {
+        const resultat = await rechercherDocumentsLibrary(sessionToken, recherche.trim(), 0, 100);
+        if (!actif) return;
+        setDocuments(resultat.documents || []);
+        setTotal(resultat.total ?? (resultat.documents || []).length);
+      } catch (e) {
+        if (actif) setErreur(e.message || "Impossible de charger les documents.");
+      } finally {
+        if (actif) setChargement(false);
+      }
+    }, recherche.trim() ? 180 : 0);
+    return () => { actif = false; window.clearTimeout(timer); };
   }, [sessionToken, recherche]);
-
-  useEffect(() => {
-    setDocuments([]);
-    setDocumentsTotal(0);
-    if (playlist) chargerDocs(playlist).catch(e => setErreur(e.message));
-  }, [playlist?.id, recherche, chargerDocs]);
-  useEffect(() => {
-    let actif = true;
-    const mot = recherche.trim();
-    if (!mot) { setDocumentsRecherche([]); return () => { actif = false; }; }
-    setDocumentsRecherche([]); setDocumentsRechercheTotal(0);
-    rechercherDocumentsLibrary(sessionToken, mot, "", 0, 100)
-      .then(r => { if (actif) { setDocumentsRecherche(r.documents || []); setDocumentsRechercheTotal(r.total ?? (r.documents || []).length); } })
-      .catch(e => { if (actif) setErreur(e.message); });
-    return () => { actif = false; };
-  }, [sessionToken, recherche]);
-
-  function ouvrirDocumentRecherche(doc) {
-    setPlaylist({ id: doc.playlist_id, titre: doc.playlist, categorie: doc.categorie, description: "Ressources publiques de la communauté GRIND." });
-    setDocumentCible(doc.id);
-    setApercu(doc);
-  }
 
   useEffect(() => {
     let actif = true;
     if (!documentAouvrirId) return () => { actif = false; };
-    obtenirDocumentLibrary(sessionToken, Number(documentAouvrirId)).then(r => {
-      if (!actif) return;
-      setPlaylist(r.playlist);
-      setDocumentCible(r.document.id);
-      setApercu(r.document);
-    }).catch(e => { if (actif) setErreur(e.message); });
+    obtenirDocumentLibrary(sessionToken, Number(documentAouvrirId))
+      .then(r => { if (actif) setApercu(r.document); })
+      .catch(e => { if (actif) setErreur(e.message); });
     return () => { actif = false; };
   }, [sessionToken, documentAouvrirId]);
 
-  async function creer(e) {
-    e.preventDefault(); setEnvoi(true); setErreur("");
-    try {
-      const r = await creerPlaylistLibrary(sessionToken, { titre, description });
-      setTitre(""); setDescription(""); setCreationOuverte(false); await chargerPlaylists();
-      setPlaylist(r.playlist);
-    } catch (e) { setErreur(e.message); } finally { setEnvoi(false); }
-  }
-  async function publierDocumentGlobal(e) {
-    e.preventDefault();
-    if (!fichierGlobal) return;
-    setEnvoi(true); setErreur("");
-    try {
-      const r = await uploaderDocumentLibrary(sessionToken, "", fichierGlobal, null, titreGlobal, descriptionGlobal);
-      setFichierGlobal(null); setTitreGlobal(""); setDescriptionGlobal(""); setUploadGlobal(false);
-      const liste = await listerPlaylistsLibrary(sessionToken, "", "");
-      setPlaylists(liste.playlists || []);
-      setPlaylistsTotal(liste.total ?? (liste.playlists || []).length);
-      if (r.document) {
-        const cible = (liste.playlists || []).find(x => x.id === r.document.playlist_id);
-        if (cible) {
-          setPlaylist(cible);
-          const page = await listerDocumentsLibrary(sessionToken, cible.id, "", 0, 100);
-          setDocuments(page.documents || []);
-          setDocumentsTotal(page.total ?? (page.documents || []).length);
-        }
-        setDocumentCible(r.document.id);
-        setApercu(r.document);
-      }
-    } catch (e) { setErreur(e.message); } finally { setEnvoi(false); }
-  }
-
   async function publierDocument(e) {
-    e.preventDefault(); if (!fichier || !playlist) return;
-    setEnvoi(true); setErreur("");
+    e.preventDefault();
+    if (!fichier || !titre.trim()) {
+      setErreur("Choisis un fichier et donne-lui un titre pour qu'il soit retrouvable.");
+      return;
+    }
+    setEnvoi(true);
+    setErreur("");
     try {
-      await uploaderDocumentLibrary(sessionToken, "", fichier, playlist.id, titreDoc, descriptionDoc);
-      setFichier(null); setTitreDoc(""); setDescriptionDoc(""); setUploadOuvert(false); await chargerDocs(playlist);
-    } catch (e) { setErreur(e.message); } finally { setEnvoi(false); }
-  }
-  async function voter(doc, valeur) {
-    const avant = doc.mon_vote;
-    const majVote = d => d.id === doc.id ? { ...d, mon_vote: avant === valeur ? 0 : valeur, votes_positifs: d.votes_positifs + (avant === 1 ? -1 : valeur === 1 ? 1 : 0), votes_negatifs: d.votes_negatifs + (avant === -1 ? -1 : valeur === -1 ? 1 : 0) } : d;
-    setDocuments(ds => ds.map(majVote));
-    setDocumentsRecherche(ds => ds.map(majVote));
-    try { await voterDocumentLibrary(sessionToken, doc.id, valeur); } catch (e) { setErreur(e.message); await chargerDocs(); }
-  }
-  async function ouvrirAvis(doc) {
-    setAvisOuvert(doc); setAvisTexte("");
-    try { const r = await listerCommentairesDocumentLibrary(sessionToken, doc.id); setDocCommentaires(s => ({ ...s, [doc.id]: r.commentaires || [] })); }
-    catch (e) { setErreur(e.message); }
-  }
-  async function envoyerAvis(e) {
-    e.preventDefault(); if (!avisOuvert || !avisTexte.trim()) return;
-    try { await commenterDocumentLibrary(sessionToken, avisOuvert.id, avisTexte); const r = await listerCommentairesDocumentLibrary(sessionToken, avisOuvert.id); setDocCommentaires(s => ({ ...s, [avisOuvert.id]: r.commentaires || [] })); setAvisTexte(""); await chargerDocs(); }
-    catch (e) { setErreur(e.message); }
+      await uploaderDocumentLibrary(sessionToken, fichier, titre.trim(), description.trim());
+      setFichier(null);
+      setTitre("");
+      setDescription("");
+      setPartageOuvert(false);
+      const resultat = await rechercherDocumentsLibrary(sessionToken, recherche.trim(), 0, 100);
+      setDocuments(resultat.documents || []);
+      setTotal(resultat.total ?? (resultat.documents || []).length);
+    } catch (e) {
+      setErreur(e.message || "Le document n'a pas pu être partagé.");
+    } finally {
+      setEnvoi(false);
+    }
   }
 
-  async function chargerPlusDocuments() {
-    if (!playlist || chargementPlusDocuments || documents.length >= documentsTotal) return;
-    setChargementPlusDocuments(true);
+  async function chargerPlus() {
+    if (chargementPlus || documents.length >= total) return;
+    setChargementPlus(true);
     try {
-      const r = await listerDocumentsLibrary(sessionToken, playlist.id, recherche, documents.length, 100);
-      setDocuments(prev => [...prev, ...(r.documents || [])]);
-      setDocumentsTotal(r.total ?? documentsTotal);
-    } catch (e) { setErreur(e.message); }
-    finally { setChargementPlusDocuments(false); }
+      const resultat = await rechercherDocumentsLibrary(sessionToken, recherche.trim(), documents.length, 100);
+      setDocuments(prev => [...prev, ...(resultat.documents || [])]);
+      setTotal(resultat.total ?? total);
+    } catch (e) {
+      setErreur(e.message || "Impossible de charger la suite.");
+    } finally {
+      setChargementPlus(false);
+    }
   }
 
-  async function chargerPlusDocumentsRecherche() {
-    if (chargementPlusRecherche || documentsRecherche.length >= documentsRechercheTotal) return;
-    setChargementPlusRecherche(true);
+  async function ouvrirCommentaires(doc) {
+    setDocumentCible(doc);
+    setCommentaires([]);
+    setCommentaire("");
+    setChargementCommentaires(true);
     try {
-      const r = await rechercherDocumentsLibrary(sessionToken, recherche, "", documentsRecherche.length, 100);
-      setDocumentsRecherche(prev => [...prev, ...(r.documents || [])]);
-      setDocumentsRechercheTotal(r.total ?? documentsRechercheTotal);
-    } catch (e) { setErreur(e.message); }
-    finally { setChargementPlusRecherche(false); }
+      const resultat = await listerCommentairesDocumentLibrary(sessionToken, doc.id);
+      setCommentaires(resultat.commentaires || []);
+    } catch (e) {
+      setErreur(e.message || "Les commentaires sont indisponibles.");
+    } finally {
+      setChargementCommentaires(false);
+    }
   }
 
-  async function chargerPlusPlaylists() {
-    if (chargementPlusPlaylists || playlists.length >= playlistsTotal) return;
-    setChargementPlusPlaylists(true);
+  async function envoyerCommentaire(e) {
+    e.preventDefault();
+    if (!documentCible || !commentaire.trim() || envoiCommentaire) return;
+    setEnvoiCommentaire(true);
     try {
-      const r = await listerPlaylistsLibrary(sessionToken, "", recherche, playlists.length, 100);
-      setPlaylists(prev => {
-        const deja = new Set(prev.map(p => p.id));
-        return [...prev, ...(r.playlists || []).filter(p => !deja.has(p.id))];
-      });
-      setPlaylistsTotal(r.total ?? playlistsTotal);
-    } catch (e) { setErreur(e.message); }
-    finally { setChargementPlusPlaylists(false); }
+      await commenterDocumentLibrary(sessionToken, documentCible.id, commentaire.trim());
+      const resultat = await listerCommentairesDocumentLibrary(sessionToken, documentCible.id);
+      setCommentaires(resultat.commentaires || []);
+      setCommentaire("");
+      setDocuments(prev => prev.map(doc => doc.id === documentCible.id ? { ...doc, commentaires: (doc.commentaires || 0) + 1 } : doc));
+    } catch (e) {
+      setErreur(e.message || "Le commentaire n'a pas pu être envoyé.");
+    } finally {
+      setEnvoiCommentaire(false);
+    }
   }
 
   if (profil) return <ProfilPublic username={profil} onRetour={() => setProfil(null)} sessionToken={sessionToken} monUsername={monUsername} />;
 
   return <main className="library-page">
     <header className="library-header">
-      <div className="library-marque"><span className="library-mark"><i className="fa-solid fa-book-open" /></span><div><h1>Library</h1><p>Le savoir se partage. Les ressources restent accessibles à tous.</p></div></div>
-      <div className="library-header-actions"><button type="button" className="library-upload-global" onClick={() => setUploadGlobal(v => !v)}><i className="fa-solid fa-file-arrow-up" /> Partager un document</button><button type="button" className="library-create" onClick={() => setCreationOuverte(v => !v)}><i className="fa-solid fa-pen-to-square" /> Créer un playsit</button></div>
+      <div className="library-marque">
+        <span className="library-mark"><i className="fa-solid fa-book-open" /></span>
+        <div><h1>Bibliothèque</h1><p>Tous les documents partagés, réunis au même endroit.</p></div>
+      </div>
+      <div className="library-header-actions">
+        <button type="button" className="library-upload-global" onClick={() => setPartageOuvert(v => !v)}>
+          <i className="fa-solid fa-file-arrow-up" /> Partager un document
+        </button>
+      </div>
     </header>
-    {uploadGlobal && <form className="library-form" onSubmit={publierDocumentGlobal}>
-      <div className="library-form-title"><i className="fa-solid fa-cloud-arrow-up" /> Publier une ressource dans la Library</div>
-      <input value={titreGlobal} onChange={e => setTitreGlobal(e.target.value)} placeholder="Titre du document (facultatif)" maxLength={180} />
-      <textarea value={descriptionGlobal} onChange={e => setDescriptionGlobal(e.target.value)} rows={2} maxLength={2000} placeholder="Décrire la ressource (facultatif)" />
-      <label className="library-file"><i className="fa-solid fa-paperclip" /> {fichierGlobal ? fichierGlobal.name : "Choisir PDF, Word, Excel ou CSV (30 Mo max)"}<input type="file" accept=".pdf,.docx,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={e => setFichierGlobal(e.target.files?.[0] || null)} required /></label>
-      <div className="library-form-actions"><button type="button" className="bouton-retour" onClick={() => setUploadGlobal(false)}>Annuler</button><button disabled={envoi || !fichierGlobal}>{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Publier la ressource"}</button></div>
-      <small>Le document sera ajouté à la bibliothèque publique.</small>
-    </form>}
-    <div className="library-search"><i className="fa-solid fa-magnifying-glass" /><input value={recherche} onChange={e => setRecherche(e.target.value)} placeholder="Rechercher une playlist ou un document…" /></div>
-    {creationOuverte && <form className="library-form" onSubmit={creer}>
-      <div className="library-form-title"><i className="fa-solid fa-folder-plus" /> Nouveau playsit public</div>
-      <input value={titre} onChange={e => setTitre(e.target.value)} maxLength={120} placeholder="Nom du playsit" required />
-      <textarea value={description} onChange={e => setDescription(e.target.value)} maxLength={1200} rows={2} placeholder="Description (facultative)" />
-      <div className="library-form-actions"><button type="button" className="bouton-retour" onClick={() => setCreationOuverte(false)}>Annuler</button><button disabled={envoi}>{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Créer le playsit"}</button></div>
-      <small>Playlist publique : les membres peuvent y partager librement leurs documents.</small>
-    </form>}
-    {erreur && <div className="library-error" role="alert">{erreur}</div>}
-    {!playlist && recherche.trim() && <section className="library-docs library-search-results"><div className="library-section-heading"><div><h2>Documents trouvés</h2><p>Recherche dans tous les playsits publics.</p></div><span>{documentsRecherche.length} résultat{documentsRecherche.length > 1 ? "s" : ""}</span></div>{documentsRecherche.length === 0 ? <div className="library-empty">Aucun document correspondant dans la Library.</div> : documentsRecherche.map(doc => <article className="library-doc" key={`search-${doc.id}`}>
-      <div className="library-doc-icon"><i className={`fa-solid ${doc.fichier_type === "application/pdf" ? "fa-file-pdf" : doc.fichier_type.includes("spreadsheet") || doc.fichier_type === "text/csv" || doc.fichier_type.includes("excel") ? "fa-file-excel" : "fa-file-word"}`} /></div>
-      <div className="library-doc-main"><h3>{doc.titre}</h3><p className="library-doc-author">Dans {doc.playlist} · <button onClick={() => setProfil(doc.auteur.username)}>{doc.auteur.nom}</button></p><p className="library-doc-meta">{dateCourte(doc.date)}</p>{doc.description && <p className="library-doc-description">{doc.description}</p>}
-        <div className="library-doc-actions"><button type="button" title="Prévisualiser" aria-label="Prévisualiser" onClick={() => ouvrirDocumentRecherche(doc)}><i className="fa-regular fa-eye" /></button><a href={doc.fichier_url} download={doc.fichier_nom} target="_blank" rel="noreferrer" title="Télécharger" aria-label="Télécharger"><i className="fa-solid fa-download" /></a><button className={doc.mon_vote === 1 ? "actif" : ""} onClick={() => voter(doc, 1)} title="Utile" aria-label="Utile"><i className="fa-regular fa-thumbs-up" /> <small>{doc.votes_positifs}</small></button><button className={doc.mon_vote === -1 ? "actif" : ""} onClick={() => voter(doc, -1)} title="Peu utile" aria-label="Peu utile"><i className="fa-regular fa-thumbs-down" /> <small>{doc.votes_negatifs}</small></button><button onClick={() => ouvrirAvis(doc)} title="Avis" aria-label="Avis"><i className="fa-regular fa-comment" /> <small>{doc.commentaires}</small></button></div>
-      </div></article>)}{documentsRecherche.length < documentsRechercheTotal && <button type="button" className="library-load-more" onClick={chargerPlusDocumentsRecherche} disabled={chargementPlusRecherche}>{chargementPlusRecherche ? "Chargement…" : "Afficher les documents suivants"}</button>}</section>}
-    {playlist ? <>
-      <div className="library-playlist-head"><button className="library-back" onClick={() => setPlaylist(null)}><i className="fa-solid fa-arrow-left" /> Bibliothèque</button><div><h2>{playlist.titre}</h2><p>{playlist.description || "Ressources partagées par la communauté GRIND."}</p></div><button className="library-upload" onClick={() => setUploadOuvert(v => !v)}><i className="fa-solid fa-file-arrow-up" /> Ajouter un document</button></div>
-      {uploadOuvert && <form className="library-form" onSubmit={publierDocument}>
-        <div className="library-form-title">Partager dans « {playlist.titre} »</div><input value={titreDoc} onChange={e => setTitreDoc(e.target.value)} maxLength={180} placeholder="Titre du document" required />
-        <textarea value={descriptionDoc} onChange={e => setDescriptionDoc(e.target.value)} maxLength={2000} rows={2} placeholder="Description du contenu" />
-        <label className="library-file"><i className="fa-solid fa-paperclip" /> {fichier ? fichier.name : "Choisir PDF, Excel ou CSV (30 Mo max)"}<input type="file" accept=".pdf,.docx,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={e => setFichier(e.target.files?.[0] || null)} required /></label>
-        <div className="library-form-actions"><button type="button" className="bouton-retour" onClick={() => setUploadOuvert(false)}>Annuler</button><button disabled={envoi || !fichier}>{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Publier dans le playsit"}</button></div>
-      </form>}
-      <section className="library-docs">{documents.length === 0 ? <div className="library-empty">Aucun document dans ce playsit pour le moment. Tu peux y partager la première ressource.</div> : documents.map(doc => <article className={`library-doc ${documentCible === doc.id ? "library-doc-cible" : ""}`} key={doc.id}>
-        <div className="library-doc-icon"><i className={`fa-solid ${doc.fichier_type === "application/pdf" ? "fa-file-pdf" : doc.fichier_type.includes("spreadsheet") || doc.fichier_type === "text/csv" || doc.fichier_type.includes("excel") ? "fa-file-excel" : "fa-file-word"}`} /></div>
-        <div className="library-doc-main"><h3>{doc.titre}</h3><p className="library-doc-author">Par <button onClick={() => setProfil(doc.auteur.username)}>{doc.auteur.nom}</button></p><p className="library-doc-meta">{dateCourte(doc.date)}{doc.taille_octets ? ` · ${taille(doc.taille_octets)}` : ""}</p>{doc.description && <p className="library-doc-description">{doc.description}</p>}
-          <div className="library-doc-actions"><button type="button" title="Prévisualiser" aria-label="Prévisualiser" onClick={() => { setDocumentCible(doc.id); setApercu(doc); }}><i className="fa-regular fa-eye" /></button><a href={doc.fichier_url} download={doc.fichier_nom} target="_blank" rel="noreferrer" title="Télécharger" aria-label="Télécharger"><i className="fa-solid fa-download" /></a><button className={doc.mon_vote === 1 ? "actif" : ""} onClick={() => voter(doc, 1)} title="Utile" aria-label="Utile"><i className="fa-regular fa-thumbs-up" /> <small>{doc.votes_positifs}</small></button><button className={doc.mon_vote === -1 ? "actif" : ""} onClick={() => voter(doc, -1)} title="Peu utile" aria-label="Peu utile"><i className="fa-regular fa-thumbs-down" /> <small>{doc.votes_negatifs}</small></button><button onClick={() => ouvrirAvis(doc)} title="Avis" aria-label="Avis"><i className="fa-regular fa-comment" /> <small>{doc.commentaires}</small></button></div>
-        </div>
-      </article>)}{documents.length < documentsTotal && <button type="button" className="library-load-more" onClick={chargerPlusDocuments} disabled={chargementPlusDocuments}>{chargementPlusDocuments ? "Chargement…" : "Afficher les documents suivants"}</button>}</section>
-    </> : <section className="library-playlists"><div className="library-section-heading"><div><h2>Playsits publics</h2><p>Tous les playsits publics, consultables et enrichis par la communauté.</p></div><span>{playlists.length} playsits</span></div>{chargement ? <ChargementGrind texte="Chargement de la Library…" /> : playlists.length === 0 ? <div className="library-empty">Aucun playsit trouvé. Essaie une autre recherche ou crée le premier.</div> : <div className="library-playlist-grid">{playlists.map(p => <button key={p.id} className="library-playlist" onClick={() => setPlaylist(p)}><span className="library-folder"><i className="fa-regular fa-folder-open" /></span><span className="library-playlist-text"><strong>{p.titre}</strong><small>{p.documents} document{p.documents > 1 ? "s" : ""}</small><small>Par {p.createur.nom}</small></span><i className="fa-solid fa-arrow-up-right-from-square" /></button>)}</div>}{playlists.length < playlistsTotal && <button type="button" className="library-load-more" onClick={chargerPlusPlaylists} disabled={chargementPlusPlaylists}>{chargementPlusPlaylists ? "Chargement…" : `Afficher les ${Math.min(100, playlistsTotal - playlists.length)} playlists suivantes`}</button>}</section>}
 
-    {apercu && <div className="library-modal-backdrop" onClick={() => setApercu(null)}><section className="library-preview-modal" role="dialog" aria-modal="true" aria-label={`Aperçu : ${apercu.titre}`} onClick={e => e.stopPropagation()}><header><div><strong>{apercu.titre}</strong><small>Partagé par {apercu.auteur?.nom || "un membre"}</small></div><button onClick={() => setApercu(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header><ApercuDocument document={apercu} sessionToken={sessionToken} /></section></div>}
-    {avisOuvert && <div className="library-modal-backdrop" onClick={() => setAvisOuvert(null)}><section className="library-review-modal" onClick={e => e.stopPropagation()}><header><strong>Avis sur « {avisOuvert.titre} »</strong><button onClick={() => setAvisOuvert(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header><div className="library-review-list">{(docCommentaires[avisOuvert.id] || []).map(c => <div className="library-review" key={c.id}><button onClick={() => setProfil(c.username)}>{c.nom || c.username}</button><p>{c.contenu}</p><small>{new Date(c.date).toLocaleDateString("fr-FR")}</small></div>)}</div><form onSubmit={envoyerAvis}><input value={avisTexte} onChange={e => setAvisTexte(e.target.value)} maxLength={2000} placeholder="Écrire un avis…" /><button disabled={!avisTexte.trim()}><i className="fa-solid fa-paper-plane" /></button></form></section></div>}
+    {partageOuvert && <form className="library-form" onSubmit={publierDocument}>
+      <div className="library-form-title"><i className="fa-solid fa-cloud-arrow-up" /> Ajouter un document partagé</div>
+      <input value={titre} onChange={e => setTitre(e.target.value)} placeholder="Titre du document (obligatoire)" maxLength={180} required />
+      <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} maxLength={2000} placeholder="Description (facultative)" />
+      <label className="library-file"><i className="fa-solid fa-paperclip" /> {fichier ? fichier.name : "Choisir PDF, Word, Excel ou CSV (30 Mo max)"}
+        <input type="file" accept=".pdf,.docx,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={e => setFichier(e.target.files?.[0] || null)} required />
+      </label>
+      <div className="library-form-actions">
+        <button type="button" className="bouton-retour" onClick={() => setPartageOuvert(false)}>Annuler</button>
+        <button disabled={envoi || !fichier || !titre.trim()}>{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Partager"}</button>
+      </div>
+    </form>}
+
+    <div className="library-search">
+      <i className="fa-solid fa-magnifying-glass" />
+      <input value={recherche} onChange={e => setRecherche(e.target.value)} placeholder="Rechercher un document par son titre…" autoComplete="off" aria-label="Rechercher un document par son titre" />
+      {recherche && <button type="button" className="library-search-clear" onClick={() => setRecherche("")} aria-label="Effacer la recherche"><i className="fa-solid fa-xmark" /></button>}
+    </div>
+
+    {erreur && <div className="library-error" role="alert">{erreur}</div>}
+
+    <section className="library-docs">
+      <div className="library-section-heading">
+        <div><h2>{recherche.trim() ? "Résultats correspondants" : "Documents partagés"}</h2><p>{recherche.trim() ? "Les titres les plus proches de ta recherche apparaissent en premier." : "Les nouveaux documents apparaissent ici automatiquement."}</p></div>
+        {!chargement && <span>{total} document{total > 1 ? "s" : ""}</span>}
+      </div>
+
+      {chargement ? <ChargementGrind texte="Recherche des documents…" /> : documents.length === 0 ? (
+        <div className="library-empty">{recherche.trim() ? "Aucun document ne correspond à cette recherche." : "Aucun document partagé pour le moment."}</div>
+      ) : documents.map(doc => <article className="library-doc" key={doc.id}>
+        <div className="library-doc-icon"><i className={`fa-solid ${iconeDocument(doc.fichier_type)}`} /></div>
+        <div className="library-doc-main">
+          <h3>{doc.titre}</h3>
+          <p className="library-doc-author">Partagé par <button type="button" onClick={() => setProfil(doc.auteur.username)}>{doc.auteur.nom}</button></p>
+          <p className="library-doc-meta">{dateCourte(doc.date)}{doc.taille_octets ? ` · ${taille(doc.taille_octets)}` : ""} · {doc.fichier_nom}</p>
+          {doc.description && <p className="library-doc-description">{doc.description}</p>}
+          <div className="library-doc-actions">
+            <button type="button" title="Prévisualiser" aria-label="Prévisualiser" onClick={() => setApercu(doc)}><i className="fa-regular fa-eye" /></button>
+            <a href={doc.fichier_url} download={doc.fichier_nom} target="_blank" rel="noreferrer" title="Télécharger" aria-label="Télécharger"><i className="fa-solid fa-download" /></a>
+            <button type="button" onClick={() => ouvrirCommentaires(doc)} title="Commentaires" aria-label="Commentaires"><i className="fa-regular fa-comment" /> <small>{doc.commentaires || 0}</small></button>
+          </div>
+        </div>
+      </article>)}
+
+      {!chargement && documents.length < total && <button type="button" className="library-load-more" onClick={chargerPlus} disabled={chargementPlus}>{chargementPlus ? "Chargement…" : "Afficher les documents suivants"}</button>}
+    </section>
+
+    {apercu && <div className="library-modal-backdrop" onClick={() => setApercu(null)}>
+      <section className="library-preview-modal" role="dialog" aria-modal="true" aria-label={`Aperçu : ${apercu.titre}`} onClick={e => e.stopPropagation()}>
+        <header><div><strong>{apercu.titre}</strong><small>Partagé par {apercu.auteur?.nom || "un membre"}</small></div><button onClick={() => setApercu(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header>
+        <ApercuDocument document={apercu} sessionToken={sessionToken} />
+      </section>
+    </div>}
+
+    {documentCible && <div className="library-modal-backdrop" onClick={() => setDocumentCible(null)}>
+      <section className="library-review-modal" role="dialog" aria-modal="true" aria-label={`Commentaires : ${documentCible.titre}`} onClick={e => e.stopPropagation()}>
+        <header><strong>Commentaires — {documentCible.titre}</strong><button onClick={() => setDocumentCible(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header>
+        <div className="library-review-list">
+          {chargementCommentaires ? <ChargementGrind texte="Chargement des commentaires…" /> : commentaires.length === 0 ? <p className="library-empty">Aucun commentaire pour le moment.</p> : commentaires.map(c => <div className="library-review" key={c.id}>
+            <button type="button" onClick={() => { setDocumentCible(null); setProfil(c.username); }}>{c.nom || c.username}</button>
+            <p>{c.contenu}</p><small>{c.date ? new Date(c.date).toLocaleDateString("fr-FR") : ""}</small>
+          </div>)}
+        </div>
+        <form onSubmit={envoyerCommentaire}>
+          <input value={commentaire} onChange={e => setCommentaire(e.target.value)} maxLength={2000} placeholder="Écrire un commentaire…" />
+          <button disabled={!commentaire.trim() || envoiCommentaire} aria-label="Envoyer le commentaire">{envoiCommentaire ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-paper-plane" />}</button>
+        </form>
+      </section>
+    </div>}
   </main>;
 }
