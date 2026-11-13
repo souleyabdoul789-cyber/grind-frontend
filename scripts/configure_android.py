@@ -53,6 +53,15 @@ def configure_manifest() -> None:
         if element is None:
             element = ET.SubElement(root, "uses-feature", {android_attr("name"): feature})
         element.set(android_attr("required"), "false")
+    application = root.find("application")
+    if application is None:
+        raise SystemExit("Balise application absente du manifeste Android.")
+    metadata = next((node for node in application.findall("meta-data")
+                     if node.get(android_attr("name")) == "com.google.mlkit.vision.DEPENDENCIES"), None)
+    if metadata is None:
+        metadata = ET.SubElement(application, "meta-data")
+    metadata.set(android_attr("name"), "com.google.mlkit.vision.DEPENDENCIES")
+    metadata.set(android_attr("value"), "barcode_ui")
     ET.indent(tree, space="    ")
     tree.write(MANIFEST, encoding="utf-8", xml_declaration=True)
 
@@ -249,14 +258,43 @@ def configure_launcher_icons() -> None:
     (adaptive / "ic_launcher_round.xml").write_text(adaptive_xml, encoding="utf-8")
 
 
+def configure_app_version() -> None:
+    """Expose le numéro de version GRIND dans les informations Android."""
+    gradle = ANDROID / "app" / "build.gradle"
+    if not gradle.is_file():
+        raise SystemExit(f"Fichier Gradle Android introuvable : {gradle}")
+    source = gradle.read_text(encoding="utf-8")
+    match = re.search(r"defaultConfig\s*\{", source)
+    if not match:
+        raise SystemExit("Bloc defaultConfig introuvable dans app/build.gradle.")
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(source) and depth:
+        if source[index] == "{": depth += 1
+        elif source[index] == "}": depth -= 1
+        index += 1
+    if depth:
+        raise SystemExit("Bloc defaultConfig Gradle incomplet.")
+    block = source[start:index - 1]
+    for key, value in (("versionCode", "21000"), ("versionName", '"2.10.0"')):
+        pattern = rf"(?m)^([ \t]*){key}\s+[^\n]+$"
+        if re.search(pattern, block):
+            block = re.sub(pattern, lambda m: f"{m.group(1)}{key} {value}", block, count=1)
+        else:
+            block = block.rstrip() + f"\n        {key} {value}\n    "
+    gradle.write_text(source[:start] + block + source[index - 1:], encoding="utf-8")
+
+
 def main() -> int:
     if not ANDROID.is_dir():
         raise SystemExit("Projet Android absent : lancer d'abord `npx cap add android`.")
     configure_manifest()
+    configure_app_version()
     configure_native_window_theme()
     configure_edge_to_edge()
     configure_launcher_icons()
-    print("Manifest, thème natif sombre, bord-à-bord, permissions et icône GRIND configurés.")
+    print("Manifest, QR scanner ML Kit, version 2.10.0, thème natif, bord-à-bord, permissions et icône GRIND configurés.")
     return 0
 
 

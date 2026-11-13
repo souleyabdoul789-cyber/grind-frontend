@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { creerClasse, catalogueScolaire } from "../api.js";
+import { creerClasse, catalogueScolaire, estGrindEnLigne } from "../api.js";
 import ChargementGrind from "./ChargementGrind.jsx";
 
 /**
@@ -40,6 +40,10 @@ export default function FormulaireClasse({ sessionToken, onCree }) {
   async function creer(e) {
     e.preventDefault();
     setErreur(null);
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour créer une classe." }));
+      return;
+    }
     if (!niveau) return setErreur("Choisis le niveau de la classe.");
     if (!matiere) return setErreur("Choisis la matière de la classe.");
     setEnvoi(true);

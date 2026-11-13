@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { listerPosts, creerPost, uploaderMedia, uploaderDocument } from "../api.js";
+import { listerPosts, creerPost, uploaderMedia, uploaderDocument, estGrindEnLigne } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
 import EditeurPhoto from "../components/EditeurPhoto.jsx";
@@ -13,9 +13,16 @@ const LIMITE_LEGENDE = 500;
 
 export default function FilActu({ sessionToken, monUsername, modeInstitutionnel = false, etablissements = [], postAouvrir = null }) {
   const [profilConsulte, setProfilConsulte] = useState(null);
-  const [posts, setPosts] = useState([]);
   const [filtre, setFiltre] = useState(null);
-  const [chargement, setChargement] = useState(true);
+  const cleCachePosts = `grind_posts_${monUsername || "compte"}_${filtre || "tout"}`;
+  const cachePostsInitial = (() => { try { const value = JSON.parse(localStorage.getItem(cleCachePosts) || "[]"); return Array.isArray(value) ? value : []; } catch { return []; } })();
+  const [posts, setPosts] = useState(cachePostsInitial);
+  const postsActuels = useRef(cachePostsInitial);
+  const [chargement, setChargement] = useState(cachePostsInitial.length === 0);
+  useEffect(() => {
+    postsActuels.current = posts;
+    try { localStorage.setItem(cleCachePosts, JSON.stringify(posts.slice(-250))); } catch {}
+  }, [posts, cleCachePosts]);
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [menuPiecesOuvert, setMenuPiecesOuvert] = useState(false);
   const imagesInputRef = useRef(null);
@@ -46,16 +53,53 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [apercuMedia?.url]);
 
-  async function charger() {
-    setChargement(true);
-    const res = await listerPosts(filtre, sessionToken);
-    setPosts(res.posts || []);
-    setChargement(false);
+  function changerFiltre(nouveauFiltre) {
+    const nouvelleCle = `grind_posts_${monUsername || "compte"}_${nouveauFiltre || "tout"}`;
+    let cache = [];
+    try {
+      const valeur = JSON.parse(localStorage.getItem(nouvelleCle) || "[]");
+      if (Array.isArray(valeur)) cache = valeur;
+    } catch {}
+    postsActuels.current = cache;
+    setPosts(cache);
+    setChargement(cache.length === 0);
+    setErreur(null);
+    setFiltre(nouveauFiltre);
+  }
+
+  async function charger({ silencieux = false } = {}) {
+    if (!estGrindEnLigne()) { setChargement(false); return; }
+    if (!silencieux && postsActuels.current.length === 0) setChargement(true);
+    try {
+      const res = await listerPosts(filtre, sessionToken);
+      const entrants = Array.isArray(res.posts) ? res.posts : [];
+      setPosts((anciens) => {
+        const parId = new Map(entrants.map((post) => [post.post_id ?? post.id, post]));
+        const anciensIds = new Set(anciens.map((post) => post.post_id ?? post.id));
+        const fusion = anciens.map((ancien) => ({ ...ancien, ...(parId.get(ancien.post_id ?? ancien.id) || {}) }));
+        entrants.forEach((post) => { const id = post.post_id ?? post.id; if (!anciensIds.has(id)) fusion.push(post); });
+        try { localStorage.setItem(cleCachePosts, JSON.stringify(fusion.slice(-250))); } catch {}
+        return fusion;
+      });
+      setErreur(null);
+    } catch (error) {
+      if (!postsActuels.current.length) setErreur(error.message || "Impossible de charger les actualités.");
+    } finally { setChargement(false); }
   }
 
   useEffect(() => {
     charger();
-  }, [filtre]);
+    const actualiser = () => charger({ silencieux: true });
+    const statutApi = event => { if (event.detail?.online) actualiser(); };
+    window.addEventListener("online", actualiser);
+    window.addEventListener("grind-api-status", statutApi);
+    const intervalle = window.setInterval(actualiser, 45000);
+    return () => {
+      window.removeEventListener("online", actualiser);
+      window.removeEventListener("grind-api-status", statutApi);
+      window.clearInterval(intervalle);
+    };
+  }, [filtre, sessionToken, cleCachePosts]);
 
   useEffect(() => {
     if (!postAouvrir?.post_id || !posts.length) return;
@@ -167,6 +211,10 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
       return;
     }
 
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour publier." }));
+      return;
+    }
     setEnvoiEnCours(true);
     try {
       let media = {};
@@ -225,12 +273,12 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     <div className="fil-actu">
       <BandeauAnnonces sessionToken={sessionToken} />
       <div className="filtres-fil">
-        <button className={filtre === null ? "filtre-actif" : "filtre"} onClick={() => setFiltre(null)}>
+        <button className={filtre === null ? "filtre-actif" : "filtre"} onClick={() => changerFiltre(null)}>
           Tout
         </button>
         <button
           className={filtre === "probleme" ? "filtre-actif" : "filtre"}
-          onClick={() => setFiltre("probleme")}
+          onClick={() => changerFiltre("probleme")}
           title="Problèmes"
           aria-label="Problèmes"
         >
@@ -238,7 +286,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
         </button>
         <button
           className={filtre === "demonstration" ? "filtre-actif" : "filtre"}
-          onClick={() => setFiltre("demonstration")}
+          onClick={() => changerFiltre("demonstration")}
           title="Démonstrations"
           aria-label="Démonstrations"
         >

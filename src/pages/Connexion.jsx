@@ -65,17 +65,24 @@ export default function Connexion({ onConnecte }) {
         return;
       }
       setErreur(null);
+      setMessage("Compte Google sélectionné. Vérification sécurisée auprès de GRIND…");
       setChargement(true);
       try {
         const result = await connecterGoogle(idToken);
         if (result.username_requis) {
+          setMessage(null);
           setCredentialGoogle(idToken);
           setUsernameGoogle(result.suggested_username || "");
           setIdentiteGoogle({ prenom: result.prenom || "", nom: result.nom || "" });
         } else {
+          if (!result?.session_token || !result?.username) {
+            throw new Error("Google a répondu, mais GRIND n'a pas reçu une session valide. Réessaie.");
+          }
+          setMessage(null);
           terminer(result);
         }
       } catch (err) {
+        setMessage(null);
         setErreur(err.message || "La connexion Google a échoué.");
       } finally {
         setChargement(false);
@@ -412,7 +419,13 @@ export default function Connexion({ onConnecte }) {
                             else throw new Error("Le service de connexion Google n'est pas prêt. Réessaie.");
                           } catch (err) {
                             if (err?.code !== ErrorCode.SignInCanceled) {
-                              setErreur(err.message || "La connexion Google a échoué.");
+                              const detail = err?.code === ErrorCode.NoCredentialAvailable
+                                ? "Aucun compte Google disponible sur cet appareil."
+                                : err?.code === ErrorCode.ProviderConfigurationError
+                                  ? "Les services Google Play ne sont pas disponibles ou doivent être mis à jour."
+                                  : err?.message || "La connexion Google a échoué. Réessaie.";
+                              setMessage(null);
+                              setErreur(detail);
                             }
                           } finally {
                             setChargement(false);

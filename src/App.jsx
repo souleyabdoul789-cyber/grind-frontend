@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
 import Connexion from "./pages/Connexion.jsx";
@@ -9,7 +9,7 @@ import Profil from "./pages/Profil.jsx";
 import Reglages from "./pages/Reglages.jsx";
 import BureauAdmin from "./pages/BureauAdmin.jsx";
 import ModaleAcceptationCgu from "./components/ModaleAcceptationCgu.jsx";
-import { obtenirMonStatut, deconnecterGrind, statutPin, relockerPin, obtenirMonProfil } from "./api.js";
+import { obtenirMonStatut, deconnecterGrind, statutPin, relockerPin, obtenirMonProfil, estGrindEnLigne } from "./api.js";
 import { oublierBloques } from "./blocages.js";
 import BarreNav from "./components/BarreNav.jsx";
 import FondAnime from "./components/FondAnime.jsx";
@@ -19,7 +19,6 @@ import GestionComptes from "./components/GestionComptes.jsx";
 import Library from "./pages/Library.jsx";
 import BienvenueGrind from "./components/BienvenueGrind.jsx";
 import PaysIndisponible from "./components/PaysIndisponible.jsx";
-import EcranHorsLigne from "./components/EcranHorsLigne.jsx";
 import { statutBienvenue, verifierAccesPays, GRIND_URL } from "./api.js";
 
 function extraireCodeDepuisUrl() {
@@ -50,6 +49,11 @@ export default function App() {
   const [discussionAouvrir, setDiscussionAouvrir] = useState(null);
   const [etatConnexion, setEtatConnexion] = useState({ disponible: true, verifiee: false, verification: false, motif: "internet" });
   const [tentativeConnexion, setTentativeConnexion] = useState(0);
+  const [discussionPleineEcran, setDiscussionPleineEcran] = useState(false);
+  const [bandeauHorsLigneMasque, setBandeauHorsLigneMasque] = useState(false);
+  const [toastGrind, setToastGrind] = useState("");
+  const toastTimerRef = useRef(null);
+  const notifierModeDiscussion = useCallback((actif) => setDiscussionPleineEcran(Boolean(actif)), []);
 
   // Sur Android, demander les notifications dès le premier lancement, même avant la connexion.
   // Android 12 et antérieur n'affichent pas de dialogue runtime pour cette permission.
@@ -142,6 +146,30 @@ export default function App() {
   }, [tentativeConnexion]);
 
   useEffect(() => {
+    // Les composants enfants peuvent ainsi bloquer les actions même lorsque
+    // Android indique encore « en ligne » sur un Wi-Fi sans accès Internet.
+    const apiEnLigne = Capacitor.getPlatform() !== "android" || (etatConnexion.verifiee && etatConnexion.disponible);
+    window.__GRIND_API_ONLINE = apiEnLigne;
+    window.dispatchEvent(new CustomEvent("grind-api-status", { detail: { online: apiEnLigne } }));
+    if (etatConnexion.disponible) setBandeauHorsLigneMasque(false);
+  }, [etatConnexion.disponible, etatConnexion.verifiee]);
+
+  useEffect(() => {
+    const afficher = (event) => {
+      const message = typeof event.detail === "string" ? event.detail : event.detail?.message;
+      if (!message) return;
+      setToastGrind(message);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = window.setTimeout(() => setToastGrind(""), 2600);
+    };
+    window.addEventListener("grind-toast", afficher);
+    return () => {
+      window.removeEventListener("grind-toast", afficher);
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
     const ouvrirDiscussion = (event) => {
       const cible = event.detail;
       if (!cible?.classe_id) return;
@@ -191,6 +219,13 @@ export default function App() {
       return;
     }
 
+    // Hors ligne, on conserve uniquement le profil déjà validé sur cet appareil.
+    // Les actions sensibles restent bloquées tant que le serveur est inaccessible.
+    if (!estGrindEnLigne() && localStorage.getItem("grind_profil_complet") === "1") {
+      setProfilComplet(true);
+      setProfilPret(true);
+      return;
+    }
     // Session ancienne ou mémorisée : vérifier le profil après la validation éventuelle du PIN.
     // Le middleware de session refuse volontairement les routes privées tant que le PIN est expiré.
     setProfilPret(false);
@@ -209,6 +244,11 @@ export default function App() {
       setProfilPret(true);
     } catch (erreur) {
       if (localStorage.getItem("grind_session_token") !== token) return;
+      if (!estGrindEnLigne() && localStorage.getItem("grind_profil_complet") === "1") {
+        setProfilComplet(true);
+        setProfilPret(true);
+        return;
+      }
       setProfilErreur(erreur.message || "Impossible de vérifier le profil sur le serveur.");
       setProfilPret(true);
     }
@@ -256,10 +296,29 @@ export default function App() {
     if (!sessionToken) { setPinStatus(null); return; }
     let actif = true;
     setPinStatus({ loading: true });
+    const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
     statutPin(sessionToken)
-      .then((status) => { if (actif) setPinStatus({ ...status, loading: false }); })
+      .then((status) => {
+        if (!actif) return;
+        try { localStorage.setItem(pinCacheKey, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
+        setPinStatus({ ...status, loading: false });
+      })
       .catch(() => {
         if (!actif) return;
+        let cache = null;
+        try { cache = JSON.parse(localStorage.getItem(pinCacheKey) || "null"); } catch {}
+        const elapsed = cache?.checkedAt ? Math.max(0, (Date.now() - cache.checkedAt) / 1000) : Infinity;
+        const ageValide = Number.isFinite(elapsed) && elapsed < 48 * 60 * 60;
+        const secondesRestantes = Math.max(0, Number(cache?.status?.remaining_seconds || 0) - elapsed);
+        const pinEncoreValide = cache?.status?.configured === true && cache.status.required === false && secondesRestantes > 0;
+        if (!estGrindEnLigne() && ageValide && pinEncoreValide) {
+          setPinStatus({ ...cache.status, required: false, remaining_seconds: Math.floor(secondesRestantes), loading: false, offline: true });
+          return;
+        }
+        if (!estGrindEnLigne()) {
+          setPinStatus({ loading: false, required: true, configured: true, offline: true });
+          return;
+        }
         localStorage.removeItem("grind_session_token");
         localStorage.removeItem("grind_username");
         setSessionToken(null); setUsername(null); setPinStatus(null);
@@ -410,15 +469,6 @@ export default function App() {
     window.history.replaceState({}, "", "/");
   }
 
-  if (Capacitor.getPlatform() === "android" && etatConnexion.verifiee && !etatConnexion.disponible) {
-    return (
-      <EcranHorsLigne
-        motif={etatConnexion.motif}
-        verificationEnCours={etatConnexion.verification}
-        onReessayer={() => setTentativeConnexion((nombre) => nombre + 1)}
-      />
-    );
-  }
 
   if (paysAccess.loading) {
     return <div className="country-check" role="status"><span className="grind-spinner" /><p>Vérification de la disponibilité de GRIND…</p></div>;
@@ -510,14 +560,22 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${discussionPleineEcran ? "app-shell-discussion" : ""}`}>
       <FondAnime />
-      <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />
+      {Capacitor.getPlatform() === "android" && etatConnexion.verifiee && !etatConnexion.disponible && !bandeauHorsLigneMasque && (
+        <div className="grind-offline-chip" role="status" aria-label="Aucune connexion Internet">
+          <img src="/icon-192.png" alt="GRIND" />
+          <i className="fa-solid fa-wifi-slash" aria-hidden="true" />
+          <button type="button" onClick={() => setBandeauHorsLigneMasque(true)} aria-label="Masquer l'indicateur hors ligne"><i className="fa-solid fa-xmark" /></button>
+        </div>
+      )}
+      {toastGrind && <div className="grind-toast" role="status">{toastGrind}</div>}
+      {!discussionPleineEcran && <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />}
 
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
       {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}
       {onglet === "classes" && (
-        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} />
+        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} onModeDiscussion={notifierModeDiscussion} />
       )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
       {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}

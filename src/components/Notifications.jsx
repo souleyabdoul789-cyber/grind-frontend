@@ -217,6 +217,7 @@ export default function Notifications({ sessionToken }) {
       const nom = n.acteur_nom || n.acteur;
       if (n.eventType === "mention") return `${nom} t’a mentionné`;
       if (n.eventType === "mention_classe") return `${nom} t’a mentionné dans une discussion de classe`;
+      if (n.eventType === "message_classe") return `${nom} a envoyé un message dans une discussion de classe`;
       if (n.eventType === "like_publication") return `${nom} a aimé ta publication`;
       if (n.eventType === "commentaire") return `${nom} a commenté ta publication`;
       if (n.eventType === "reponse_commentaire") return `${nom} a répondu à ton commentaire`;

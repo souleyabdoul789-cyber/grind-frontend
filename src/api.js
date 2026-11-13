@@ -2,6 +2,12 @@
 // Les comptes sont autonomes : aucune clé G-SOCIETY n'est demandée à l'inscription.
 export const GRIND_URL = import.meta.env.VITE_GRIND_URL || "https://grind-4vsz.onrender.com";
 
+// L'application Android confirme l'accès réel à l'API via /api/health.
+// navigator.onLine seul est insuffisant lorsqu'un Wi-Fi est connecté sans Internet.
+export function estGrindEnLigne() {
+  return navigator.onLine !== false && window.__GRIND_API_ONLINE !== false;
+}
+
 async function fetchApi(url, options) {
   try {
     return await fetch(url, options);
@@ -46,8 +52,32 @@ export function connecterGrind(username, password) {
   return poster(`${GRIND_URL}/api/compte/login`, { username, password });
 }
 
-export function connecterGoogle(credential, username = null, cguAcceptees = false) {
-  return poster(`${GRIND_URL}/api/compte/google`, { credential, username, cgu_acceptees: !!cguAcceptees });
+export async function connecterGoogle(credential, username = null, cguAcceptees = false) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetchApi(`${GRIND_URL}/api/compte/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential, username, cgu_acceptees: !!cguAcceptees }),
+      signal: controller.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data.detail;
+      const error = new Error(typeof detail === "string" ? detail : detail?.message || "La vérification du compte Google a échoué.");
+      error.status = res.status;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("La vérification Google a dépassé 25 secondes. Vérifie la connexion au serveur GRIND puis réessaie.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
@@ -292,7 +322,11 @@ export function rejoindreClasse(sessionToken, codeInvitation) {
 export async function listerMesClasses(sessionToken) {
   const res = await fetchApi(`${GRIND_URL}/api/classes/mes-classes?session_token=${encodeURIComponent(sessionToken)}`);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Impossible de charger les classes.");
+  if (!res.ok) {
+    const error = new Error(typeof data.detail === "string" ? data.detail : "Impossible de charger les classes.");
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -370,7 +404,11 @@ export async function obtenirDiscussionClasse(sessionToken, classeId) {
   const url = `${GRIND_URL}/api/classes/${classeId}/discussion?session_token=${encodeURIComponent(sessionToken)}`;
   const res = await fetchApi(url);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "Impossible d'ouvrir la discussion.");
+  if (!res.ok) {
+    const error = new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "Impossible d'ouvrir la discussion.");
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -381,7 +419,11 @@ export async function listerMessagesDiscussion(sessionToken, classeId, beforeId 
   if (afterId) url.searchParams.set("after_id", String(afterId));
   const res = await fetchApi(url.toString());
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || "Impossible de charger les messages.");
+  if (!res.ok) {
+    const error = new Error(data.detail || "Impossible de charger les messages.");
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -400,6 +442,29 @@ export async function envoyerVocalDiscussion(sessionToken, classeId, fichier, re
 
 export function envoyerMessageDiscussion(sessionToken, classeId, payload) {
   return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, { session_token: sessionToken, ...payload });
+}
+
+export async function modifierMessageDiscussion(sessionToken, classeId, messageId, contenu) {
+  const res = await fetchApi(`${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken, contenu }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Impossible de modifier ce message.");
+  return data;
+}
+
+export async function supprimerMessageDiscussionPourMoi(sessionToken, classeId, messageId) {
+  const url = `${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/pour-moi`;
+  const res = await fetchApi(url, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_token: sessionToken }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || "Impossible de masquer ce message.");
+  return data;
 }
 
 export function urlDiscussion(sessionToken, discussionId) {

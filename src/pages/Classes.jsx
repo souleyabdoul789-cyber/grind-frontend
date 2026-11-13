@@ -1,15 +1,20 @@
 import FormulaireClasse from "../components/FormulaireClasse.jsx";
-import { useState, useEffect } from "react";
-import { rejoindreClasse, rejoindreDiscussion, listerMesClasses, renommerClasse, supprimerClasse, extraireCode } from "../api.js";
+import { useState, useEffect, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
+import { BarcodeScanner, BarcodeFormat } from "@capacitor-mlkit/barcode-scanning";
+import QRCode from "qrcode";
+import { rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode, estGrindEnLigne } from "../api.js";
 import SalleClasse from "../components/SalleClasse.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import EtatVide from "../components/EtatVide.jsx";
 import DiscussionClasse from "../components/DiscussionClasse.jsx";
 import ProfilPublic from "../components/ProfilPublic.jsx";
 
-export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme, discussionAouvrir, onDiscussionOuverte }) {
-  const [classes, setClasses] = useState([]);
-  const [chargement, setChargement] = useState(true);
+export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme, discussionAouvrir, onDiscussionOuverte, onModeDiscussion }) {
+  const cleCacheClasses = `grind_classes_${monUsername || "compte"}`;
+  const classesDepuisCache = (() => { try { const data = JSON.parse(localStorage.getItem(cleCacheClasses) || "[]"); return Array.isArray(data) ? data : []; } catch { return []; } })();
+  const [classes, setClasses] = useState(classesDepuisCache);
+  const [chargement, setChargement] = useState(classesDepuisCache.length === 0);
   const [salleActive, setSalleActive] = useState(null); // salle LiveKit de la classe réelle
   const [discussionActive, setDiscussionActive] = useState(null);
   const [messageInitialDiscussion, setMessageInitialDiscussion] = useState(null);
@@ -17,10 +22,11 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [ouvertureSalleId, setOuvertureSalleId] = useState(null);
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
-  const [codeInvitation, setCodeInvitation] = useState(codeAttente || "");
-  const [codeDiscussion, setCodeDiscussion] = useState("");
-  const [erreurDiscussion, setErreurDiscussion] = useState("");
-  const [adhesionDiscussion, setAdhesionDiscussion] = useState(false);
+  const [erreurScanner, setErreurScanner] = useState("");
+  const [scannerEnCours, setScannerEnCours] = useState(false);
+  const [qrClasse, setQrClasse] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const codeLienTraite = useRef(null);
   const [erreur, setErreur] = useState(null);
   const [erreurChargement, setErreurChargement] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
@@ -30,22 +36,63 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [nomEdition, setNomEdition] = useState("");
   const [classeASupprimer, setClasseASupprimer] = useState(null);
 
-  async function charger() {
-    setChargement(true);
+  async function charger({ silencieux = false } = {}) {
+    if (!estGrindEnLigne()) { setChargement(false); return; }
     setErreurChargement(null);
     try {
       const res = await listerMesClasses(sessionToken);
-      setClasses(Array.isArray(res.classes) ? res.classes : []);
+      const entrantes = Array.isArray(res.classes) ? res.classes : [];
+      setClasses((anciennes) => {
+        const idsServeur = new Set(entrantes.map((c) => Number(c.classe_id)));
+        // Les cartes déjà affichées gardent leur contenu et leur ordre.
+        // On retire uniquement les accès révoqués, puis on ajoute les nouvelles classes à la fin.
+        const fusion = anciennes.filter((c) => idsServeur.has(Number(c.classe_id)));
+        const idsAffiches = new Set(fusion.map((c) => Number(c.classe_id)));
+        entrantes.forEach((c) => { if (!idsAffiches.has(Number(c.classe_id))) fusion.push(c); });
+        try { localStorage.setItem(cleCacheClasses, JSON.stringify(fusion.slice(-100))); } catch {}
+        return fusion;
+      });
     } catch (err) {
+      if ([401, 403].includes(err.status)) {
+        // Le serveur a invalidé la session : ne plus réafficher les classes du cache local.
+        localStorage.removeItem(cleCacheClasses);
+        setClasses([]);
+      }
       setErreurChargement(err.message || "Impossible de charger les classes. Réessaie.");
-    } finally {
-      setChargement(false);
-    }
+    } finally { setChargement(false); }
   }
 
   useEffect(() => {
     charger();
-  }, []);
+    const actualiser = () => charger({ silencieux: true });
+    const statutApi = event => { if (event.detail?.online) actualiser(); };
+    window.addEventListener("online", actualiser);
+    window.addEventListener("grind-api-status", statutApi);
+    const intervalle = window.setInterval(actualiser, 45000);
+    return () => {
+      window.removeEventListener("online", actualiser);
+      window.removeEventListener("grind-api-status", statutApi);
+      window.clearInterval(intervalle);
+    };
+  }, [sessionToken, cleCacheClasses]);
+
+  useEffect(() => {
+    try { localStorage.setItem(cleCacheClasses, JSON.stringify(classes.slice(-100))); } catch {}
+  }, [classes, cleCacheClasses]);
+
+  useEffect(() => {
+    onModeDiscussion?.(Boolean(discussionActive && !profilConsulte && !salleActive));
+    return () => onModeDiscussion?.(false);
+  }, [discussionActive, profilConsulte, salleActive, onModeDiscussion]);
+
+  useEffect(() => {
+    let actif = true;
+    if (!qrClasse?.code_invitation) { setQrDataUrl(""); return undefined; }
+    QRCode.toDataURL(String(qrClasse.code_invitation), { width: 240, margin: 2, errorCorrectionLevel: "M" })
+      .then(url => { if (actif) setQrDataUrl(url); })
+      .catch(() => { if (actif) setQrDataUrl(""); });
+    return () => { actif = false; };
+  }, [qrClasse]);
 
   useEffect(() => {
     const ouvrirProfil = (event) => {
@@ -67,44 +114,67 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     }
   }, [discussionAouvrir, classes, chargement, onDiscussionOuverte]);
 
-  async function gererAdhesion(e) {
-    e.preventDefault();
-    setErreur(null);
-    setEnvoiEnCours(true);
-    try {
-      await rejoindreClasse(sessionToken, extraireCode(codeInvitation));
-      setCodeInvitation("");
-      setFormulaireOuvert(null);
-      if (onCodeConsomme) onCodeConsomme();
-      charger();
-    } catch (err) {
-      setErreur(err.message);
-    } finally {
-      setEnvoiEnCours(false);
+  async function rejoindreAvecCode(codeBrut) {
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre une classe." }));
+      return;
     }
+    const code = extraireCode(String(codeBrut || "").trim());
+    if (!/^[A-Za-z0-9_-]{6,80}$/.test(code)) {
+      setErreurScanner("Ce QR code ne correspond pas à une invitation GRIND valide.");
+      return;
+    }
+    setErreurScanner("");
+    setScannerEnCours(true);
+    try {
+      await rejoindreClasse(sessionToken, code);
+      setFormulaireOuvert(null);
+      setQrClasse(null);
+      onCodeConsomme?.();
+      await charger({ silencieux: true });
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Tu as rejoint la classe." }));
+    } catch (err) {
+      setErreurScanner(err.message || "Impossible de rejoindre cette classe.");
+    } finally { setScannerEnCours(false); }
   }
 
-  async function gererAdhesionDiscussion(e) {
-    e.preventDefault();
-    setErreurDiscussion("");
-    setAdhesionDiscussion(true);
-    try {
-      const res = await rejoindreDiscussion(sessionToken, extraireCode(codeDiscussion));
-      setCodeDiscussion("");
-      await charger();
-      const cible = classes.find(c => Number(c.classe_id) === Number(res.classe_id));
-      if (cible) setDiscussionActive(cible);
-      else {
-        const actualisees = await listerMesClasses(sessionToken);
-        const ligne = (actualisees.classes || []).find(c => Number(c.classe_id) === Number(res.classe_id));
-        if (ligne) { setClasses(actualisees.classes); setDiscussionActive(ligne); }
-      }
-    } catch (err) {
-      setErreurDiscussion(err.message || "Impossible de rejoindre cette discussion.");
-    } finally {
-      setAdhesionDiscussion(false);
+  async function gererAdhesion() {
+    if (scannerEnCours) return;
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre une classe." }));
+      return;
     }
+    setErreurScanner("");
+    setScannerEnCours(true);
+    try {
+      if (Capacitor.getPlatform() === "android") {
+        const statutModule = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
+        if (!statutModule.available) {
+          await BarcodeScanner.installGoogleBarcodeScannerModule();
+          setErreurScanner("Le lecteur QR Android vient d'être installé. Appuie de nouveau sur le bouton pour scanner.");
+          return;
+        }
+      }
+      const resultat = await BarcodeScanner.scan({ formats: [BarcodeFormat.QrCode], autoZoom: true });
+      const valeur = resultat.barcodes?.find(code => code.rawValue)?.rawValue;
+      if (!valeur) return;
+      await rejoindreAvecCode(valeur);
+    } catch (err) {
+      setErreurScanner(err.message || "Impossible d'ouvrir le scanner QR.");
+    } finally { setScannerEnCours(false); }
   }
+
+  useEffect(() => {
+    if (!codeAttente) return undefined;
+    const traiterLien = () => {
+      if (!estGrindEnLigne() || codeLienTraite.current === codeAttente) return;
+      codeLienTraite.current = codeAttente;
+      rejoindreAvecCode(codeAttente);
+    };
+    traiterLien();
+    window.addEventListener("online", traiterLien);
+    return () => window.removeEventListener("online", traiterLien);
+  }, [codeAttente]);
 
   function ouvrirDiscussion(c, messageId = null) {
     setSalleActive(null);
@@ -113,6 +183,10 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   }
 
   function ouvrirSalle(classeId) {
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "La salle de classe nécessite une connexion Internet." }));
+      return;
+    }
     if (ouvertureSalleId !== null) return;
     setOuvertureSalleId(classeId);
     window.setTimeout(() => {
@@ -201,29 +275,24 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
   return (
     <div className="fil-actu">
-      <form className="discussion-rejoindre-form carte-post" onSubmit={gererAdhesionDiscussion}>
-        <div className="discussion-rejoindre-intro">
-          <span className="discussion-rejoindre-icone"><i className="fa-solid fa-comments" /></span>
-          <span><strong>Rejoindre une discussion</strong><small>Entre le code du groupe. Tu peux discuter même si la classe réelle est complète.</small></span>
-        </div>
-        <div className="discussion-rejoindre-ligne">
-          <input value={codeDiscussion} onChange={e => setCodeDiscussion(e.target.value)} placeholder="Code ou lien d'invitation du groupe" aria-label="Code ou lien d'invitation du groupe" />
-          <button type="submit" disabled={adhesionDiscussion || !codeDiscussion.trim()}>{adhesionDiscussion ? <i className="fa-solid fa-circle-notch fa-spin" /> : <><i className="fa-solid fa-arrow-right-to-bracket" /> Rejoindre</>}</button>
-        </div>
-        {erreurDiscussion && <div className="erreur" role="alert">{erreurDiscussion}</div>}
-      </form>
 
       <div className="choix-categorie" style={{ marginBottom: 16 }}>
         <button
           className={formulaireOuvert === "creer" ? "chip chip-actif" : "chip"}
-          onClick={() => setFormulaireOuvert(formulaireOuvert === "creer" ? null : "creer")}
+          onClick={() => {
+            if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour créer une classe." })); return; }
+            setFormulaireOuvert(formulaireOuvert === "creer" ? null : "creer");
+          }}
           type="button"
         >
           <i className="fa-solid fa-plus"></i> Créer une classe
         </button>
         <button
           className={formulaireOuvert === "rejoindre" ? "chip chip-actif" : "chip"}
-          onClick={() => setFormulaireOuvert(formulaireOuvert === "rejoindre" ? null : "rejoindre")}
+          onClick={() => {
+            if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre une classe." })); return; }
+            setFormulaireOuvert(formulaireOuvert === "rejoindre" ? null : "rejoindre"); setErreurScanner("");
+          }}
           type="button"
         >
           <i className="fa-solid fa-right-to-bracket"></i> Rejoindre
@@ -241,17 +310,13 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       )}
 
       {formulaireOuvert === "rejoindre" && (
-        <form className="carte-post formulaire-post" onSubmit={gererAdhesion}>
-          <label><i className="fa-solid fa-key"></i> Code d'invitation</label>
-          <input
-            value={codeInvitation}
-            onChange={(e) => setCodeInvitation(e.target.value)}
-            placeholder="colle juste le code (pas besoin du lien entier)"
-            required
-          />
-          <button type="submit" disabled={envoiEnCours}>{envoiEnCours ? <><i className="fa-solid fa-spinner fa-spin"></i> Connexion...</> : "Rejoindre"}</button>
-          {erreur && <div className="erreur"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
-        </form>
+        <div className="carte-post classe-scanner-card">
+          <button type="button" className="classe-scanner-button" onClick={gererAdhesion} disabled={scannerEnCours}>
+            {scannerEnCours ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-camera" />}
+            <span>{scannerEnCours ? "Ouverture du scanner…" : "Scanner le QR code d'une classe"}</span>
+          </button>
+          {erreurScanner && <div className="erreur" role="alert">{erreurScanner}</div>}
+        </div>
       )}
 
       {chargement ? (
@@ -262,7 +327,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
           <button type="button" onClick={charger}>Réessayer</button>
         </div>
       ) : classes.length === 0 ? (
-        <EtatVide texte="Aucune classe pour l'instant" />
+        <EtatVide texte={!estGrindEnLigne() ? "Aucune classe n'a encore été enregistrée sur cet appareil" : "Aucune classe pour l'instant"} />
       ) : (
         classes.map((c) => (
           <div key={c.classe_id} className="carte-post carte-classe">
@@ -293,6 +358,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
                   {c.est_membre_classe === false && <span> · membre du groupe uniquement</span>}
                 </div>
               </div>
+              {c.role === "prof" && !!c.code_invitation && <button className="classe-qr-action" type="button" onClick={() => setQrClasse(c)} title="Afficher le QR code de la classe" aria-label={`Afficher le QR code de ${c.nom}`}><i className="fa-solid fa-qrcode" /></button>}
               {c.role === "prof" && (
                 <div className="badge-statut statut-ouverte">
                   <i className="fa-solid fa-star"></i> Créateur
@@ -333,6 +399,18 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
           </div>
         ))
       )}
+      {qrClasse && (
+        <div className="classe-qr-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget) setQrClasse(null); }}>
+          <section className="classe-qr-modal" role="dialog" aria-modal="true" aria-label={`QR code de ${qrClasse.nom}`}>
+            <button type="button" className="classe-qr-close" onClick={() => setQrClasse(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button>
+            <strong>{qrClasse.nom}</strong>
+            <small>Scanne ce code depuis GRIND pour rejoindre la classe.</small>
+            {qrDataUrl ? <img src={qrDataUrl} alt={`QR code d'invitation pour ${qrClasse.nom}`} /> : <span className="grind-spinner" />}
+            <span className="classe-qr-security"><i className="fa-solid fa-shield-halved" /> L'accès reste vérifié par GRIND.</span>
+          </section>
+        </div>
+      )}
+
       {classeASupprimer && (
         <ConfirmModal
           message="Supprimer définitivement cette classe ? Tous ses membres seront retirés."

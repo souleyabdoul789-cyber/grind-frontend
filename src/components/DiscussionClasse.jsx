@@ -6,7 +6,8 @@ import {
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
   restreindreMembreDiscussion, leverRestrictionDiscussion, retirerMembreDiscussion,
   transfererProprietaireDiscussion, renouvelerInvitationDiscussion, uploaderMedia, uploaderDocument,
-  envoyerVocalDiscussion, urlPieceDiscussion,
+  envoyerVocalDiscussion, urlPieceDiscussion, modifierMessageDiscussion,
+  supprimerMessageDiscussionPourMoi, estGrindEnLigne,
 } from "../api.js";
 
 function heure(date) {
@@ -108,11 +109,19 @@ function TexteMessage({ texte, onProfil }) {
     : <span key={index}>{part}</span>)}</>;
 }
 
+function lireCacheDiscussion(classeId, username) {
+  try {
+    const valeur = JSON.parse(localStorage.getItem(`grind_discussion_${username}_${classeId}`) || "null");
+    return valeur && typeof valeur === "object" ? valeur : null;
+  } catch { return null; }
+}
+
 export default function DiscussionClasse({ sessionToken, classe, monUsername, messageAouvrirId = null, onQuitter }) {
-  const [discussion, setDiscussion] = useState(null);
-  const [membres, setMembres] = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [chargement, setChargement] = useState(true);
+  const cacheInitial = lireCacheDiscussion(classe.classe_id, monUsername);
+  const [discussion, setDiscussion] = useState(cacheInitial?.discussion || null);
+  const [membres, setMembres] = useState(cacheInitial?.membres || []);
+  const [messages, setMessages] = useState(cacheInitial?.messages || []);
+  const [chargement, setChargement] = useState(!cacheInitial);
   const [erreur, setErreur] = useState("");
   const [texte, setTexte] = useState("");
   const [vocalEnCours, setVocalEnCours] = useState(false);
@@ -137,6 +146,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [messageErreur, setMessageErreur] = useState("");
   const [profilPhotoEnvoi, setProfilPhotoEnvoi] = useState(false);
   const [inviteCopie, setInviteCopie] = useState(false);
+  const [messagesSelectionnes, setMessagesSelectionnes] = useState([]);
+  const [menuSelectionOuvert, setMenuSelectionOuvert] = useState(false);
+  const [messageEnEdition, setMessageEnEdition] = useState(null);
+  const [suppressionEnCours, setSuppressionEnCours] = useState(false);
   const [dureesRestriction, setDureesRestriction] = useState({});
   const [renouvellementInvitation, setRenouvellementInvitation] = useState(false);
   const [transfertProprietaire, setTransfertProprietaire] = useState(null);
@@ -164,31 +177,71 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const typingTimeout = useRef(null);
   const presenceTimeouts = useRef({});
   const initialScroll = useRef(false);
+  const longPressTimer = useRef(null);
+  const longPressDeclenche = useRef(false);
+  const cacheDiscussionKey = `grind_discussion_${monUsername}_${classe.classe_id}`;
 
   const estAdmin = discussion?.mon_role === "owner" || discussion?.mon_role === "admin";
   const estOwner = discussion?.mon_role === "owner";
   const restreint = discussion?.restreint === true;
 
   const charger = useCallback(async () => {
+    if (!estGrindEnLigne()) {
+      const cache = lireCacheDiscussion(classe.classe_id, monUsername);
+      setSocketEtat("hors ligne");
+      if (!cache?.discussion) {
+        const erreur = new Error("Cette discussion n'a pas encore été téléchargée sur cet appareil.");
+        erreur.code = "CACHE_ABSENT";
+        throw erreur;
+      }
+      setDiscussion(cache.discussion);
+      setMembres(cache.membres || []);
+      setMessages(cache.messages || []);
+      messagesActuels.current = cache.messages || [];
+      setPlusAnciens(false);
+      return cache;
+    }
     const data = await obtenirDiscussionClasse(sessionToken, classe.classe_id);
     setDiscussion(data.discussion);
     setMembres(data.membres || []);
     setMessages(data.messages || []);
     messagesActuels.current = data.messages || [];
+    try { localStorage.setItem(cacheDiscussionKey, JSON.stringify({ discussion: data.discussion, membres: data.membres || [], messages: data.messages || [] })); } catch {}
     setPlusAnciens((data.messages || []).length >= 50);
     setMentionsNonLues(data.discussion?.mentions_non_lues || 0);
     initialScroll.current = false;
     return data;
-  }, [sessionToken, classe.classe_id]);
+  }, [sessionToken, classe.classe_id, monUsername, cacheDiscussionKey]);
 
   useEffect(() => {
     let actif = true;
-    setChargement(true);
+    if (!cacheInitial) setChargement(true);
     charger().then(() => { if (actif) setErreur(""); })
-      .catch(error => { if (actif) setErreur(error.message || "Impossible d'ouvrir la discussion."); })
+      .catch(error => {
+        if (!actif) return;
+        if ([401, 403, 404].includes(error.status)) {
+          // Le serveur a confirmé que cette session n'a plus accès au groupe :
+          // ne pas laisser les anciennes données en cache visibles après reconnexion.
+          localStorage.removeItem(cacheDiscussionKey);
+          setDiscussion(null); setMembres([]); setMessages([]);
+          messagesActuels.current = [];
+          setErreur(error.message || "Tu n'as plus accès à cette discussion.");
+        } else if (!cacheInitial) {
+          setErreur(error.message || "Impossible d'ouvrir la discussion.");
+        }
+      })
       .finally(() => { if (actif) setChargement(false); });
     return () => { actif = false; };
-  }, [charger]);
+  }, [charger, cacheDiscussionKey]);
+
+  useEffect(() => {
+    if (!discussion && !membres.length && !messages.length) return;
+    try {
+      localStorage.setItem(cacheDiscussionKey, JSON.stringify({
+        discussion, membres, messages: messages.slice(-100),
+      }));
+    } catch {}
+  }, [discussion, membres, messages, cacheDiscussionKey]);
 
   useEffect(() => {
     if (!discussion?.id) return undefined;
@@ -211,6 +264,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         if (data.message.contenu?.toLowerCase().includes(`@${String(monUsername).toLowerCase()}`) && data.message.auteur !== monUsername) {
           setMentionsNonLues(value => value + 1);
         }
+      } else if (data.type === "message_updated" && data.message) {
+        setMessages(prev => prev.map(m => m.id === data.message.id ? data.message : m));
       } else if (data.type === "typing" && data.username) {
         setTyping(prev => data.typing
           ? (prev.includes(data.username) ? prev : [...prev, data.username])
@@ -228,6 +283,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       } else if (data.type === "owner_changed") {
         charger().catch(() => {});
       } else if (data.type === "member_removed" && data.username === monUsername) {
+        localStorage.removeItem(cacheDiscussionKey);
+        setDiscussion(null); setMembres([]); setMessages([]);
+        messagesActuels.current = [];
         setMessageErreur("Tu as été retiré de cette discussion.");
         window.setTimeout(() => { if (actif) onQuitter?.(); }, 900);
       } else if (["member_update", "member_restriction", "member_removed", "member_joined"].includes(data.type)) {
@@ -237,6 +295,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
     const connecter = () => {
       if (!actif) return;
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+      if (!estGrindEnLigne()) { setSocketEtat("hors ligne"); retryTimer = window.setTimeout(connecter, 5000); return; }
       try {
         socket = new WebSocket(urlDiscussion(sessionToken, discussion.id));
         socketRef.current = socket;
@@ -248,25 +308,46 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           // 1008 = refus d'accès côté serveur : ne pas boucler en reconnexion
           // quand un administrateur vient de retirer ou qu'un membre a quitté.
           if (event?.code === 1008) {
+            localStorage.removeItem(cacheDiscussionKey);
+            setDiscussion(null); setMembres([]); setMessages([]);
+            messagesActuels.current = [];
             setSocketEtat("ferme");
             setMessageErreur("Ton accès à cette discussion n'est plus actif.");
             window.setTimeout(() => { if (actif) onQuitter?.(); }, 800);
             return;
           }
-          setSocketEtat("reconnexion");
-          retryTimer = window.setTimeout(connecter, 2500);
+          if (!estGrindEnLigne()) { setSocketEtat("hors ligne"); retryTimer = window.setTimeout(connecter, 5000); }
+          else { setSocketEtat("reconnexion"); retryTimer = window.setTimeout(connecter, 2500); }
         };
       } catch {
-        setSocketEtat("reconnexion");
-        retryTimer = window.setTimeout(connecter, 3500);
+        setSocketEtat(!estGrindEnLigne() ? "hors ligne" : "reconnexion");
+        retryTimer = window.setTimeout(connecter, !estGrindEnLigne() ? 5000 : 3500);
       }
     };
+    const repriseReseau = () => {
+      clearTimeout(retryTimer);
+      charger().catch(error => {
+        if ([401, 403, 404].includes(error.status)) {
+          localStorage.removeItem(cacheDiscussionKey);
+          setDiscussion(null); setMembres([]); setMessages([]);
+          messagesActuels.current = [];
+          setErreur(error.message || "Tu n'as plus accès à cette discussion.");
+        }
+      });
+      connecter();
+    };
+    const statutApi = event => {
+      if (event.detail?.online) repriseReseau();
+      else setSocketEtat("hors ligne");
+    };
+    window.addEventListener("online", repriseReseau);
+    window.addEventListener("grind-api-status", statutApi);
     connecter();
 
     // La synchronisation REST continue à faible fréquence : elle couvre la reprise
     // après veille mobile et les déploiements exécutés avec plusieurs processus.
     const actualiserMessages = async () => {
-      if (!actif) return;
+      if (!actif || !estGrindEnLigne()) return;
       const dernierId = messagesActuels.current.at(-1)?.id || 0;
       try {
         const [data, mentions] = await Promise.all([
@@ -291,6 +372,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       actif = false;
       clearTimeout(retryTimer);
       clearInterval(pollTimer);
+      window.removeEventListener("online", repriseReseau);
+      window.removeEventListener("grind-api-status", statutApi);
       if (socket) socket.close();
       Object.values(presenceTimeouts.current).forEach(clearTimeout);
       if (socketRef.current === socket) socketRef.current = null;
@@ -299,7 +382,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   useEffect(() => {
     messagesActuels.current = messages;
-  }, [messages]);
+    if (discussion) {
+      try { localStorage.setItem(cacheDiscussionKey, JSON.stringify({ discussion, membres, messages: messages.slice(-100) })); } catch {}
+    }
+  }, [messages, discussion, membres, cacheDiscussionKey]);
 
   useEffect(() => {
     if (!scrollRef.current || !messages.length) return;
@@ -421,6 +507,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function chargerPlusAnciens() {
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Les anciens messages non enregistrés sur cet appareil nécessitent Internet." }));
+      return;
+    }
     if (!messages.length || chargementAnciens) return;
     setChargementAnciens(true);
     const scroll = scrollRef.current;
@@ -435,6 +525,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function envoyer() {
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un message." })); return; }
     if (envoi || (!texte.trim() && !fichier)) return;
     setEnvoi(true); setProgression(0); setMessageErreur("");
     try {
@@ -451,10 +542,16 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           piece = { url: media.media_url, type: media.media_type || (estVideo ? "video" : "image"), nom: fichier.name, mime: fichier.type, taille: fichier.size };
         }
       }
-      const res = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
-        contenu: texte.trim(), reply_to_id: reponse?.id || null, style_texte: "normal", piece,
-      });
-      setMessages(prev => prev.some(m => m.id === res.message.id) ? prev : [...prev, res.message]);
+      if (messageEnEdition && !piece) {
+        const res = await modifierMessageDiscussion(sessionToken, classe.classe_id, messageEnEdition, texte.trim());
+        setMessages(prev => prev.map(m => m.id === messageEnEdition ? res.message : m));
+        setMessageEnEdition(null);
+      } else {
+        const res = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+          contenu: texte.trim(), reply_to_id: reponse?.id || null, style_texte: "normal", piece,
+        });
+        setMessages(prev => prev.some(m => m.id === res.message.id) ? prev : [...prev, res.message]);
+      }
       setTexte(""); setFichier(null); setReponse(null);
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
@@ -478,6 +575,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function publierVocal(fichierVocal) {
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un vocal." })); return; }
     setEnvoi(true); setProgression(0); setMessageErreur("");
     try {
       const resultat = await envoyerVocalDiscussion(
@@ -495,6 +593,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   async function demarrerVocal(event) {
     event.preventDefault();
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour enregistrer et envoyer un vocal." })); return; }
     if (vocalPreparation || vocalEnCours || envoi || texte.trim() || fichier) return;
     try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* certains WebView ne prennent pas la capture */ }
     pointeurVocalRef.current = { x: event.clientX, y: event.clientY, startedAt: Date.now(), released: false, locked: false };
@@ -639,6 +738,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   useEffect(() => () => {
+    clearTimeout(longPressTimer.current);
     annulerVocalRef.current = true;
     const recorder = mediaRecorderVocalRef.current;
     if (recorder && recorder.state !== "inactive") {
@@ -666,6 +766,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function rejoindreVraieClasse() {
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre la classe réelle." })); return; }
     setActionEnCours("classe"); setMessageErreur("");
     try {
       await rejoindreVraieClasseDepuisDiscussion(sessionToken, classe.classe_id);
@@ -676,6 +777,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function changerPhoto(event) {
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour modifier la photo du groupe." })); return; }
     const image = event.target.files?.[0];
     if (!image) return;
     setProfilPhotoEnvoi(true); setMessageErreur("");
@@ -688,6 +790,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function acterMembre(action, membre) {
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour gérer les membres." })); return; }
     setActionEnCours(`${action}:${membre.username}`); setMessageErreur("");
     try {
       if (action === "owner") await transfererProprietaireDiscussion(sessionToken, classe.classe_id, membre.username);
@@ -724,6 +827,73 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     finally { setRenouvellementInvitation(false); }
   }
 
+  function messageEditable(message) {
+    if (!message || message.auteur !== monUsername || message.piece || !message.contenu) return false;
+    const date = Date.parse(message.created_at || "");
+    return Number.isFinite(date) && Date.now() - date >= 0 && Date.now() - date <= 15 * 60 * 1000;
+  }
+
+  function basculerSelectionMessage(messageId) {
+    setMessagesSelectionnes(prev => prev.includes(messageId) ? prev.filter(id => id !== messageId) : [...prev, messageId]);
+    setMenuSelectionOuvert(false);
+  }
+
+  function commencerPressMessage(event, message) {
+    if (event.target?.closest?.("button, input, audio, video, a, textarea")) return;
+    if (messagesSelectionnes.length) return;
+    clearTimeout(longPressTimer.current);
+    debutSwipe(event, message.id);
+    longPressDeclenche.current = false;
+    longPressTimer.current = window.setTimeout(() => {
+      longPressDeclenche.current = true;
+      setMessagesSelectionnes(prev => prev.includes(message.id) ? prev : [...prev, message.id]);
+      setMenuSelectionOuvert(false);
+      try { navigator.vibrate?.(24); } catch {}
+    }, 560);
+  }
+
+  function deplacerPressMessage(event) {
+    const start = swipeStart.current.get(Number(event.currentTarget?.dataset?.messageId));
+    if (start && (Math.abs(event.clientX - start.x) > 12 || Math.abs(event.clientY - start.y) > 12)) clearTimeout(longPressTimer.current);
+  }
+
+  function terminerPressMessage(event, message) {
+    clearTimeout(longPressTimer.current);
+    if (!longPressDeclenche.current) finSwipe(event, message);
+  }
+
+  function annulerPressMessage() { clearTimeout(longPressTimer.current); }
+
+  function cliquerMessageEnModeSelection(event, message) {
+    if (longPressDeclenche.current) { longPressDeclenche.current = false; event.preventDefault(); return; }
+    if (messagesSelectionnes.length && !event.target?.closest?.("button, input, audio, video, a")) {
+      event.preventDefault(); basculerSelectionMessage(message.id);
+    }
+  }
+
+  function modifierSelection() {
+    if (messagesSelectionnes.length !== 1) return;
+    const message = messages.find(m => m.id === messagesSelectionnes[0]);
+    if (!messageEditable(message)) return;
+    setTexte(message.contenu || "");
+    setMessageEnEdition(message.id);
+    setMessagesSelectionnes([]); setMenuSelectionOuvert(false); setReponse(null);
+    requestAnimationFrame(() => { textareaRef.current?.focus(); redimensionnerSaisie(); });
+  }
+
+  async function supprimerSelectionPourMoi() {
+    if (!messagesSelectionnes.length || suppressionEnCours) return;
+    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ces messages de ton historique." })); return; }
+    setSuppressionEnCours(true); setMessageErreur("");
+    const resultats = await Promise.allSettled(messagesSelectionnes.map(id => supprimerMessageDiscussionPourMoi(sessionToken, classe.classe_id, id)));
+    const supprimes = messagesSelectionnes.filter((id, index) => resultats[index].status === "fulfilled");
+    setMessages(prev => prev.filter(message => !supprimes.includes(message.id)));
+    setMessagesSelectionnes([]); setMenuSelectionOuvert(false); setSuppressionEnCours(false);
+    const echecs = resultats.filter(r => r.status === "rejected");
+    if (echecs.length) setMessageErreur(echecs[0].reason?.message || "Certains messages n'ont pas pu être masqués.");
+    else window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Messages supprimés de ton historique." }));
+  }
+
   function ouvrirProfil(username) {
     window.dispatchEvent(new CustomEvent("grind-open-profil", { detail: username }));
   }
@@ -747,7 +917,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         </div>
       </header>
 
-      <div className="discussion-statut"><span className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"} · {discussion.limite_membres || 200} membres maximum</div>
+      <div className="discussion-statut"><span className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{!estGrindEnLigne() || socketEtat === "hors ligne" ? "Hors ligne · lecture seule" : socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"} · {discussion.limite_membres || 200} membres maximum</div>
 
       {mentionsNonLues > 0 && (
         <button
@@ -762,14 +932,26 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         </button>
       )}
 
-      <div className="discussion-corps" ref={scrollRef}>
+      <div className="discussion-corps" ref={scrollRef} onScroll={() => {
+        if (scrollRef.current && scrollRef.current.scrollTop < 72 && plusAnciens && !chargementAnciens) chargerPlusAnciens();
+      }}>
+        {messagesSelectionnes.length > 0 && <div className="discussion-selection-barre">
+          <button type="button" onClick={() => { setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }} aria-label="Annuler la sélection"><i className="fa-solid fa-xmark" /></button>
+          <strong>{messagesSelectionnes.length} sélectionné{messagesSelectionnes.length > 1 ? "s" : ""}</strong>
+          <button type="button" onClick={() => setMenuSelectionOuvert(v => !v)} aria-label="Actions des messages sélectionnés"><i className="fa-solid fa-ellipsis-vertical" /></button>
+          {menuSelectionOuvert && <div className="discussion-selection-menu">
+            {messagesSelectionnes.length === 1 && messageEditable(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" onClick={modifierSelection}><i className="fa-solid fa-pen" /> Modifier</button>}
+            {messagesSelectionnes.length === 1 && <button type="button" onClick={() => { const cible = messages.find(m => m.id === messagesSelectionnes[0]); if (cible) commencerReponse(cible); setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }}><i className="fa-solid fa-reply" /> Répondre</button>}
+            <button type="button" className="danger" onClick={supprimerSelectionPourMoi} disabled={suppressionEnCours}><i className="fa-solid fa-trash" /> {suppressionEnCours ? "Suppression…" : "Supprimer pour moi"}</button>
+          </div>}
+        </div>}
         {plusAnciens && messages.length > 0 && <button className="discussion-plus-anciens" type="button" onClick={chargerPlusAnciens} disabled={chargementAnciens}>{chargementAnciens ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-clock-rotate-left" />} Charger les messages précédents</button>}
         {messages.length === 0 ? <div className="discussion-vide"><i className="fa-regular fa-comments" /><strong>La discussion commence ici</strong><span>Pose une question, partage un cours ou aide un camarade.</span></div> : messages.map(message => {
           const propre = message.auteur === monUsername;
           const mediaPriveUrl = message.piece ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id) : null;
           return (
             <article key={message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
-              className={`discussion-ligne ${propre ? "moi" : "autre"}`} onTouchStart={event => debutSwipe(event, message.id)} onTouchEnd={event => finSwipe(event, message)} onMouseDown={event => debutSwipe(event, message.id)} onMouseUp={event => finSwipe(event, message)}>
+              className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
               {!propre && <AvatarIcone username={message.auteur} taille={34} onClic={ouvrirProfil} />}
               <div className="discussion-bulle-wrap">
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
@@ -786,7 +968,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   </>}
                   {message.piece && message.piece.type === "audio" && <LecteurVocal src={mediaPriveUrl} id={message.id} />}
                   {message.piece && message.piece.type === "document" && <a className="discussion-fichier" href={mediaPriveUrl} target="_blank" rel="noreferrer" download><span className="discussion-fichier-icone"><i className="fa-solid fa-file-pdf" /></span><span><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}</small></span><i className="fa-solid fa-download" /></a>}
-                  <span className="discussion-heure">{heure(message.created_at)}</span>
+                  <span className="discussion-heure">{heure(message.created_at)}{message.modifie && <small className="discussion-message-modifie"> · modifié</small>}</span>
                 </div>
                 <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>
               </div>
@@ -798,8 +980,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       </div>
 
       {messageErreur && <div className="discussion-erreur-message" role="alert">{messageErreur}<button type="button" onClick={() => setMessageErreur("")} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></div>}
-      {restreint ? <div className="discussion-restreint"><i className="fa-solid fa-comment-slash" /> Tu ne peux pas envoyer de message{discussion.restriction_jusqua ? ` jusqu'au ${new Date(discussion.restriction_jusqua).toLocaleString()}` : " pour le moment"}.</div> : (
+      {!estGrindEnLigne() ? <div className="discussion-hors-ligne-note"><i className="fa-solid fa-wifi-slash" /> Lecture hors ligne · les envois reprendront avec Internet.</div> : restreint ? <div className="discussion-restreint"><i className="fa-solid fa-comment-slash" /> Tu ne peux pas envoyer de message{discussion.restriction_jusqua ? ` jusqu'au ${new Date(discussion.restriction_jusqua).toLocaleString()}` : " pour le moment"}.</div> : (
         <div className="discussion-compositeur-zone">
+          {messageEnEdition && <div className="discussion-reponse-active discussion-edition-active"><span><strong>Modification du message</strong><small>Tu peux modifier ton texte pendant les 15 premières minutes.</small></span><button type="button" onClick={() => { setMessageEnEdition(null); setTexte(""); }} aria-label="Annuler la modification"><i className="fa-solid fa-xmark" /></button></div>}
           {reponse && <div className="discussion-reponse-active"><span><strong>Réponse à {reponse.auteur_nom}</strong><small>{reponse.contenu}</small></span><button type="button" onClick={() => setReponse(null)} aria-label="Annuler la réponse"><i className="fa-solid fa-xmark" /></button></div>}
           {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${iconePieceSelectionnee(fichier)}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { setFichier(null); [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }}><i className="fa-solid fa-xmark" /></button></div>}
           {envoi && <div className="discussion-progression"><span style={{ width: `${progression}%` }} /></div>}
@@ -830,8 +1013,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
                   <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
                 </div>
-                <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); envoyer(); } }} placeholder="Écrire un message…" disabled={envoi || !!fichier} />
-                {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-paper-plane" />}</button>}
+                <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); envoyer(); } }} placeholder={messageEnEdition ? "Modifier ton message…" : "Écrire un message…"} disabled={envoi || !!fichier} />
+                {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className={`fa-solid ${messageEnEdition ? "fa-check" : "fa-paper-plane"}`} />}</button>}
               </>
             )}
             <button
@@ -841,7 +1024,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
               onPointerMove={deplacerPointeurVocal}
               onPointerUp={relacherPointeurVocal}
               onPointerCancel={annulerEnregistrementVocal}
-              disabled={envoi || (!vocalEnCours && (!!texte.trim() || !!fichier))}
+              disabled={envoi || !!messageEnEdition || (!vocalEnCours && (!!texte.trim() || !!fichier))}
               title="Maintenir pour enregistrer un vocal · Toucher pour verrouiller"
               aria-label="Enregistrer un message vocal"
             ><i className={`fa-solid ${vocalEnCours || vocalPreparation ? "fa-microphone-lines" : "fa-microphone"}`} /></button>

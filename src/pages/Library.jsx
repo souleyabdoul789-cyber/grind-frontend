@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   rechercherDocumentsLibrary,
   uploaderDocumentLibrary,
   commenterDocumentLibrary,
   listerCommentairesDocumentLibrary,
-  obtenirDocumentLibrary,
+  obtenirDocumentLibrary, estGrindEnLigne,
 } from "../api.js";
 import ProfilPublic from "../components/ProfilPublic.jsx";
 import ChargementGrind from "../components/ChargementGrind.jsx";
@@ -27,11 +27,21 @@ function iconeDocument(type = "") {
   return "fa-file-word";
 }
 
+function lireDocumentsEnCache(username) {
+  try {
+    const valeur = JSON.parse(localStorage.getItem(`grind_library_docs_${username || "compte"}`) || "[]");
+    return Array.isArray(valeur) ? valeur : [];
+  } catch { return []; }
+}
+
 export default function Library({ sessionToken, monUsername, documentAouvrirId = null }) {
-  const [documents, setDocuments] = useState([]);
-  const [total, setTotal] = useState(0);
+  const cleCacheDocuments = `grind_library_docs_${monUsername || "compte"}`;
+  const [documents, setDocuments] = useState(() => lireDocumentsEnCache(monUsername));
+  const documentsCache = useRef(documents);
+  const [total, setTotal] = useState(documents.length);
   const [recherche, setRecherche] = useState("");
-  const [chargement, setChargement] = useState(true);
+  const [reconnexion, setReconnexion] = useState(0);
+  const [chargement, setChargement] = useState(() => documents.length === 0 && estGrindEnLigne());
   const [chargementPlus, setChargementPlus] = useState(false);
   const [erreur, setErreur] = useState("");
   const [profil, setProfil] = useState(null);
@@ -50,27 +60,55 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   const [envoiCommentaire, setEnvoiCommentaire] = useState(false);
 
   useEffect(() => {
+    const statutApi = event => { if (event.detail?.online) setReconnexion(value => value + 1); };
+    window.addEventListener("grind-api-status", statutApi);
+    return () => window.removeEventListener("grind-api-status", statutApi);
+  }, []);
+
+  useEffect(() => {
     let actif = true;
+    const terme = recherche.trim().toLocaleLowerCase("fr");
+    const filtrerCache = () => !terme ? documentsCache.current : documentsCache.current.filter(doc =>
+      String(doc.titre || "").toLocaleLowerCase("fr").includes(terme)
+    );
+    const local = filtrerCache();
+    setDocuments(local);
+    setTotal(local.length);
+    setErreur("");
+    if (!estGrindEnLigne()) {
+      setChargement(false);
+      return () => { actif = false; };
+    }
     const timer = window.setTimeout(async () => {
-      setChargement(true);
-      setErreur("");
+      if (!documentsCache.current.length) setChargement(true);
       try {
         const resultat = await rechercherDocumentsLibrary(sessionToken, recherche.trim(), 0, 100);
         if (!actif) return;
-        setDocuments(resultat.documents || []);
-        setTotal(resultat.total ?? (resultat.documents || []).length);
+        const trouve = resultat.documents || [];
+        setDocuments(trouve);
+        setTotal(resultat.total ?? trouve.length);
+        if (!recherche.trim()) {
+          documentsCache.current = trouve;
+          try { localStorage.setItem(cleCacheDocuments, JSON.stringify(trouve.slice(0, 100))); } catch {}
+        }
       } catch (e) {
-        if (actif) setErreur(e.message || "Impossible de charger les documents.");
+        if (actif && !local.length) setErreur(e.message || "Impossible de charger les documents.");
       } finally {
         if (actif) setChargement(false);
       }
     }, recherche.trim() ? 180 : 0);
     return () => { actif = false; window.clearTimeout(timer); };
-  }, [sessionToken, recherche]);
+  }, [sessionToken, recherche, cleCacheDocuments, reconnexion]);
 
   useEffect(() => {
     let actif = true;
     if (!documentAouvrirId) return () => { actif = false; };
+    if (!estGrindEnLigne()) {
+      const cached = documentsCache.current.find(doc => Number(doc.id) === Number(documentAouvrirId));
+      if (cached) setApercu(cached);
+      else setErreur("Ce document n'a pas encore été enregistré sur cet appareil.");
+      return () => { actif = false; };
+    }
     obtenirDocumentLibrary(sessionToken, Number(documentAouvrirId))
       .then(r => { if (actif) setApercu(r.document); })
       .catch(e => { if (actif) setErreur(e.message); });
@@ -79,6 +117,10 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
 
   async function publierDocument(e) {
     e.preventDefault();
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour partager un document." }));
+      return;
+    }
     if (!fichier || !titre.trim()) {
       setErreur("Choisis un fichier et donne-lui un titre pour qu'il soit retrouvable.");
       return;
@@ -92,8 +134,13 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
       setDescription("");
       setPartageOuvert(false);
       const resultat = await rechercherDocumentsLibrary(sessionToken, recherche.trim(), 0, 100);
-      setDocuments(resultat.documents || []);
-      setTotal(resultat.total ?? (resultat.documents || []).length);
+      const trouve = resultat.documents || [];
+      setDocuments(trouve);
+      setTotal(resultat.total ?? trouve.length);
+      if (!recherche.trim()) {
+        documentsCache.current = trouve;
+        try { localStorage.setItem(cleCacheDocuments, JSON.stringify(trouve.slice(0, 100))); } catch {}
+      }
     } catch (e) {
       setErreur(e.message || "Le document n'a pas pu être partagé.");
     } finally {
@@ -102,11 +149,24 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   }
 
   async function chargerPlus() {
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour charger d'autres documents." }));
+      return;
+    }
     if (chargementPlus || documents.length >= total) return;
     setChargementPlus(true);
     try {
       const resultat = await rechercherDocumentsLibrary(sessionToken, recherche.trim(), documents.length, 100);
-      setDocuments(prev => [...prev, ...(resultat.documents || [])]);
+      setDocuments(prev => {
+        const ajoutes = resultat.documents || [];
+        const ids = new Set(prev.map(doc => doc.id));
+        const fusion = [...prev, ...ajoutes.filter(doc => !ids.has(doc.id))];
+        if (!recherche.trim()) {
+          documentsCache.current = fusion;
+          try { localStorage.setItem(cleCacheDocuments, JSON.stringify(fusion.slice(0, 100))); } catch {}
+        }
+        return fusion;
+      });
       setTotal(resultat.total ?? total);
     } catch (e) {
       setErreur(e.message || "Impossible de charger la suite.");
@@ -117,14 +177,23 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
 
   async function ouvrirCommentaires(doc) {
     setDocumentCible(doc);
-    setCommentaires([]);
     setCommentaire("");
-    setChargementCommentaires(true);
+    const cleCommentaires = `grind_library_comments_${monUsername || "compte"}_${doc.id}`;
+    let cacheCommentaires = [];
+    try {
+      const valeur = JSON.parse(localStorage.getItem(cleCommentaires) || "[]");
+      if (Array.isArray(valeur)) cacheCommentaires = valeur;
+    } catch {}
+    setCommentaires(cacheCommentaires);
+    setChargementCommentaires(estGrindEnLigne() && cacheCommentaires.length === 0);
+    if (!estGrindEnLigne()) return;
     try {
       const resultat = await listerCommentairesDocumentLibrary(sessionToken, doc.id);
-      setCommentaires(resultat.commentaires || []);
+      const liste = resultat.commentaires || [];
+      setCommentaires(liste);
+      try { localStorage.setItem(cleCommentaires, JSON.stringify(liste.slice(-100))); } catch {}
     } catch (e) {
-      setErreur(e.message || "Les commentaires sont indisponibles.");
+      if (!cacheCommentaires.length) setErreur(e.message || "Les commentaires sont indisponibles.");
     } finally {
       setChargementCommentaires(false);
     }
@@ -132,14 +201,27 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
 
   async function envoyerCommentaire(e) {
     e.preventDefault();
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour commenter ce document." }));
+      return;
+    }
     if (!documentCible || !commentaire.trim() || envoiCommentaire) return;
     setEnvoiCommentaire(true);
     try {
       await commenterDocumentLibrary(sessionToken, documentCible.id, commentaire.trim());
       const resultat = await listerCommentairesDocumentLibrary(sessionToken, documentCible.id);
-      setCommentaires(resultat.commentaires || []);
+      const liste = resultat.commentaires || [];
+      setCommentaires(liste);
+      try { localStorage.setItem(`grind_library_comments_${monUsername || "compte"}_${documentCible.id}`, JSON.stringify(liste.slice(-100))); } catch {}
       setCommentaire("");
-      setDocuments(prev => prev.map(doc => doc.id === documentCible.id ? { ...doc, commentaires: (doc.commentaires || 0) + 1 } : doc));
+      setDocuments(prev => {
+        const actualises = prev.map(doc => doc.id === documentCible.id ? { ...doc, commentaires: (doc.commentaires || 0) + 1 } : doc);
+        const cacheComplet = documentsCache.current.map(doc => doc.id === documentCible.id
+          ? { ...doc, commentaires: (doc.commentaires || 0) + 1 } : doc);
+        documentsCache.current = cacheComplet;
+        try { localStorage.setItem(cleCacheDocuments, JSON.stringify(cacheComplet.slice(0, 100))); } catch {}
+        return actualises;
+      });
     } catch (e) {
       setErreur(e.message || "Le commentaire n'a pas pu être envoyé.");
     } finally {
@@ -156,7 +238,10 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
         <div><h1>Bibliothèque</h1><p>Tous les documents partagés, réunis au même endroit.</p></div>
       </div>
       <div className="library-header-actions">
-        <button type="button" className="library-upload-global" onClick={() => setPartageOuvert(v => !v)}>
+        <button type="button" className="library-upload-global" onClick={() => {
+        if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour partager un document." })); return; }
+        setPartageOuvert(v => !v);
+      }}>
           <i className="fa-solid fa-file-arrow-up" /> Partager un document
         </button>
       </div>
@@ -181,6 +266,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
       {recherche && <button type="button" className="library-search-clear" onClick={() => setRecherche("")} aria-label="Effacer la recherche"><i className="fa-solid fa-xmark" /></button>}
     </div>
 
+    {!estGrindEnLigne() && <div className="library-offline-note"><i className="fa-solid fa-wifi-slash" /> Bibliothèque hors ligne · documents déjà consultés sur cet appareil.</div>}
     {erreur && <div className="library-error" role="alert">{erreur}</div>}
 
     <section className="library-docs">
@@ -190,7 +276,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
       </div>
 
       {chargement ? <ChargementGrind texte="Recherche des documents…" /> : documents.length === 0 ? (
-        <div className="library-empty">{recherche.trim() ? "Aucun document ne correspond à cette recherche." : "Aucun document partagé pour le moment."}</div>
+        <div className="library-empty">{!estGrindEnLigne() ? "Aucun document de la Bibliothèque n'a été enregistré sur cet appareil." : recherche.trim() ? "Aucun document ne correspond à cette recherche." : "Aucun document partagé pour le moment."}</div>
       ) : documents.map(doc => <article className="library-doc" key={doc.id}>
         <div className="library-doc-icon"><i className={`fa-solid ${iconeDocument(doc.fichier_type)}`} /></div>
         <div className="library-doc-main">
@@ -212,7 +298,9 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
     {apercu && <div className="library-modal-backdrop" onClick={() => setApercu(null)}>
       <section className="library-preview-modal" role="dialog" aria-modal="true" aria-label={`Aperçu : ${apercu.titre}`} onClick={e => e.stopPropagation()}>
         <header><div><strong>{apercu.titre}</strong><small>Partagé par {apercu.auteur?.nom || "un membre"}</small></div><button onClick={() => setApercu(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header>
-        <ApercuDocument document={apercu} sessionToken={sessionToken} />
+        {!estGrindEnLigne()
+          ? <div className="library-preview-other"><i className="fa-solid fa-wifi-slash" /><strong>Fichier non disponible hors ligne</strong><span>Les informations du document sont consultables. Le fichier doit être téléchargé lorsque GRIND retrouve Internet.</span></div>
+          : <ApercuDocument document={apercu} sessionToken={sessionToken} />}
       </section>
     </div>}
 
@@ -220,7 +308,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
       <section className="library-review-modal" role="dialog" aria-modal="true" aria-label={`Commentaires : ${documentCible.titre}`} onClick={e => e.stopPropagation()}>
         <header><strong>Commentaires — {documentCible.titre}</strong><button onClick={() => setDocumentCible(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header>
         <div className="library-review-list">
-          {chargementCommentaires ? <ChargementGrind texte="Chargement des commentaires…" /> : commentaires.length === 0 ? <p className="library-empty">Aucun commentaire pour le moment.</p> : commentaires.map(c => <div className="library-review" key={c.id}>
+          {chargementCommentaires ? <ChargementGrind texte="Chargement des commentaires…" /> : commentaires.length === 0 ? <p className="library-empty">{!estGrindEnLigne() ? "Aucun commentaire de ce document n'a été enregistré sur cet appareil." : "Aucun commentaire pour le moment."}</p> : commentaires.map(c => <div className="library-review" key={c.id}>
             <button type="button" onClick={() => { setDocumentCible(null); setProfil(c.username); }}>{c.nom || c.username}</button>
             <p>{c.contenu}</p><small>{c.date ? new Date(c.date).toLocaleDateString("fr-FR") : ""}</small>
           </div>)}
