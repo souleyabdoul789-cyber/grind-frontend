@@ -1,4 +1,4 @@
-# GRIND 2.8.6 — APK Android, Google Sign-In et notifications push
+# GRIND 2.8.7 — APK Android, Google Sign-In et notifications push
 
 ## Ce que contient cette livraison
 
@@ -85,3 +85,14 @@ Installer l'APK debug sur un appareil Android et tester :
 - clic sur les notifications pour ouvrir la ressource correspondante.
 
 La livraison source a passé les tests backend et contrôles statiques détaillés dans la note de livraison. Le build GitHub, l'authentification réelle Google, FCM, LiveKit et le test physique restent à effectuer après l'envoi des archives.
+
+
+## 7. Démarrage Android, bord à bord et absence de connexion (2.8.7)
+
+- Au lancement de l'APK Android, GRIND vérifie la permission des notifications et présente le dialogue système si Android indique qu'une demande est possible. Si l'autorisation a déjà été refusée, Android peut ne plus afficher le dialogue : l'autorisation doit alors être réactivée dans les paramètres Android de l'application.
+- La caméra et le microphone restent demandés au moment où l'utilisateur ouvre une fonction qui en a besoin (par exemple une salle de classe), et non dès l'écran de connexion.
+- L'interface utilise l'affichage bord à bord de Capacitor 8. Les marges de sécurité Android sont respectées pour éviter que les champs et boutons se retrouvent sous les barres système.
+- Sur Android, l'application vérifie périodiquement l'accès à l'API `/api/health`. Si Internet ou le serveur GRIND est inaccessible, un écran de reconnexion au thème GRIND apparaît. La vérification automatique reprend toutes les 15 secondes ; le bouton « Réessayer » lance aussi une vérification immédiate.
+- Ce contrôle distingue une absence de réseau signalée par Android d'un serveur GRIND non joignable malgré un réseau détecté. Il ne masque pas les erreurs applicatives ordinaires lorsque le serveur répond.
+
+Après avoir envoyé les fichiers frontend mis à jour sur la branche `main`, relancer **Actions → Build GRIND Android APK → Run workflow** pour obtenir le nouvel APK. Le backend n'a pas besoin d'être modifié pour ces trois ajustements.

@@ -2,6 +2,7 @@
 """Configure le projet Android Capacitor généré pendant GitHub Actions."""
 from __future__ import annotations
 
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -57,6 +58,60 @@ def configure_manifest() -> None:
 
     ET.indent(tree, space="    ")
     tree.write(MANIFEST, encoding="utf-8", xml_declaration=True)
+
+
+def configure_edge_to_edge() -> None:
+    """Active le rendu bord à bord et le style clair des barres système."""
+    java_root = ANDROID / "app" / "src" / "main" / "java"
+    candidates = sorted(java_root.rglob("MainActivity.java")) if java_root.is_dir() else []
+    if not candidates:
+        raise SystemExit(f"MainActivity.java introuvable sous : {java_root}")
+
+    activity = candidates[0]
+    source = activity.read_text(encoding="utf-8")
+
+    if not re.search(r"^package\s+[\w.]+;", source, re.MULTILINE):
+        raise SystemExit(f"Déclaration package introuvable dans : {activity}")
+    if not re.search(r"public\s+class\s+MainActivity\s+extends\s+BridgeActivity", source):
+        raise SystemExit(f"MainActivity n'étend pas BridgeActivity : {activity}")
+
+    if "import androidx.activity.EdgeToEdge;" not in source:
+        bridge_import = "import com.getcapacitor.BridgeActivity;"
+        if bridge_import not in source:
+            raise SystemExit(f"Import BridgeActivity introuvable dans : {activity}")
+        source = source.replace(
+            bridge_import,
+            "import androidx.activity.EdgeToEdge;\n" + bridge_import,
+            1,
+        )
+
+    if "EdgeToEdge.enable(this);" not in source:
+        super_call = re.search(r"super\.onCreate\(\s*savedInstanceState\s*\)\s*;", source)
+        if super_call:
+            source = source[:super_call.start()] + "EdgeToEdge.enable(this);\n        " + source[super_call.start():]
+        else:
+            class_open = re.search(
+                r"public\s+class\s+MainActivity\s+extends\s+BridgeActivity\s*\{",
+                source,
+            )
+            if not class_open:
+                raise SystemExit(f"Début de classe MainActivity introuvable : {activity}")
+            method = (
+                "\n    @Override\n"
+                "    public void onCreate(Bundle savedInstanceState) {\n"
+                "        EdgeToEdge.enable(this);\n"
+                "        super.onCreate(savedInstanceState);\n"
+                "    }\n"
+            )
+            source = source[:class_open.end()] + method + source[class_open.end():]
+            if "import android.os.Bundle;" not in source:
+                source = source.replace(
+                    "import androidx.activity.EdgeToEdge;",
+                    "import android.os.Bundle;\nimport androidx.activity.EdgeToEdge;",
+                    1,
+                )
+
+    activity.write_text(source, encoding="utf-8")
 
 
 def configure_launcher_icons() -> None:
@@ -124,8 +179,9 @@ def main() -> int:
     if not ANDROID.is_dir():
         raise SystemExit("Projet Android absent : lancer d'abord `npx cap add android`.")
     configure_manifest()
+    configure_edge_to_edge()
     configure_launcher_icons()
-    print("Manifest Android, permissions et icône GRIND configurés.")
+    print("Manifest, affichage bord à bord, barres système, permissions et icône GRIND configurés.")
     return 0
 
 

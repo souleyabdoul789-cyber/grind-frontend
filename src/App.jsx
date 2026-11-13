@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { Capacitor } from "@capacitor/core";
+import { PushNotifications } from "@capacitor/push-notifications";
 import Connexion from "./pages/Connexion.jsx";
 import Questionnaire from "./pages/Questionnaire.jsx";
 import FilActu from "./pages/FilActu.jsx";
@@ -17,7 +19,8 @@ import GestionComptes from "./components/GestionComptes.jsx";
 import Library from "./pages/Library.jsx";
 import BienvenueGrind from "./components/BienvenueGrind.jsx";
 import PaysIndisponible from "./components/PaysIndisponible.jsx";
-import { statutBienvenue, verifierAccesPays } from "./api.js";
+import EcranHorsLigne from "./components/EcranHorsLigne.jsx";
+import { statutBienvenue, verifierAccesPays, GRIND_URL } from "./api.js";
 
 function extraireCodeDepuisUrl() {
   const correspondance = window.location.pathname.match(/^\/rejoindre\/(.+)$/);
@@ -45,6 +48,98 @@ export default function App() {
   const [documentLibraryAouvrir, setDocumentLibraryAouvrir] = useState(null);
   const [postAouvrir, setPostAouvrir] = useState(null);
   const [discussionAouvrir, setDiscussionAouvrir] = useState(null);
+  const [etatConnexion, setEtatConnexion] = useState({ disponible: true, verifiee: false, verification: false, motif: "internet" });
+  const [tentativeConnexion, setTentativeConnexion] = useState(0);
+
+  // Sur Android, demander les notifications dès le premier lancement, même avant la connexion.
+  // Android 12 et antérieur n'affichent pas de dialogue runtime pour cette permission.
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "android") return undefined;
+    let actif = true;
+    const demanderPermissionNotifications = async () => {
+      try {
+        const statutPermission = await PushNotifications.checkPermissions();
+        if (!actif || statutPermission.receive === "granted" || statutPermission.receive === "denied") return;
+        if (statutPermission.receive === "prompt" || statutPermission.receive === "prompt-with-rationale") {
+          await PushNotifications.requestPermissions();
+        }
+      } catch (erreur) {
+        console.warn("Permission des notifications GRIND indisponible", erreur);
+      }
+    };
+    demanderPermissionNotifications();
+    return () => { actif = false; };
+  }, []);
+
+  // L'état Wi-Fi seul ne garantit pas l'accès à Internet : on vérifie aussi l'API GRIND.
+  // Une panne réseau ou serveur affiche un écran de reconnexion, puis disparaît automatiquement.
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "android") return undefined;
+    let actif = true;
+    let verificationEnCours = false;
+    let controleur = null;
+    let delaiAnnulation = null;
+
+    const verifierConnexion = async () => {
+      if (!actif || verificationEnCours) return;
+      if (navigator.onLine === false) {
+        setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
+        return;
+      }
+
+      verificationEnCours = true;
+      setEtatConnexion((precedent) => ({ ...precedent, verification: true }));
+      controleur = new AbortController();
+      delaiAnnulation = window.setTimeout(() => controleur?.abort(), 9000);
+
+      try {
+        const reponse = await fetch(`${GRIND_URL}/api/health`, {
+          method: "GET",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+          signal: controleur.signal,
+        });
+        if (!reponse.ok) throw new Error(`Serveur GRIND indisponible (${reponse.status})`);
+        const donnees = await reponse.json();
+        if (donnees?.status !== "ok") throw new Error("Réponse de santé GRIND invalide");
+        if (actif) setEtatConnexion({ disponible: true, verifiee: true, verification: false, motif: null });
+      } catch {
+        if (actif) {
+          setEtatConnexion({
+            disponible: false,
+            verifiee: true,
+            verification: false,
+            motif: navigator.onLine === false ? "internet" : "service",
+          });
+        }
+      } finally {
+        if (delaiAnnulation !== null) window.clearTimeout(delaiAnnulation);
+        controleur = null;
+        delaiAnnulation = null;
+        verificationEnCours = false;
+      }
+    };
+
+    const horsLigne = () => {
+      controleur?.abort();
+      setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
+    };
+    const enLigne = () => { verifierConnexion(); };
+
+    window.addEventListener("offline", horsLigne);
+    window.addEventListener("online", enLigne);
+    verifierConnexion();
+    const intervalle = window.setInterval(verifierConnexion, 15000);
+
+    return () => {
+      actif = false;
+      window.removeEventListener("offline", horsLigne);
+      window.removeEventListener("online", enLigne);
+      window.clearInterval(intervalle);
+      controleur?.abort();
+      if (delaiAnnulation !== null) window.clearTimeout(delaiAnnulation);
+    };
+  }, [tentativeConnexion]);
 
   useEffect(() => {
     const ouvrirDiscussion = (event) => {
@@ -313,6 +408,16 @@ export default function App() {
   function consommerCode() {
     setCodeAttente(null);
     window.history.replaceState({}, "", "/");
+  }
+
+  if (Capacitor.getPlatform() === "android" && etatConnexion.verifiee && !etatConnexion.disponible) {
+    return (
+      <EcranHorsLigne
+        motif={etatConnexion.motif}
+        verificationEnCours={etatConnexion.verification}
+        onReessayer={() => setTentativeConnexion((nombre) => nombre + 1)}
+      />
+    );
   }
 
   if (paysAccess.loading) {
