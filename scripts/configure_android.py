@@ -28,7 +28,6 @@ def android_attr(name: str) -> str:
 def configure_manifest() -> None:
     if not MANIFEST.is_file():
         raise SystemExit(f"Manifest Android introuvable : {MANIFEST}")
-
     tree = ET.parse(MANIFEST)
     root = tree.getroot()
     permissions = {
@@ -45,7 +44,6 @@ def configure_manifest() -> None:
     for permission in required_permissions:
         if permission not in permissions:
             ET.SubElement(root, "uses-permission", {android_attr("name"): permission})
-
     features = {
         element.get(android_attr("name")): element
         for element in root.findall("uses-feature")
@@ -55,18 +53,90 @@ def configure_manifest() -> None:
         if element is None:
             element = ET.SubElement(root, "uses-feature", {android_attr("name"): feature})
         element.set(android_attr("required"), "false")
-
     ET.indent(tree, space="    ")
     tree.write(MANIFEST, encoding="utf-8", xml_declaration=True)
 
 
+def _upsert_style_item(style: ET.Element, name: str, value: str) -> None:
+    item = next((node for node in style.findall("item") if node.get("name") == name), None)
+    if item is None:
+        item = ET.SubElement(style, "item", {"name": name})
+    item.text = value
+
+
+def configure_native_window_theme() -> None:
+    """Évite les bandes natives blanches autour de la WebView et du splash Android."""
+    values_dir = RES / "values"
+    values_dir.mkdir(parents=True, exist_ok=True)
+
+    # Couleur de secours de la fenêtre native, visible derrière les barres système
+    # et pendant les transitions avant le premier rendu React.
+    colors_file = values_dir / "colors.xml"
+    if colors_file.is_file():
+        colors_tree = ET.parse(colors_file)
+        colors_root = colors_tree.getroot()
+    else:
+        colors_root = ET.Element("resources")
+        colors_tree = ET.ElementTree(colors_root)
+
+    background = next(
+        (node for node in colors_root.findall("color") if node.get("name") == "grind_window_background"),
+        None,
+    )
+    if background is None:
+        background = ET.SubElement(colors_root, "color", {"name": "grind_window_background"})
+    background.text = "#0A0A0F"
+    ET.indent(colors_tree, space="    ")
+    colors_tree.write(colors_file, encoding="utf-8", xml_declaration=True)
+
+    # Capacitor génère ces thèmes à chaque build : on les corrige à la génération,
+    # sans ajouter de fichiers Android générés au dépôt Git.
+    theme_files = sorted(RES.glob("values*/styles.xml")) + sorted(RES.glob("values*/themes.xml"))
+    if not theme_files:
+        raise SystemExit(f"Aucun fichier styles.xml/themes.xml trouvé sous {RES}")
+
+    themes_updated = 0
+    for theme_file in theme_files:
+        tree = ET.parse(theme_file)
+        root = tree.getroot()
+        changed = False
+        for style in root.findall("style"):
+            style_name = style.get("name", "")
+            if not style_name.startswith("AppTheme"):
+                continue
+
+            # Même fond sur le décor natif, la WebView et les transitions.
+            _upsert_style_item(style, "android:windowBackground", "@color/grind_window_background")
+            _upsert_style_item(style, "android:statusBarColor", "@android:color/transparent")
+            _upsert_style_item(style, "android:navigationBarColor", "@android:color/transparent")
+            _upsert_style_item(style, "android:windowLightStatusBar", "false")
+            _upsert_style_item(style, "android:windowLightNavigationBar", "false")
+            _upsert_style_item(style, "windowActionBar", "false")
+            _upsert_style_item(style, "android:windowNoTitle", "true")
+
+            if "Launch" in style_name:
+                _upsert_style_item(
+                    style,
+                    "android:windowSplashScreenBackground",
+                    "@color/grind_window_background",
+                )
+            changed = True
+
+        if changed:
+            ET.indent(tree, space="    ")
+            tree.write(theme_file, encoding="utf-8", xml_declaration=True)
+            themes_updated += 1
+
+    if themes_updated == 0:
+        raise SystemExit("Aucun thème AppTheme trouvé : impossible de corriger le fond natif GRIND.")
+
+
 def configure_edge_to_edge() -> None:
-    """Active le rendu bord à bord et le style clair des barres système."""
+    """Active le bord-à-bord et colore la surface native de la palette GRIND."""
     java_root = ANDROID / "app" / "src" / "main" / "java"
     candidates = sorted(java_root.rglob("MainActivity.java")) if java_root.is_dir() else []
     if not candidates:
         raise SystemExit(f"MainActivity.java introuvable sous : {java_root}")
-
     activity = candidates[0]
     source = activity.read_text(encoding="utf-8")
 
@@ -95,21 +165,30 @@ def configure_edge_to_edge() -> None:
                 source,
             )
             if not class_open:
-                raise SystemExit(f"Début de classe MainActivity introuvable : {activity}")
+                raise SystemExit(f"Début de classe MainActivity introuvable dans : {activity}")
             method = (
                 "\n    @Override\n"
-                "    public void onCreate(Bundle savedInstanceState) {\n"
+                "    public void onCreate(android.os.Bundle savedInstanceState) {\n"
                 "        EdgeToEdge.enable(this);\n"
                 "        super.onCreate(savedInstanceState);\n"
                 "    }\n"
             )
             source = source[:class_open.end()] + method + source[class_open.end():]
-            if "import android.os.Bundle;" not in source:
-                source = source.replace(
-                    "import androidx.activity.EdgeToEdge;",
-                    "import android.os.Bundle;\nimport androidx.activity.EdgeToEdge;",
-                    1,
-                )
+
+    # EdgeToEdge rend les barres transparentes. Le décor natif doit aussi avoir
+    # un fond sombre, sinon Android laisse apparaître un rectangle blanc dans les
+    # zones d'insets que la WebView ne recouvre pas (notamment sur certains WebView).
+    if "getWindow().getDecorView().setBackgroundColor" not in source:
+        super_call = re.search(r"super\.onCreate\(\s*savedInstanceState\s*\)\s*;", source)
+        if not super_call:
+            raise SystemExit(f"Appel super.onCreate introuvable dans : {activity}")
+        insertion = (
+            "\n        getWindow().getDecorView().setBackgroundColor("
+            "android.graphics.Color.rgb(10, 10, 15));"
+            "\n        getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);"
+            "\n        getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);"
+        )
+        source = source[:super_call.end()] + insertion + source[super_call.end():]
 
     activity.write_text(source, encoding="utf-8")
 
@@ -117,7 +196,6 @@ def configure_edge_to_edge() -> None:
 def configure_launcher_icons() -> None:
     if not ICON_SOURCE.is_file():
         raise SystemExit(f"Icône GRIND introuvable : {ICON_SOURCE}")
-
     source = Image.open(ICON_SOURCE).convert("RGBA")
     density_sizes = {
         "mdpi": 48,
@@ -133,14 +211,12 @@ def configure_launcher_icons() -> None:
         "xxhdpi": 324,
         "xxxhdpi": 432,
     }
-
     for density, size in density_sizes.items():
         directory = RES / f"mipmap-{density}"
         directory.mkdir(parents=True, exist_ok=True)
         icon = source.resize((size, size), Image.Resampling.LANCZOS)
         icon.save(directory / "ic_launcher.png", optimize=True)
         icon.save(directory / "ic_launcher_round.png", optimize=True)
-
     # L'icône adaptative garde la palette du logo existant, avec un espace sûr
     # autour du cerveau afin que les masques circulaires/carrés ne le rognent pas.
     for density, size in adaptive_foreground_sizes.items():
@@ -151,7 +227,6 @@ def configure_launcher_icons() -> None:
         artwork = source.resize((size - 2 * margin, size - 2 * margin), Image.Resampling.LANCZOS)
         canvas.alpha_composite(artwork, (margin, margin))
         canvas.save(directory / "ic_launcher_foreground.png", optimize=True)
-
     drawable = RES / "drawable"
     drawable.mkdir(parents=True, exist_ok=True)
     (drawable / "ic_launcher_background.xml").write_text(
@@ -161,7 +236,6 @@ def configure_launcher_icons() -> None:
         '''</shape>\n''',
         encoding="utf-8",
     )
-
     adaptive = RES / "mipmap-anydpi-v26"
     adaptive.mkdir(parents=True, exist_ok=True)
     adaptive_xml = (
@@ -179,9 +253,10 @@ def main() -> int:
     if not ANDROID.is_dir():
         raise SystemExit("Projet Android absent : lancer d'abord `npx cap add android`.")
     configure_manifest()
+    configure_native_window_theme()
     configure_edge_to_edge()
     configure_launcher_icons()
-    print("Manifest, affichage bord à bord, barres système, permissions et icône GRIND configurés.")
+    print("Manifest, thème natif sombre, bord-à-bord, permissions et icône GRIND configurés.")
     return 0
 
 
