@@ -385,6 +385,19 @@ export async function listerMessagesDiscussion(sessionToken, classeId, beforeId 
   return data;
 }
 
+export async function envoyerVocalDiscussion(sessionToken, classeId, fichier, replyToId = null, onProgress = null) {
+  if (!fichier || !fichier.type?.startsWith("audio/")) throw new Error("L'enregistrement vocal n'est pas valide.");
+  if (fichier.size <= 0 || fichier.size > 8 * 1024 * 1024) throw new Error("Le vocal doit être non vide et ne pas dépasser 8 Mo.");
+  const formulaire = new FormData();
+  formulaire.append("session_token", sessionToken);
+  formulaire.append("file", fichier, fichier.name || "message-vocal.webm");
+  if (replyToId) formulaire.append("reply_to_id", String(replyToId));
+  return envoyerXHR(`${GRIND_URL}/api/classes/${classeId}/discussion/vocaux`, formulaire, {
+    onProgress: (charge, total) => onProgress?.(total ? Math.round(charge / total * 100) : 0),
+    timeout: 120000,
+  });
+}
+
 export function envoyerMessageDiscussion(sessionToken, classeId, payload) {
   return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, { session_token: sessionToken, ...payload });
 }
@@ -852,26 +865,8 @@ export function marquerNotificationLue(sessionToken, id) {
   return poster(`${GRIND_URL}/api/notifications/${id}/lue`, { session_token: sessionToken });
 }
 
-// ---------- Bibliothèque publique GRIND ----------
-export async function listerCategoriesLibrary() {
-  const r = await fetchApi(`${GRIND_URL}/api/library/categories`);
-  const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Catégories indisponibles."); return d;
-}
-export async function listerPlaylistsLibrary(sessionToken, categorie = "", q = "", offset = 0, limit = 100) {
-  const u = new URL(`${GRIND_URL}/api/library/playlists`);
-  u.searchParams.set("session_token", sessionToken); if (categorie) u.searchParams.set("categorie", categorie); if (q) u.searchParams.set("q", q);
-  u.searchParams.set("offset", String(offset)); u.searchParams.set("limit", String(limit));
-  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Playlists indisponibles."); return d;
-}
-export async function creerPlaylistLibrary(sessionToken, payload) {
-  return poster(`${GRIND_URL}/api/library/playlists`, { session_token: sessionToken, ...payload });
-}
-export async function uploaderDocumentLibrary(sessionToken, categorie, fichier, playlistId, titre, description) {
-  const f = new FormData(); f.append("session_token", sessionToken); if (categorie) f.append("categorie", categorie); f.append("file", fichier, fichier.name);
-  f.append("titre", titre || fichier.name); f.append("description", description || ""); if (playlistId) f.append("playlist_id", String(playlistId));
-  const r = await fetchApi(`${GRIND_URL}/api/library/documents`, { method: "POST", body: f }); const d = await r.json(); if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Envoi du document impossible."); return d;
-}
-export async function rechercherDocumentsLibrary(sessionToken, q = "", categorie = "", offset = 0, limit = 100) {
+// ---------- Bibliothèque GRIND : documents partagés ----------
+export async function rechercherDocumentsLibrary(sessionToken, q = "", offset = 0, limit = 100) {
   const u = new URL(`${GRIND_URL}/api/library/documents`);
   u.searchParams.set("session_token", sessionToken);
   if (q) u.searchParams.set("q", q);
@@ -881,17 +876,33 @@ export async function rechercherDocumentsLibrary(sessionToken, q = "", categorie
   if (!r.ok) throw new Error(d.detail || "Recherche de documents indisponible.");
   return d;
 }
-export async function listerDocumentsLibrary(sessionToken, playlistId, q = "", offset = 0, limit = 100) {
-  const u = new URL(`${GRIND_URL}/api/library/playlists/${playlistId}/documents`);
-  u.searchParams.set("session_token", sessionToken); if (q) u.searchParams.set("q", q);
-  u.searchParams.set("offset", String(offset)); u.searchParams.set("limit", String(limit));
-  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Documents indisponibles."); return d;
+export async function uploaderDocumentLibrary(sessionToken, fichier, titre, description = "") {
+  const f = new FormData();
+  f.append("session_token", sessionToken);
+  f.append("titre", String(titre || "").trim());
+  f.append("description", description || "");
+  f.append("file", fichier, fichier.name);
+  const r = await fetchApi(`${GRIND_URL}/api/library/documents`, { method: "POST", body: f });
+  const d = await r.json();
+  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Envoi du document impossible.");
+  return d;
 }
-export function voterDocumentLibrary(sessionToken, id, valeur) { return poster(`${GRIND_URL}/api/library/documents/${id}/vote`, { session_token: sessionToken, valeur }); }
-export function commenterDocumentLibrary(sessionToken, id, contenu) { return poster(`${GRIND_URL}/api/library/documents/${id}/commentaires`, { session_token: sessionToken, contenu }); }
+export function commenterDocumentLibrary(sessionToken, id, contenu) {
+  return poster(`${GRIND_URL}/api/library/documents/${id}/commentaires`, { session_token: sessionToken, contenu });
+}
 export async function listerCommentairesDocumentLibrary(sessionToken, id) {
-  const u = new URL(`${GRIND_URL}/api/library/documents/${id}/commentaires`); u.searchParams.set("session_token", sessionToken);
-  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Avis indisponibles."); return d;
+  const u = new URL(`${GRIND_URL}/api/library/documents/${id}/commentaires`);
+  u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u); const d = await r.json();
+  if (!r.ok) throw new Error(d.detail || "Commentaires indisponibles.");
+  return d;
+}
+export async function obtenirDocumentLibrary(sessionToken, id) {
+  const u = new URL(`${GRIND_URL}/api/library/documents/${id}`);
+  u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u); const d = await r.json();
+  if (!r.ok) throw new Error(d.detail || "Document introuvable.");
+  return d;
 }
 export async function statutBienvenue(sessionToken) {
   const u = new URL(`${GRIND_URL}/api/compte/bienvenue`); u.searchParams.set("session_token", sessionToken);
@@ -917,10 +928,6 @@ export async function rechercherMentions(sessionToken, q = "") {
 export function likerCommentaire(sessionToken, commentaireId) { return poster(`${GRIND_URL}/api/commentaires/${commentaireId}/like`, { session_token: sessionToken }); }
 export function modifierPost(sessionToken, postId, contenu) { return poster(`${GRIND_URL}/api/posts/${postId}/modifier`, { session_token: sessionToken, contenu }); }
 
-export async function obtenirDocumentLibrary(sessionToken, id) {
-  const u = new URL(`${GRIND_URL}/api/library/documents/${id}`); u.searchParams.set("session_token", sessionToken);
-  const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Document introuvable."); return d;
-}
 export async function chargerApercuDocumentLibrary(sessionToken, id, signal) {
   const u = new URL(`${GRIND_URL}/api/library/documents/${id}/preview`);
   u.searchParams.set("session_token", sessionToken);

@@ -6,7 +6,7 @@ import {
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
   restreindreMembreDiscussion, leverRestrictionDiscussion, retirerMembreDiscussion,
   transfererProprietaireDiscussion, renouvelerInvitationDiscussion, uploaderMedia, uploaderDocument,
-  urlPieceDiscussion,
+  envoyerVocalDiscussion, urlPieceDiscussion,
 } from "../api.js";
 
 function heure(date) {
@@ -46,6 +46,61 @@ function extraireDureeVideo(file) {
   });
 }
 
+function dureeLisible(secondes) {
+  const total = Number.isFinite(Number(secondes)) ? Math.max(0, Math.floor(Number(secondes))) : 0;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+const NOMBRE_BARRES_VOCAL = 30;
+
+function LecteurVocal({ src, id }) {
+  const audioRef = useRef(null);
+  const [lecture, setLecture] = useState(false);
+  const [courant, setCourant] = useState(0);
+  const [duree, setDuree] = useState(0);
+  const progression = duree > 0 ? Math.min(100, (courant / duree) * 100) : 0;
+  const hauteurs = Array.from({ length: NOMBRE_BARRES_VOCAL }, (_, index) => {
+    const seed = (Number(id) * 17 + index * 29 + index * index * 7) % 31;
+    return 5 + seed % 17;
+  });
+
+  async function basculerLecture() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      try { await audio.play(); setLecture(true); } catch { setLecture(false); }
+    } else {
+      audio.pause();
+      setLecture(false);
+    }
+  }
+
+  function chercher(event) {
+    const audio = audioRef.current;
+    if (audio && duree > 0) {
+      audio.currentTime = duree * (Number(event.target.value) / 100);
+      setCourant(audio.currentTime);
+    }
+  }
+
+  return (
+    <div className="discussion-vocal-player" onPointerDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
+      <audio ref={audioRef} src={src} preload="metadata" onLoadedMetadata={event => setDuree(event.currentTarget.duration || 0)} onTimeUpdate={event => setCourant(event.currentTarget.currentTime || 0)} onEnded={() => setLecture(false)} onPause={() => setLecture(false)} onPlay={() => setLecture(true)} />
+      <button type="button" className="discussion-vocal-play" onClick={basculerLecture} aria-label={lecture ? "Mettre en pause le vocal" : "Lire le message vocal"}>
+        <i className={`fa-solid ${lecture ? "fa-pause" : "fa-play"}`} />
+      </button>
+      <div className="discussion-vocal-piste">
+        <div className="discussion-vocal-ondes" aria-hidden="true">
+          {hauteurs.map((h, index) => <span key={index} className={index / hauteurs.length * 100 <= progression ? "jouee" : ""} style={{ height: `${h}px` }} />)}
+        </div>
+        <input aria-label="Position du message vocal" type="range" min="0" max="100" step="0.5" value={progression} onChange={chercher} />
+        <small>{dureeLisible(courant)} / {dureeLisible(duree)}</small>
+      </div>
+    </div>
+  );
+}
+
+
 function TexteMessage({ texte, onProfil }) {
   const fragments = String(texte || "").split(/(@[A-Za-z_]{3,24})/g);
   return <>{fragments.map((part, index) => part.startsWith("@")
@@ -60,8 +115,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
   const [texte, setTexte] = useState("");
-  const [styleTexte, setStyleTexte] = useState("normal");
-  const [menuPolice, setMenuPolice] = useState(false);
+  const [vocalEnCours, setVocalEnCours] = useState(false);
+  const [vocalPreparation, setVocalPreparation] = useState(false);
+  const [vocalVerrouille, setVocalVerrouille] = useState(false);
+  const [vocalSecondes, setVocalSecondes] = useState(0);
+  const [vocalNiveaux, setVocalNiveaux] = useState(Array(24).fill(3));
   const [reponse, setReponse] = useState(null);
   const [fichier, setFichier] = useState(null);
   const [menuPiecesOuvert, setMenuPiecesOuvert] = useState(false);
@@ -91,6 +149,16 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const videoPieceRef = useRef(null);
   const documentPieceRef = useRef(null);
   const photoRef = useRef(null);
+  const mediaRecorderVocalRef = useRef(null);
+  const streamVocalRef = useRef(null);
+  const morceauxVocalRef = useRef([]);
+  const pointeurVocalRef = useRef(null);
+  const annulerVocalRef = useRef(false);
+  const envoyerVocalAutoRef = useRef(false);
+  const debutVocalRef = useRef(0);
+  const minuteurVocalRef = useRef(null);
+  const audioContextVocalRef = useRef(null);
+  const analyseurVocalRef = useRef(null);
   const messageRefs = useRef(new Map());
   const swipeStart = useRef(new Map());
   const typingTimeout = useRef(null);
@@ -331,11 +399,13 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   function commencerReponse(message) {
-    setReponse({ id: message.id, auteur: message.auteur, auteur_nom: message.auteur_nom, contenu: message.contenu || message.piece?.nom || "Pièce jointe" });
+    const resume = message.contenu || (message.piece?.type === "audio" ? "Message vocal" : message.piece?.nom || "Pièce jointe");
+    setReponse({ id: message.id, auteur: message.auteur, auteur_nom: message.auteur_nom, contenu: resume });
     textareaRef.current?.focus();
   }
 
   function debutSwipe(event, id) {
+    if (event.target?.closest?.("button, input, audio, video, a")) return;
     const t = event.touches?.[0];
     swipeStart.current.set(id, { x: t ? t.clientX : event.clientX, y: t ? t.clientY : event.clientY });
   }
@@ -382,10 +452,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         }
       }
       const res = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
-        contenu: texte.trim(), reply_to_id: reponse?.id || null, style_texte: styleTexte, piece,
+        contenu: texte.trim(), reply_to_id: reponse?.id || null, style_texte: "normal", piece,
       });
       setMessages(prev => prev.some(m => m.id === res.message.id) ? prev : [...prev, res.message]);
-      setTexte(""); setFichier(null); setReponse(null); setStyleTexte("normal");
+      setTexte(""); setFichier(null); setReponse(null);
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
       setMenuPiecesOuvert(false);
@@ -394,6 +464,189 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     } catch (error) { setMessageErreur(error.message || "Échec de l'envoi du message."); }
     finally { setEnvoi(false); setProgression(0); }
   }
+
+  function nettoyerCaptureVocal() {
+    if (minuteurVocalRef.current) window.clearInterval(minuteurVocalRef.current);
+    minuteurVocalRef.current = null;
+    streamVocalRef.current?.getTracks?.().forEach(track => track.stop());
+    streamVocalRef.current = null;
+    const contexte = audioContextVocalRef.current;
+    audioContextVocalRef.current = null;
+    analyseurVocalRef.current = null;
+    if (contexte && contexte.state !== "closed") contexte.close().catch(() => {});
+    mediaRecorderVocalRef.current = null;
+  }
+
+  async function publierVocal(fichierVocal) {
+    setEnvoi(true); setProgression(0); setMessageErreur("");
+    try {
+      const resultat = await envoyerVocalDiscussion(
+        sessionToken, classe.classe_id, fichierVocal, reponse?.id || null,
+        value => setProgression(value),
+      );
+      setMessages(prev => prev.some(m => m.id === resultat.message.id) ? prev : [...prev, resultat.message].sort((a, b) => a.id - b.id));
+      setReponse(null);
+    } catch (error) {
+      setMessageErreur(error.message || "Impossible d'envoyer le message vocal.");
+    } finally {
+      setEnvoi(false); setProgression(0);
+    }
+  }
+
+  async function demarrerVocal(event) {
+    event.preventDefault();
+    if (vocalPreparation || vocalEnCours || envoi || texte.trim() || fichier) return;
+    try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* certains WebView ne prennent pas la capture */ }
+    pointeurVocalRef.current = { x: event.clientX, y: event.clientY, startedAt: Date.now(), released: false, locked: false };
+    annulerVocalRef.current = false;
+    envoyerVocalAutoRef.current = false;
+    setVocalPreparation(true); setVocalSecondes(0); setVocalNiveaux(Array(24).fill(3));
+    setMessageErreur("");
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        throw new Error("L'enregistrement vocal n'est pas disponible sur cette version d'Android.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      streamVocalRef.current = stream;
+      if (annulerVocalRef.current) {
+        nettoyerCaptureVocal(); setVocalPreparation(false); return;
+      }
+      const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+      const mime = types.find(type => MediaRecorder.isTypeSupported?.(type)) || "";
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 64000 }) : new MediaRecorder(stream);
+      mediaRecorderVocalRef.current = recorder;
+      morceauxVocalRef.current = [];
+      recorder.ondataavailable = eventData => { if (eventData.data?.size) morceauxVocalRef.current.push(eventData.data); };
+      recorder.onstop = async () => {
+        const blob = new Blob(morceauxVocalRef.current, { type: recorder.mimeType || "audio/webm" });
+        const annule = annulerVocalRef.current;
+        const envoyer = envoyerVocalAutoRef.current && !annule;
+        const duree = Math.max(1, Math.round((Date.now() - debutVocalRef.current) / 1000));
+        const type = blob.type.split(";")[0] || "audio/webm";
+        const extension = type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm";
+        nettoyerCaptureVocal();
+        setVocalEnCours(false); setVocalPreparation(false); setVocalVerrouille(false);
+        setVocalSecondes(duree); pointeurVocalRef.current = null;
+        if (envoyer && blob.size > 512) {
+          const fichierVocal = new File([blob], `vocal-grind-${Date.now()}.${extension}`, { type });
+          await publierVocal(fichierVocal);
+        } else if (!annule && blob.size <= 512) {
+          setMessageErreur("Le message vocal est trop court ou vide. Réessaie.");
+        }
+        morceauxVocalRef.current = [];
+      };
+      recorder.start(250);
+      debutVocalRef.current = Date.now();
+      setVocalPreparation(false); setVocalEnCours(true);
+
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          const contexte = new AudioContextClass();
+          const analyseur = contexte.createAnalyser();
+          analyseur.fftSize = 128;
+          contexte.createMediaStreamSource(stream).connect(analyseur);
+          audioContextVocalRef.current = contexte;
+          analyseurVocalRef.current = analyseur;
+        }
+      } catch { /* l'enregistrement fonctionne même sans visualiseur de niveau */ }
+
+      minuteurVocalRef.current = window.setInterval(() => {
+        const secondes = Math.floor((Date.now() - debutVocalRef.current) / 1000);
+        setVocalSecondes(secondes);
+        const analyseur = analyseurVocalRef.current;
+        if (analyseur) {
+          const valeurs = new Uint8Array(analyseur.frequencyBinCount);
+          analyseur.getByteFrequencyData(valeurs);
+          const niveaux = Array.from({ length: 24 }, (_, index) => Math.max(3, Math.min(26, Math.round((valeurs[Math.min(index, valeurs.length - 1)] || 0) / 9))));
+          setVocalNiveaux(niveaux);
+        }
+        if (secondes >= 300 && mediaRecorderVocalRef.current?.state === "recording") {
+          envoyerVocalAutoRef.current = true;
+          mediaRecorderVocalRef.current.stop();
+        }
+      }, 120);
+
+      // Un appui très bref verrouille le vocal au lieu de l'envoyer immédiatement.
+      // Cela permet de toucher l'icône puis d'avoir le temps d'écouter/annuler/envoyer.
+      const pointeur = pointeurVocalRef.current;
+      if (pointeur?.released) {
+        if ((pointeur.elapsedAtRelease ?? 999) < 320) {
+          pointeur.locked = true; setVocalVerrouille(true);
+        } else {
+          envoyerVocalAutoRef.current = true;
+          recorder.stop();
+        }
+      }
+    } catch (error) {
+      nettoyerCaptureVocal();
+      setVocalPreparation(false); setVocalEnCours(false); setVocalVerrouille(false);
+      pointeurVocalRef.current = null;
+      setMessageErreur(error.name === "NotAllowedError" ? "Autorise le microphone pour enregistrer un message vocal." : error.message || "Impossible d'accéder au microphone.");
+    }
+  }
+
+  function deplacerPointeurVocal(event) {
+    const pointeur = pointeurVocalRef.current;
+    if (!pointeur || pointeur.released || pointeur.locked) return;
+    const dx = event.clientX - pointeur.x;
+    const dy = event.clientY - pointeur.y;
+    if (dx < -95) {
+      annulerEnregistrementVocal();
+      return;
+    }
+    if (dy < -85) {
+      pointeur.locked = true;
+      setVocalVerrouille(true);
+    }
+  }
+
+  function relacherPointeurVocal() {
+    const pointeur = pointeurVocalRef.current;
+    if (!pointeur || pointeur.released) return;
+    pointeur.released = true;
+    pointeur.elapsedAtRelease = Date.now() - pointeur.startedAt;
+    if (pointeur.locked) return;
+    const recorder = mediaRecorderVocalRef.current;
+    if (!recorder || recorder.state !== "recording") return;
+    if (pointeur.elapsedAtRelease < 320) {
+      pointeur.locked = true;
+      setVocalVerrouille(true);
+    } else {
+      envoyerVocalAutoRef.current = true;
+      recorder.stop();
+    }
+  }
+
+  function annulerEnregistrementVocal() {
+    annulerVocalRef.current = true;
+    envoyerVocalAutoRef.current = false;
+    const recorder = mediaRecorderVocalRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    else {
+      nettoyerCaptureVocal();
+      setVocalPreparation(false); setVocalEnCours(false); setVocalVerrouille(false);
+      pointeurVocalRef.current = null;
+    }
+  }
+
+  function envoyerVocalVerrouille() {
+    const recorder = mediaRecorderVocalRef.current;
+    if (!recorder || recorder.state !== "recording") return;
+    envoyerVocalAutoRef.current = true;
+    recorder.stop();
+  }
+
+  useEffect(() => () => {
+    annulerVocalRef.current = true;
+    const recorder = mediaRecorderVocalRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = null;
+      try { recorder.stop(); } catch { /* capture déjà terminée */ }
+    }
+    nettoyerCaptureVocal();
+  }, []);
 
   async function sauterVersMention() {
     try {
@@ -520,7 +773,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
               {!propre && <AvatarIcone username={message.auteur} taille={34} onClic={ouvrirProfil} />}
               <div className="discussion-bulle-wrap">
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
-                {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span>{message.reply.contenu}</span></button>}
+                {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span>{message.reply.contenu || "Message"}</span></button>}
                 <div className={`discussion-bulle style-${message.style_texte || "normal"}`}>
                   {!!message.contenu && <div className="discussion-texte"><TexteMessage texte={message.contenu} onProfil={ouvrirProfil} /></div>}
                   {message.piece && message.piece.type === "image" && <>
@@ -531,6 +784,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     <video className="discussion-video" src={mediaPriveUrl} controls playsInline preload="metadata" />
                     <div className="discussion-media-actions"><a href={mediaPriveUrl} download={message.piece.nom || "video-grind"} title="Télécharger la vidéo" aria-label="Télécharger la vidéo"><i className="fa-solid fa-download" /></a></div>
                   </>}
+                  {message.piece && message.piece.type === "audio" && <LecteurVocal src={mediaPriveUrl} id={message.id} />}
                   {message.piece && message.piece.type === "document" && <a className="discussion-fichier" href={mediaPriveUrl} target="_blank" rel="noreferrer" download><span className="discussion-fichier-icone"><i className="fa-solid fa-file-pdf" /></span><span><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}</small></span><i className="fa-solid fa-download" /></a>}
                   <span className="discussion-heure">{heure(message.created_at)}</span>
                 </div>
@@ -549,24 +803,51 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           {reponse && <div className="discussion-reponse-active"><span><strong>Réponse à {reponse.auteur_nom}</strong><small>{reponse.contenu}</small></span><button type="button" onClick={() => setReponse(null)} aria-label="Annuler la réponse"><i className="fa-solid fa-xmark" /></button></div>}
           {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${iconePieceSelectionnee(fichier)}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { setFichier(null); [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }}><i className="fa-solid fa-xmark" /></button></div>}
           {envoi && <div className="discussion-progression"><span style={{ width: `${progression}%` }} /></div>}
-          <div className="discussion-compositeur">
-            <div className="discussion-attachement-wrap">
-              <button type="button" className={`discussion-joindre ${menuPiecesOuvert ? "actif" : ""}`} onClick={() => setMenuPiecesOuvert(v => !v)} title="Choisir une pièce jointe" aria-label="Choisir une pièce jointe" aria-expanded={menuPiecesOuvert}><i className="fa-solid fa-paperclip" /></button>
-              {menuPiecesOuvert && <div className="discussion-attachement-menu" role="group" aria-label="Type de pièce jointe">
-                <button type="button" onClick={() => imagePieceRef.current?.click()}><span><i className="fa-regular fa-image" /></span><strong>Image</strong><small>Photo ou capture</small></button>
-                <button type="button" onClick={() => videoPieceRef.current?.click()}><span><i className="fa-solid fa-video" /></span><strong>Vidéo</strong><small>Lecture dans le fil</small></button>
-                <button type="button" onClick={() => documentPieceRef.current?.click()}><span><i className="fa-solid fa-file-lines" /></span><strong>Document</strong><small>PDF ou DOCX</small></button>
-              </div>}
-              <input ref={imagePieceRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
-              <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
-              <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
-            </div>
-            <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); envoyer(); } }} placeholder="Écrire un message…" disabled={envoi} />
-            {!texte.trim() && !fichier && <div className="discussion-police-wrap"><button type="button" className="discussion-police" title="Style du texte" onClick={() => setMenuPolice(v => !v)}>Aᴀ</button>{menuPolice && <div className="discussion-police-menu">{[["normal", "Normal"], ["serif", "Sérif"], ["mono", "Monospace"]].map(([value, label]) => <button type="button" key={value} className={styleTexte === value ? "active" : ""} onClick={() => { setStyleTexte(value); setMenuPolice(false); }}>{label}</button>)}</div>}</div>}
-            {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-paper-plane" />}</button>}
+          <div className={`discussion-compositeur ${vocalEnCours || vocalPreparation ? "vocal-actif" : ""}`}>
+            {(vocalEnCours || vocalPreparation) ? (
+              <div className="discussion-vocal-enregistrement" role="status" aria-live="polite">
+                <span className="discussion-vocal-point" />
+                <strong>{vocalPreparation ? "Ouverture du microphone…" : dureeLisible(vocalSecondes)}</strong>
+                <div className="discussion-vocal-ondes en-direct" aria-label="Niveau sonore en direct">
+                  {vocalNiveaux.map((niveau, index) => <span key={index} style={{ height: `${niveau}px` }} />)}
+                </div>
+                <small>{vocalVerrouille ? "Enregistrement verrouillé" : "Glisse vers le haut pour verrouiller · vers la gauche pour annuler"}</small>
+                {vocalVerrouille && <div className="discussion-vocal-commandes">
+                  <button type="button" className="discussion-vocal-supprimer" onClick={annulerEnregistrementVocal} title="Supprimer le vocal" aria-label="Supprimer le vocal"><i className="fa-solid fa-trash" /></button>
+                  <button type="button" className="discussion-vocal-envoyer" onClick={envoyerVocalVerrouille} title="Envoyer le vocal" aria-label="Envoyer le vocal"><i className="fa-solid fa-paper-plane" /></button>
+                </div>}
+              </div>
+            ) : (
+              <>
+                <div className="discussion-attachement-wrap">
+                  <button type="button" className={`discussion-joindre ${menuPiecesOuvert ? "actif" : ""}`} onClick={() => setMenuPiecesOuvert(v => !v)} title="Choisir une pièce jointe" aria-label="Choisir une pièce jointe" aria-expanded={menuPiecesOuvert}><i className="fa-solid fa-paperclip" /></button>
+                  {menuPiecesOuvert && <div className="discussion-attachement-menu" role="group" aria-label="Type de pièce jointe">
+                    <button type="button" onClick={() => imagePieceRef.current?.click()}><span><i className="fa-regular fa-image" /></span><strong>Image</strong><small>Photo ou capture</small></button>
+                    <button type="button" onClick={() => videoPieceRef.current?.click()}><span><i className="fa-solid fa-video" /></span><strong>Vidéo</strong><small>Lecture dans le fil</small></button>
+                    <button type="button" onClick={() => documentPieceRef.current?.click()}><span><i className="fa-solid fa-file-lines" /></span><strong>Document</strong><small>PDF ou DOCX</small></button>
+                  </div>}
+                  <input ref={imagePieceRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+                  <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+                  <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+                </div>
+                <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); envoyer(); } }} placeholder="Écrire un message…" disabled={envoi || !!fichier} />
+                {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-paper-plane" />}</button>}
+              </>
+            )}
+            <button
+              type="button"
+              className={`discussion-vocal-bouton ${vocalEnCours || vocalPreparation ? "actif" : ""}`}
+              onPointerDown={demarrerVocal}
+              onPointerMove={deplacerPointeurVocal}
+              onPointerUp={relacherPointeurVocal}
+              onPointerCancel={annulerEnregistrementVocal}
+              disabled={envoi || (!vocalEnCours && (!!texte.trim() || !!fichier))}
+              title="Maintenir pour enregistrer un vocal · Toucher pour verrouiller"
+              aria-label="Enregistrer un message vocal"
+            ><i className={`fa-solid ${vocalEnCours || vocalPreparation ? "fa-microphone-lines" : "fa-microphone"}`} /></button>
           </div>
           {suggestions.length > 0 && <div className="discussion-suggestions-mention">{suggestions.map(m => <button type="button" key={m.username} onClick={() => choisirMention(m)}><AvatarIcone username={m.username} taille={30} /><span><strong>{m.nom}</strong><small>@{m.username}</small></span><i className="fa-solid fa-at" /></button>)}</div>}
-          <small className="discussion-aide-composer">Entrée pour envoyer · Maj + Entrée pour aller à la ligne · Glisse un message pour répondre</small>
+          <small className="discussion-aide-composer">Maintiens le micro pour envoyer · Glisse vers le haut pour verrouiller · Glisse un message pour répondre</small>
         </div>
       )}
 
