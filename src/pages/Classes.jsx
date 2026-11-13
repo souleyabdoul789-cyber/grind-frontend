@@ -23,6 +23,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
   const [erreurScanner, setErreurScanner] = useState("");
+  const [codeInvitationSaisi, setCodeInvitationSaisi] = useState("");
   const [scannerEnCours, setScannerEnCours] = useState(false);
   const [qrClasse, setQrClasse] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -121,7 +122,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     }
     const code = extraireCode(String(codeBrut || "").trim());
     if (!/^[A-Za-z0-9_-]{6,80}$/.test(code)) {
-      setErreurScanner("Ce QR code ne correspond pas à une invitation GRIND valide.");
+      setErreurScanner("Ce code ou QR code ne correspond pas à une invitation GRIND valide.");
       return;
     }
     setErreurScanner("");
@@ -129,6 +130,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     try {
       await rejoindreClasse(sessionToken, code);
       setFormulaireOuvert(null);
+      setCodeInvitationSaisi("");
       setQrClasse(null);
       onCodeConsomme?.();
       await charger({ silencieux: true });
@@ -273,6 +275,72 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     );
   }
 
+  // L'écran « Rejoindre » est volontairement indépendant de la liste des classes :
+  // il sert uniquement à saisir un code ou à scanner un QR d'invitation.
+  if (formulaireOuvert === "rejoindre") {
+    return (
+      <div className="fil-actu classe-rejoindre-page">
+        <button
+          type="button"
+          className="classe-rejoindre-retour"
+          onClick={() => { setFormulaireOuvert(null); setCodeInvitationSaisi(""); setErreurScanner(""); }}
+        >
+          <i className="fa-solid fa-arrow-left" /> Retour aux classes
+        </button>
+
+        <section className="carte-post classe-rejoindre-card" aria-labelledby="titre-rejoindre-classe">
+          <div className="classe-rejoindre-entete">
+            <span className="classe-rejoindre-icone"><i className="fa-solid fa-user-plus" /></span>
+            <div>
+              <h2 id="titre-rejoindre-classe">Rejoindre une classe</h2>
+              <p>Utilise un code d'invitation ou scanne le QR code fourni par le créateur.</p>
+            </div>
+          </div>
+
+          <form
+            className="classe-code-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!scannerEnCours) rejoindreAvecCode(codeInvitationSaisi);
+            }}
+          >
+            <label htmlFor="grind-code-invitation">Code d'invitation</label>
+            <div className="classe-code-ligne">
+              <input
+                id="grind-code-invitation"
+                type="text"
+                value={codeInvitationSaisi}
+                onChange={(event) => { setCodeInvitationSaisi(event.target.value); if (erreurScanner) setErreurScanner(""); }}
+                placeholder="Saisir le code ou coller le lien"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                autoComplete="off"
+                maxLength={500}
+                disabled={scannerEnCours}
+                aria-describedby="aide-code-invitation"
+              />
+              <button type="submit" disabled={scannerEnCours || !codeInvitationSaisi.trim()}>
+                {scannerEnCours ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-arrow-right" />}
+                <span>Valider</span>
+              </button>
+            </div>
+            <small id="aide-code-invitation">Tu peux saisir le code seul ou coller le lien d'invitation GRIND.</small>
+          </form>
+
+          <div className="classe-rejoindre-separateur"><span>OU</span></div>
+
+          <button type="button" className="classe-scanner-button" onClick={gererAdhesion} disabled={scannerEnCours}>
+            {scannerEnCours ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-qrcode" />}
+            <span>{scannerEnCours ? "Ouverture du scanner…" : "Scanner un QR code"}</span>
+          </button>
+
+          {erreurScanner && <div className="erreur classe-rejoindre-erreur" role="alert">{erreurScanner}</div>}
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="fil-actu">
 
@@ -307,16 +375,6 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
             charger();
           }}
         />
-      )}
-
-      {formulaireOuvert === "rejoindre" && (
-        <div className="carte-post classe-scanner-card">
-          <button type="button" className="classe-scanner-button" onClick={gererAdhesion} disabled={scannerEnCours}>
-            {scannerEnCours ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-camera" />}
-            <span>{scannerEnCours ? "Ouverture du scanner…" : "Scanner le QR code d'une classe"}</span>
-          </button>
-          {erreurScanner && <div className="erreur" role="alert">{erreurScanner}</div>}
-        </div>
       )}
 
       {chargement ? (

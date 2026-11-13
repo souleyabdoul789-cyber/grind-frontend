@@ -4327,3 +4327,27 @@ button:disabled {
 /* 2.10.0 — état hors ligne compact de la Bibliothèque */
 .library-offline-note{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:9px 12px;border:1px solid rgba(201,182,228,.14);border-radius:12px;background:rgba(201,182,228,.055);color:var(--text-dim);font-size:12px}
 .library-offline-note i{color:var(--violet)}
+
+
+/* GRIND 2.10.1 — écran dédié « Rejoindre une classe » : code OU QR, sans liste des classes */
+.classe-rejoindre-page{width:100%;max-width:720px;margin:0 auto;padding-top:6px}
+.classe-rejoindre-retour{display:inline-flex;align-items:center;gap:9px;margin:0 0 15px;padding:9px 12px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.045);color:var(--text);font-size:13px;font-weight:650}
+.classe-rejoindre-card{display:grid;gap:18px;padding:clamp(17px,4vw,25px)}
+.classe-rejoindre-entete{display:flex;align-items:center;gap:13px}
+.classe-rejoindre-icone{display:grid;place-items:center;flex:0 0 48px;width:48px;height:48px;border:1px solid var(--border);border-radius:15px;background:rgba(201,182,228,.11);color:var(--violet);font-size:19px}
+.classe-rejoindre-entete h2{margin:0;color:var(--text);font-size:17px;font-weight:750}
+.classe-rejoindre-entete p{margin:5px 0 0;color:var(--text-dim);font-size:12px;line-height:1.5}
+.classe-code-form{display:grid;gap:8px}
+.classe-code-form label{color:var(--text);font-size:12px;font-weight:700}
+.classe-code-ligne{display:flex;align-items:stretch;gap:8px}
+.classe-code-ligne input{min-width:0;flex:1;height:48px;margin:0;padding:0 13px;border:1px solid var(--border);border-radius:12px;background:rgba(255,255,255,.045);color:var(--text);font-size:14px}
+.classe-code-ligne input::placeholder{color:var(--text-dim);opacity:.8}
+.classe-code-ligne button{display:flex;align-items:center;justify-content:center;gap:8px;flex:0 0 auto;min-width:104px;height:48px;margin:0;padding:0 14px;border:1px solid transparent;border-radius:12px;background:var(--violet);color:#111018;font-size:13px;font-weight:750}
+.classe-code-ligne button:disabled,.classe-scanner-button:disabled{opacity:.55;cursor:not-allowed}
+.classe-code-form>small{color:var(--text-dim);font-size:11px;line-height:1.45}
+.classe-rejoindre-separateur{display:flex;align-items:center;gap:12px;color:var(--text-dim);font-size:10px;font-weight:750;letter-spacing:.12em}
+.classe-rejoindre-separateur:before,.classe-rejoindre-separateur:after{content:"";height:1px;flex:1;background:var(--border)}
+.classe-rejoindre-card .classe-scanner-button{min-height:50px;background:rgba(255,255,255,.055);color:var(--text);border-color:var(--border)}
+.classe-rejoindre-card .classe-scanner-button i{color:var(--violet)}
+.classe-rejoindre-erreur{margin:0;padding:10px 12px;border-radius:10px;font-size:12px;line-height:1.45}
+@media(max-width:420px){.classe-code-ligne{flex-wrap:wrap}.classe-code-ligne input{flex-basis:100%}.classe-code-ligne button{width:100%}.classe-rejoindre-card{gap:15px}}
