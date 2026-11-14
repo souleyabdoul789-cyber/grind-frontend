@@ -4,7 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.PdfDocument;
+import android.graphics.pdf.PdfDocument;
 import android.graphics.Typeface;
 import android.text.Layout;
 import android.text.StaticLayout;
