@@ -12,7 +12,7 @@ import {
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
   restreindreMembreDiscussion, leverRestrictionDiscussion, retirerMembreDiscussion,
   transfererProprietaireDiscussion, renouvelerInvitationDiscussion, uploaderMedia, uploaderDocument,
-  envoyerVocalDiscussion, urlPieceDiscussion, modifierMessageDiscussion,
+  envoyerVocalDiscussion, obtenirTicketsMediaDiscussion, obtenirTicketPieceDiscussion, modifierMessageDiscussion,
   supprimerMessageDiscussionPourMoi, supprimerMessageDiscussionPourTous, estGrindEnLigne,
 } from "../api.js";
 
@@ -185,9 +185,10 @@ function VideoDiscussion({ src, poster, nom, messageId }) {
   return (
     <div className="discussion-video-shell" style={{ aspectRatio: ratio }}>
       {!src && <div className="discussion-video-placeholder">
-        <span className="discussion-video-skeleton" aria-hidden="true" />
+        {poster && <img src={poster} alt="Miniature de la vidéo" loading="lazy" />}
+        {!poster && <span className="discussion-video-skeleton" aria-hidden="true" />}
         <i className="fa-solid fa-circle-play" aria-hidden="true" />
-        <small>Vidéo non disponible hors ligne. Elle sera lisible dès que le fichier sera disponible.</small>
+        <small>Vidéo non téléchargée sur cet appareil</small>
       </div>}
       {src && <>
         {chargement && <span className="discussion-video-skeleton" aria-hidden="true" />}
@@ -319,11 +320,38 @@ function lireCacheDiscussion(classeId, username) {
   } catch { return null; }
 }
 
+function cleFileAttenteDiscussion(classeId, username) {
+  return `grind_discussion_outbox_${username || "compte"}_${classeId}`;
+}
+
+function lireFileAttenteDiscussion(classeId, username) {
+  try {
+    const valeur = JSON.parse(localStorage.getItem(cleFileAttenteDiscussion(classeId, username)) || "[]");
+    if (!Array.isArray(valeur)) return [];
+    return valeur.filter(item => item && typeof item.contenu === "string"
+      && typeof item.client_message_id === "string").slice(0, 20);
+  } catch { return []; }
+}
+
+function nouveauClientMessageId() {
+  return globalThis.crypto?.randomUUID?.()
+    || `grind-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function fusionnerMessageDiscussion(messages, entrant) {
+  const suivant = (messages || []).filter(message => message.id !== entrant.id
+    && !(entrant.client_message_id && message.client_message_id === entrant.client_message_id));
+  suivant.push(entrant);
+  return suivant.sort((a, b) => Number(a.id) - Number(b.id));
+}
+
 export default function DiscussionClasse({ sessionToken, classe, monUsername, messageAouvrirId = null, onQuitter }) {
   const cacheInitial = lireCacheDiscussion(classe.classe_id, monUsername);
   const [discussion, setDiscussion] = useState(cacheInitial?.discussion || null);
   const [membres, setMembres] = useState(cacheInitial?.membres || []);
   const [messages, setMessages] = useState(cacheInitial?.messages || []);
+  const [messagesEnAttente, setMessagesEnAttente] = useState(() => lireFileAttenteDiscussion(classe.classe_id, monUsername));
+  const [revisionReseau, setRevisionReseau] = useState(0);
   const [chargement, setChargement] = useState(!cacheInitial);
   const [erreur, setErreur] = useState("");
   const [texte, setTexte] = useState("");
@@ -338,6 +366,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [envoi, setEnvoi] = useState(false);
   const [progression, setProgression] = useState(0);
   const [mediasLocaux, setMediasLocaux] = useState({});
+  const [ticketsMedia, setTicketsMedia] = useState({});
   const [progressionsMedia, setProgressionsMedia] = useState({});
   const mediasLocauxRef = useRef({});
   const promessesCacheMediaRef = useRef(new Map());
@@ -364,6 +393,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [renouvellementInvitation, setRenouvellementInvitation] = useState(false);
   const [transfertProprietaire, setTransfertProprietaire] = useState(null);
   const messageInitialTraite = useRef(null);
+  const pendingMessageIdRef = useRef(null);
+  const pendingMessagePieceRef = useRef(null);
+  const pendingMessagePayloadRef = useRef(null);
+  const pendingVocalIdRef = useRef(null);
+  const fileAttenteEnCoursRef = useRef(false);
   const messagesActuels = useRef([]);
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
@@ -390,6 +424,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const longPressTimer = useRef(null);
   const longPressDeclenche = useRef(false);
   const cacheDiscussionKey = `grind_discussion_${monUsername}_${classe.classe_id}`;
+  const cleOutboxDiscussion = cleFileAttenteDiscussion(classe.classe_id, monUsername);
   const retourDiscussionRef = useRef({});
   retourDiscussionRef.current = {
     confirmationSuppressionOuverte, suppressionEnCours, transfertProprietaire,
@@ -401,6 +436,37 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   useEffect(() => {
     mediasLocauxRef.current = mediasLocaux;
   }, [mediasLocaux]);
+
+  // Les médias HTML reçoivent des tickets limités au fichier et à une durée courte.
+  // Le jeton de session principal reste dans les requêtes POST authentifiées.
+  useEffect(() => {
+    if (!discussion?.id || !sessionToken || !messages.length || !estGrindEnLigne()) return undefined;
+    let actif = true;
+    const obtenirIdsManquants = () => messages
+      .filter(m => m?.piece && !m.supprime_pour_tous)
+      .map(m => Number(m.id))
+      .filter(id => Number.isInteger(id) && id > 0 && (!ticketsMedia[id]?.url || ticketsMedia[id].expiresAt < Date.now() + 5 * 60 * 1000));
+    const renouveler = async () => {
+      const ids = obtenirIdsManquants();
+      if (!ids.length) return;
+      try {
+        const tickets = await obtenirTicketsMediaDiscussion(sessionToken, classe.classe_id, ids);
+        if (actif) setTicketsMedia(prev => ({ ...prev, ...tickets }));
+      } catch (error) {
+        if (actif) console.debug("Tickets média GRIND non renouvelés", error?.message || "");
+      }
+    };
+    renouveler();
+    const timer = window.setInterval(renouveler, 5 * 60 * 1000);
+    return () => { actif = false; window.clearInterval(timer); };
+  }, [discussion?.id, sessionToken, classe.classe_id, messages, ticketsMedia]);
+
+  async function obtenirUrlPiece(message, download = false) {
+    const id = Number(message?.id);
+    const cache = ticketsMedia[id];
+    if (!download && cache?.url && cache.expiresAt > Date.now() + 30000) return cache.url;
+    return obtenirTicketPieceDiscussion(sessionToken, classe.classe_id, id, download);
+  }
 
   useEffect(() => {
     composantActifRef.current = true;
@@ -497,6 +563,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           // Le serveur a confirmé que cette session n'a plus accès au groupe :
           // ne pas laisser les anciennes données en cache visibles après reconnexion.
           localStorage.removeItem(cacheDiscussionKey);
+          localStorage.removeItem(cleOutboxDiscussion);
+          setMessagesEnAttente([]);
           effacerCacheClasseMediaAndroid(monUsername, classe.classe_id).catch(() => {});
           setDiscussion(null); setMembres([]); setMessages([]);
           messagesActuels.current = [];
@@ -518,6 +586,81 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     } catch {}
   }, [discussion, membres, messages, cacheDiscussionKey]);
 
+
+  useEffect(() => {
+    try { localStorage.setItem(cleOutboxDiscussion, JSON.stringify(messagesEnAttente.slice(0, 20))); }
+    catch { /* le fil reste utilisable même si le stockage local est saturé */ }
+  }, [messagesEnAttente, cleOutboxDiscussion]);
+
+  useEffect(() => {
+    const reveiller = () => setRevisionReseau(value => value + 1);
+    window.addEventListener("online", reveiller);
+    window.addEventListener("grind-api-status", reveiller);
+    const intervalle = window.setInterval(reveiller, 15000);
+    return () => {
+      window.removeEventListener("online", reveiller);
+      window.removeEventListener("grind-api-status", reveiller);
+      window.clearInterval(intervalle);
+    };
+  }, []);
+
+  // Envoi séquentiel des messages texte déjà placés dans la file locale.
+  // Chaque élément conserve son client_message_id : un retry après réponse perdue
+  // retrouve le message côté serveur au lieu d'en créer un second.
+  useEffect(() => {
+    if (!discussion?.id || !sessionToken || !messagesEnAttente.length || !estGrindEnLigne()) return undefined;
+    let actif = true;
+    const synchroniser = async () => {
+      if (fileAttenteEnCoursRef.current) return;
+      fileAttenteEnCoursRef.current = true;
+      const envoyes = [];
+      try {
+        for (const element of messagesEnAttente) {
+          if (!actif || element.failed) continue;
+          try {
+            const resultat = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+              contenu: element.contenu,
+              reply_to_id: element.reply_to_id || null,
+              style_texte: element.style_texte || "normal",
+              piece: element.piece || null,
+              client_message_id: element.client_message_id,
+            });
+            if (!actif) return;
+            setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
+            envoyes.push(element.client_message_id);
+          } catch (erreur) {
+            if (!actif) return;
+            const statut = Number(erreur?.status || 0);
+            const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+            if (!temporaire) {
+              setMessagesEnAttente(prev => prev.map(item => item.client_message_id === element.client_message_id
+                ? { ...item, failed: true, error: erreur.message || "Le serveur a refusé ce message." } : item));
+            }
+            break;
+          }
+        }
+      } finally {
+        fileAttenteEnCoursRef.current = false;
+        if (envoyes.length) {
+          const ids = new Set(envoyes);
+          setMessagesEnAttente(prev => prev.filter(item => !ids.has(item.client_message_id)));
+        }
+      }
+    };
+    synchroniser();
+    return () => { actif = false; };
+  }, [discussion?.id, sessionToken, classe.classe_id, messagesEnAttente, revisionReseau]);
+
+  function annulerMessageEnAttente(clientMessageId) {
+    setMessagesEnAttente(prev => prev.filter(item => item.client_message_id !== clientMessageId));
+  }
+
+  function retenterMessageEnAttente(clientMessageId) {
+    setMessagesEnAttente(prev => prev.map(item => item.client_message_id === clientMessageId
+      ? { ...item, failed: false, error: null } : item));
+    setRevisionReseau(value => value + 1);
+  }
+
   useEffect(() => {
     if (!discussion?.id) return undefined;
     let actif = true;
@@ -530,11 +673,13 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       try { data = JSON.parse(event.data); } catch { return; }
       if (data.type === "message" && data.message) {
         setMessages(prev => {
-          if (prev.some(m => m.id === data.message.id)) return prev;
-          const next = [...prev, data.message].sort((a, b) => a.id - b.id);
+          const next = fusionnerMessageDiscussion(prev, data.message);
           messagesActuels.current = next;
           return next;
         });
+        if (data.message.client_message_id) {
+          setMessagesEnAttente(prev => prev.filter(item => item.client_message_id !== data.message.client_message_id));
+        }
         // Une nouvelle mention reçue pendant que le groupe est ouvert met à jour le compteur.
         if (data.message.contenu?.toLowerCase().includes(`@${String(monUsername).toLowerCase()}`) && data.message.auteur !== monUsername) {
           setMentionsNonLues(value => value + 1);
@@ -570,6 +715,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         charger().catch(() => {});
       } else if (data.type === "member_removed" && data.username === monUsername) {
         localStorage.removeItem(cacheDiscussionKey);
+        localStorage.removeItem(cleOutboxDiscussion);
+        setMessagesEnAttente([]);
         setDiscussion(null); setMembres([]); setMessages([]);
         messagesActuels.current = [];
         setMessageErreur("Tu as été retiré de cette discussion.");
@@ -595,6 +742,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           // quand un administrateur vient de retirer ou qu'un membre a quitté.
           if (event?.code === 1008) {
             localStorage.removeItem(cacheDiscussionKey);
+            localStorage.removeItem(cleOutboxDiscussion);
+            setMessagesEnAttente([]);
             setDiscussion(null); setMembres([]); setMessages([]);
             messagesActuels.current = [];
             setSocketEtat("ferme");
@@ -615,6 +764,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       charger().catch(error => {
         if ([401, 403, 404].includes(error.status)) {
           localStorage.removeItem(cacheDiscussionKey);
+          localStorage.removeItem(cleOutboxDiscussion);
+          setMessagesEnAttente([]);
           effacerCacheClasseMediaAndroid(monUsername, classe.classe_id).catch(() => {});
           setDiscussion(null); setMembres([]); setMessages([]);
           messagesActuels.current = [];
@@ -645,12 +796,13 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         setMentionsNonLues((mentions.mentions || []).length);
         if (!data.messages?.length) return;
         setMessages(prev => {
-          const map = new Map(prev.map(m => [m.id, m]));
-          data.messages.forEach(m => map.set(m.id, m));
-          const next = [...map.values()].sort((a, b) => a.id - b.id);
+          let next = prev;
+          data.messages.forEach(message => { next = fusionnerMessageDiscussion(next, message); });
           messagesActuels.current = next;
           return next;
         });
+        const envoyes = new Set(data.messages.map(message => message.client_message_id).filter(Boolean));
+        if (envoyes.size) setMessagesEnAttente(prev => prev.filter(item => !envoyes.has(item.client_message_id)));
       } catch { /* le fil reste consultable avec les messages déjà chargés */ }
     };
     pollTimer = window.setInterval(actualiserMessages, 12000);
@@ -692,11 +844,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     // le flux jusqu'à sa pause/fin, puis les prochaines lectures utiliseront le cache.
     const appliquer = () => {
       video.removeEventListener("ended", appliquer);
-      video.removeEventListener("pause", appliquer);
+      // Ne remplace jamais la source au simple événement pause : cela remettrait
+      // le curseur de lecture à zéro. Le cache prendra le relais à la fin du clip.
       enregistrerMediaLocal(messageId, resultat);
     };
     video.addEventListener("ended", appliquer, { once: true });
-    video.addEventListener("pause", appliquer, { once: true });
   }
 
   function enregistrerPosterLocal(messageId, resultat) {
@@ -715,13 +867,15 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   function sourcePieceMessage(message) {
     const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
     if (locale?.path) return sourceLocaleMedia(locale.path);
-    return estGrindEnLigne() ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id) : null;
+    return estGrindEnLigne() ? ticketsMedia[message.id]?.url || null : null;
   }
 
   function sourcePosterMessage(message) {
     const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
     if (locale?.posterPath) return sourceLocaleMedia(locale.posterPath);
-    return estGrindEnLigne() ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id, false, true) : null;
+    const ticket = ticketsMedia[message.id];
+    if (!estGrindEnLigne()) return null;
+    return ticket?.poster_url || (ticket?.url ? `${ticket.url}${ticket.url.includes("?") ? "&" : "?"}poster=1` : null);
   }
 
   async function assurerPosterTemporaire(message) {
@@ -735,7 +889,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       if (cache?.path) { enregistrerPosterLocal(messageId, cache); return cache; }
       if (!estGrindEnLigne()) return null;
       const resultat = await mettreEnCacheMedia({
-        url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, false, true),
+        url: ticketsMedia[messageId]?.poster_url || await obtenirUrlPiece(message).then(url => `${url}${url.includes("?") ? "&" : "?"}poster=1`),
         fileName,
         mimeType: "image/jpeg",
         requestId: `poster-cache-${classe.classe_id}-${messageId}`,
@@ -785,7 +939,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           : typePiece === "document" ? 15 * 1024 * 1024
             : typePiece === "video" ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
         const resultat = await mettreEnCacheMedia({
-          url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId),
+          url: await obtenirUrlPiece(message),
           fileName, mimeType, requestId, maxBytes,
         });
         if (typePiece === "video") enregistrerVideoCacheSansInterrompre(messageId, resultat);
@@ -825,7 +979,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           if (cache?.path) saved = await enregistrerMediaCacheAndroid(fileName, savedName, mimeType);
           else if (estGrindEnLigne()) {
             saved = await enregistrerMediaAndroid({
-              url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true),
+              url: await obtenirUrlPiece(message, true),
               fileName: savedName, mimeType, requestId, maxBytes: 15 * 1024 * 1024,
             });
           } else {
@@ -836,8 +990,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         await ouvrirFichierAndroid(saved.path, mimeType);
       } else {
         if (!estGrindEnLigne()) throw new Error("Ce document n'est pas disponible hors ligne.");
-        await telechargerDansNavigateur(urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true), message.piece.nom || savedName,
-          pct => definirProgressionMedia(messageId, pct));
+        await telechargerDansNavigateur(await obtenirUrlPiece(message, true), message.piece.nom || savedName,
+          pct => definirProgressionMedia(messageId, pct), { size: Number(message.piece.taille || 0), maxBlobBytes: 32 * 1024 * 1024 });
       }
     } catch (error) {
       setMessageErreur(error.message || "Le document n'a pas pu être téléchargé.");
@@ -865,7 +1019,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
             saved = await enregistrerMediaCacheAndroid(cache.fileName || nomFichierTemporaire(monUsername, classe.classe_id, message), savedName, mimeType);
           } else if (estGrindEnLigne()) {
             saved = await enregistrerMediaAndroid({
-              url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true),
+              url: await obtenirUrlPiece(message, true),
               fileName: savedName, mimeType, requestId, maxBytes: 300 * 1024 * 1024,
             });
           } else {
@@ -876,8 +1030,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         await ouvrirFichierAndroid(saved.path, mimeType);
       } else {
         if (!estGrindEnLigne()) throw new Error("Cette vidéo n'est pas disponible hors ligne.");
-        await telechargerDansNavigateur(urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true), message.piece.nom || savedName,
-          pct => definirProgressionMedia(messageId, pct));
+        await telechargerDansNavigateur(await obtenirUrlPiece(message, true), message.piece.nom || savedName,
+          pct => definirProgressionMedia(messageId, pct), { size: Number(message.piece.taille || 0), maxBlobBytes: 32 * 1024 * 1024 });
       }
     } catch (error) {
       setMessageErreur(error.message || "La vidéo n'a pas pu être téléchargée.");
@@ -888,25 +1042,39 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   useEffect(() => {
-    if (!stockageAndroidDisponible() || !messages.length) return undefined;
+    if (!stockageAndroidDisponible() || !messages.length || typeof IntersectionObserver === "undefined") return undefined;
+    const root = scrollRef.current;
+    if (!root) return undefined;
     let actif = true;
-    const candidats = messages.filter(message => message?.piece && !message.supprime_pour_tous && ["image", "document", "audio"].includes(message.piece.type));
-    let prochain = 0;
-    const worker = async () => {
-      while (actif && prochain < candidats.length) {
-        const message = candidats[prochain++];
-        await assurerCacheTemporaire(message);
+    const parId = new Map(messages.map(message => [Number(message.id), message]));
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const ligne = entry.target;
+        const id = Number(ligne.dataset.messageId);
+        const message = parId.get(id);
+        if (!entry.isIntersecting || !message?.piece || message.supprime_pour_tous) {
+          if (!entry.isIntersecting) {
+            const video = ligne.querySelector("video.discussion-video");
+            if (video && !video.paused) video.pause();
+          }
+          continue;
+        }
+        // Images, vocaux et vidéos légères seulement ; les documents ne se
+        // téléchargent jamais en tâche de fond sans demande explicite.
+        const type = message.piece.type;
+        const taille = Number(message.piece.taille || 0);
+        const admissible = type === "image" || type === "audio" || (type === "video" && taille >= 1024 && taille <= 10 * 1024 * 1024);
+        if (admissible) assurerCacheTemporaire(message).catch(() => {});
       }
-    };
-    // Deux transferts en parallèle maximum pour préserver la réactivité des téléphones modestes.
-    Promise.all([worker(), worker()]).catch(() => {});
-    return () => { actif = false; };
-  }, [messages, sessionToken, classe.classe_id]);
+    }, { root, rootMargin: "240px 0px", threshold: 0.01 });
+    root.querySelectorAll("article[data-has-media='true'][data-message-id]").forEach(el => observer.observe(el));
+    return () => { actif = false; observer.disconnect(); };
+  }, [messages, mediasLocaux, classe.classe_id, sessionToken]);
 
   useEffect(() => {
     if (!stockageAndroidDisponible() || !messages.length) return undefined;
     let actif = true;
-    const videos = messages.filter(message => message?.piece?.type === "video" && !message.supprime_pour_tous);
+    const videos = messages.filter(message => message?.piece && !message.supprime_pour_tous);
     let prochain = 0;
     const worker = async () => {
       while (actif && prochain < videos.length) {
@@ -916,14 +1084,13 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         try {
           const mimeType = mimePiece(message);
           let local = await chercherMediaEnregistre(nomFichierEnregistre(monUsername, classe.classe_id, message), mimeType);
-          const taille = Number(message.piece?.taille || 0);
-          if (!local?.path && taille >= 1024 && taille <= 10 * 1024 * 1024) {
-            local = await chercherMediaTemporaire(nomFichierTemporaire(monUsername, classe.classe_id, message), mimeType);
-          }
+          if (!local?.path) local = await chercherMediaTemporaire(nomFichierTemporaire(monUsername, classe.classe_id, message), mimeType);
           if (!actif) return;
           if (local?.path) enregistrerMediaLocal(key, local);
-          const posterLocal = await chercherMediaTemporaire(nomPosterTemporaire(monUsername, classe.classe_id, message), "image/jpeg");
-          if (actif && posterLocal?.path) enregistrerPosterLocal(key, posterLocal);
+          if (message.piece.type === "video") {
+            const posterLocal = await chercherMediaTemporaire(nomPosterTemporaire(monUsername, classe.classe_id, message), "image/jpeg");
+            if (actif && posterLocal?.path) enregistrerPosterLocal(key, posterLocal);
+          }
         } catch { /* recherche locale silencieuse, aucun téléchargement ici */ }
       }
     };
@@ -944,30 +1111,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     }
   }, [messages, reponse]);
 
-  useEffect(() => {
-    const root = scrollRef.current;
-    if (!root || typeof IntersectionObserver === "undefined") return undefined;
-    const parId = new Map(messages.map(message => [Number(message.id), message]));
-    // Préchargement limité aux vidéos légères proches de l'écran : aucune lecture
-    // automatique et aucun téléchargement de tout l'historique de la discussion.
-    const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        const video = entry.target;
-        if (!entry.isIntersecting) {
-          if (!video.paused) video.pause();
-          continue;
-        }
-        if (!stockageAndroidDisponible()) continue;
-        const message = parId.get(Number(video.dataset.messageId));
-        const taille = Number(message?.piece?.taille || 0);
-        if (message?.piece?.type === "video" && taille >= 1024 && taille <= 10 * 1024 * 1024) {
-          assurerCacheTemporaire(message).catch(() => {});
-        }
-      }
-    }, { root, rootMargin: "220px 0px", threshold: 0.01 });
-    root.querySelectorAll("video.discussion-video[data-message-id]").forEach(video => observer.observe(video));
-    return () => observer.disconnect();
-  }, [messages, mediasLocaux]);
+
 
   useEffect(() => {
     const cibleId = Number(messageAouvrirId || 0);
@@ -1077,12 +1221,47 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function envoyer() {
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un message." })); return; }
     if (envoi || (!texte.trim() && !fichier)) return;
+    if (!estGrindEnLigne()) {
+      const pieceDejaChargee = pendingMessagePieceRef.current;
+      if (fichier && !pieceDejaChargee) {
+        window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Le fichier sera envoyé dès le retour de la connexion. Garde-le sélectionné." }));
+        return;
+      }
+      if (messageEnEdition) {
+        window.dispatchEvent(new CustomEvent("grind-toast", { detail: "La modification sera possible dès le retour de la connexion." }));
+        return;
+      }
+      if (!texte.trim() && !pieceDejaChargee) return;
+      const payloadIdempotence = JSON.stringify({ contenu: texte.trim(), reply_to_id: reponse?.id || null,
+        style_texte: "normal", piece_url: pieceDejaChargee?.url || null });
+      if (!pendingMessageIdRef.current || pendingMessagePayloadRef.current !== payloadIdempotence) {
+        pendingMessageIdRef.current = nouveauClientMessageId();
+        pendingMessagePayloadRef.current = payloadIdempotence;
+      }
+      if (messagesEnAttente.length >= 20 && !messagesEnAttente.some(item => item.client_message_id === pendingMessageIdRef.current)) {
+        setMessageErreur("La file hors ligne contient déjà 20 messages. Rétablis la connexion avant d'en ajouter d'autres.");
+        return;
+      }
+      const element = {
+        client_message_id: pendingMessageIdRef.current,
+        contenu: texte.trim(), reply_to_id: reponse?.id || null,
+        style_texte: "normal", piece: pieceDejaChargee || null,
+        created_at: new Date().toISOString(), failed: false,
+      };
+      setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== element.client_message_id), element].slice(0, 20));
+      pendingMessageIdRef.current = null;
+      pendingMessagePayloadRef.current = null;
+      pendingMessagePieceRef.current = null;
+      setTexte(""); setFichier(null); setReponse(null);
+      [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Message enregistré sur cet appareil. Il sera envoyé automatiquement à la reconnexion." }));
+      return;
+    }
     setEnvoi(true); setProgression(0); setMessageErreur("");
     try {
-      let piece = null;
-      if (fichier) {
+      let piece = pendingMessagePieceRef.current;
+      if (fichier && !piece) {
         const ext = fichier.name.split(".").pop().toLowerCase();
         if (["pdf", "docx"].includes(ext)) {
           const doc = await uploaderDocument(sessionToken, fichier, setProgression);
@@ -1093,15 +1272,28 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           const media = await uploaderMedia(sessionToken, fichier, decoupe, setProgression);
           piece = { url: media.media_url, type: media.media_type || (estVideo ? "video" : "image"), nom: fichier.name, mime: fichier.type, taille: fichier.size };
         }
+        pendingMessagePieceRef.current = piece;
       }
       if (messageEnEdition && !piece) {
         const res = await modifierMessageDiscussion(sessionToken, classe.classe_id, messageEnEdition, texte.trim());
         setMessages(prev => prev.map(m => m.id === messageEnEdition ? res.message : m));
         setMessageEnEdition(null);
       } else {
+        const payloadIdempotence = JSON.stringify({
+          contenu: texte.trim(), reply_to_id: reponse?.id || null,
+          style_texte: "normal", piece_url: piece?.url || null,
+        });
+        if (!pendingMessageIdRef.current || pendingMessagePayloadRef.current !== payloadIdempotence) {
+          pendingMessageIdRef.current = globalThis.crypto?.randomUUID?.() || `grind-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+          pendingMessagePayloadRef.current = payloadIdempotence;
+        }
         const res = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
           contenu: texte.trim(), reply_to_id: reponse?.id || null, style_texte: "normal", piece,
+          client_message_id: pendingMessageIdRef.current,
         });
+        pendingMessageIdRef.current = null;
+        pendingMessagePieceRef.current = null;
+        pendingMessagePayloadRef.current = null;
         setMessages(prev => prev.some(m => m.id === res.message.id) ? prev : [...prev, res.message]);
       }
       setTexte(""); setFichier(null); setReponse(null);
@@ -1110,7 +1302,33 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       setMenuPiecesOuvert(false);
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "typing", typing: false }));
-    } catch (error) { setMessageErreur(error.message || "Échec de l'envoi du message."); }
+    } catch (error) {
+      const statut = Number(error?.status || 0);
+      const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+      if (temporaire && !messageEnEdition && (!fichier || pendingMessagePieceRef.current)) {
+        const pieceDejaChargee = pendingMessagePieceRef.current;
+        const payloadIdempotence = JSON.stringify({ contenu: texte.trim(), reply_to_id: reponse?.id || null,
+          style_texte: "normal", piece_url: pieceDejaChargee?.url || null });
+        if (!pendingMessageIdRef.current || pendingMessagePayloadRef.current !== payloadIdempotence) {
+          pendingMessageIdRef.current = nouveauClientMessageId();
+          pendingMessagePayloadRef.current = payloadIdempotence;
+        }
+        const element = { client_message_id: pendingMessageIdRef.current, contenu: texte.trim(),
+          reply_to_id: reponse?.id || null, style_texte: "normal", piece: pieceDejaChargee || null,
+          created_at: new Date().toISOString(), failed: false };
+        if (messagesEnAttente.length >= 20 && !messagesEnAttente.some(item => item.client_message_id === element.client_message_id)) {
+          setMessageErreur("La file hors ligne est pleine. Ton texte reste dans le champ ; réessaie après la reconnexion.");
+          return;
+        }
+        setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== element.client_message_id), element]);
+        pendingMessageIdRef.current = null; pendingMessagePayloadRef.current = null; pendingMessagePieceRef.current = null;
+        setTexte(""); setFichier(null); setReponse(null);
+        [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
+        setMessageErreur("Connexion interrompue : le message a été conservé sur cet appareil et sera renvoyé sans doublon.");
+      } else {
+        setMessageErreur(error.message || "Échec de l'envoi du message.");
+      }
+    }
     finally { setEnvoi(false); setProgression(0); }
   }
 
@@ -1130,10 +1348,14 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un vocal." })); return; }
     setEnvoi(true); setProgression(0); setMessageErreur("");
     try {
+      if (!pendingVocalIdRef.current) {
+        pendingVocalIdRef.current = globalThis.crypto?.randomUUID?.() || `grind-audio-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+      }
       const resultat = await envoyerVocalDiscussion(
         sessionToken, classe.classe_id, fichierVocal, reponse?.id || null,
-        value => setProgression(value),
+        value => setProgression(value), pendingVocalIdRef.current,
       );
+      pendingVocalIdRef.current = null;
       setMessages(prev => prev.some(m => m.id === resultat.message.id) ? prev : [...prev, resultat.message].sort((a, b) => a.id - b.id));
       setReponse(null);
     } catch (error) {
@@ -1147,6 +1369,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     event.preventDefault();
     if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour enregistrer et envoyer un vocal." })); return; }
     if (vocalPreparation || vocalEnCours || envoi || texte.trim() || fichier) return;
+    // Chaque nouvel enregistrement est un nouveau message ; seul le réessai
+    // d'une requête précédente conserve sa clé d'idempotence.
+    pendingVocalIdRef.current = null;
     try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* certains WebView ne prennent pas la capture */ }
     pointeurVocalRef.current = { x: event.clientX, y: event.clientY, startedAt: Date.now(), released: false, locked: false };
     annulerVocalRef.current = false;
@@ -1528,6 +1753,15 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       <div className="discussion-corps" ref={scrollRef} onScroll={() => {
         if (scrollRef.current && scrollRef.current.scrollTop < 72 && plusAnciens && !chargementAnciens) chargerPlusAnciens();
       }}>
+        {messagesEnAttente.length > 0 && <section className="discussion-outbox" aria-label="Messages en attente de connexion">
+          <div className="discussion-outbox-entete"><i className="fa-solid fa-cloud-arrow-up" /><strong>{messagesEnAttente.length} message{messagesEnAttente.length > 1 ? "s" : ""} en attente</strong><small>Envoi automatique à la reconnexion</small></div>
+          {messagesEnAttente.map(element => <div className="discussion-outbox-item" key={element.client_message_id}>
+            <span className="discussion-outbox-texte">{element.contenu || element.piece?.nom || "Pièce jointe"}</span>
+            <span className={element.failed ? "discussion-outbox-erreur" : "discussion-outbox-etat"}>{element.failed ? (element.error || "Envoi refusé") : "En attente"}</span>
+            {element.failed && <button type="button" onClick={() => retenterMessageEnAttente(element.client_message_id)}>Réessayer</button>}
+            <button type="button" className="discussion-outbox-annuler" onClick={() => annulerMessageEnAttente(element.client_message_id)} aria-label="Retirer ce message en attente"><i className="fa-solid fa-xmark" /></button>
+          </div>)}
+        </section>}
         {messagesSelectionnes.length > 0 && <div className="discussion-selection-barre">
           <button type="button" onClick={() => { setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }} aria-label="Annuler la sélection"><i className="fa-solid fa-xmark" /></button>
           <strong>{messagesSelectionnes.length} sélectionné{messagesSelectionnes.length > 1 ? "s" : ""}</strong>
@@ -1547,7 +1781,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           const telechargementActif = progressionMedia !== undefined;
           return (
             <article key={message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
-              className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
+              className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} data-has-media={message.piece && !message.supprime_pour_tous ? "true" : "false"} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
               {!propre && <AvatarIcone username={message.auteur} taille={34} onClic={ouvrirProfil} />}
               <div className={`discussion-bulle-wrap ${message.piece?.type === "video" ? "discussion-bulle-wrap-video" : ""}`}>
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
@@ -1595,7 +1829,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         <div className="discussion-compositeur-zone">
           {messageEnEdition && <div className="discussion-reponse-active discussion-edition-active"><span><strong>Modification du message</strong><small>Tu peux modifier ton texte pendant les 15 premières minutes.</small></span><button type="button" onClick={() => { setMessageEnEdition(null); setTexte(""); }} aria-label="Annuler la modification"><i className="fa-solid fa-xmark" /></button></div>}
           {reponse && <div className="discussion-reponse-active"><span><strong>Réponse à {reponse.auteur_nom}</strong><small>{reponse.contenu}</small></span><button type="button" onClick={() => setReponse(null)} aria-label="Annuler la réponse"><i className="fa-solid fa-xmark" /></button></div>}
-          {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${iconePieceSelectionnee(fichier)}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { setFichier(null); [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }}><i className="fa-solid fa-xmark" /></button></div>}
+          {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${iconePieceSelectionnee(fichier)}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { pendingMessageIdRef.current = null; pendingMessagePieceRef.current = null; pendingMessagePayloadRef.current = null; setFichier(null); [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }}><i className="fa-solid fa-xmark" /></button></div>}
           {envoi && <div className="discussion-progression"><span style={{ width: `${progression}%` }} /></div>}
           <div className={`discussion-compositeur ${vocalEnCours || vocalPreparation ? "vocal-actif" : ""}`}>
             {(vocalEnCours || vocalPreparation) ? (
@@ -1620,9 +1854,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     <button type="button" onClick={() => videoPieceRef.current?.click()}><span><i className="fa-solid fa-video" /></span><strong>Vidéo</strong><small>Lecture dans le fil</small></button>
                     <button type="button" onClick={() => documentPieceRef.current?.click()}><span><i className="fa-solid fa-file-lines" /></span><strong>Document</strong><small>PDF ou DOCX</small></button>
                   </div>}
-                  <input ref={imagePieceRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
-                  <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
-                  <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+                  <input ref={imagePieceRef} type="file" hidden accept="image/jpeg,image/png,image/webp" onChange={event => { pendingMessageIdRef.current = null; pendingMessagePieceRef.current = null; pendingMessagePayloadRef.current = null; setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+                  <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { pendingMessageIdRef.current = null; pendingMessagePieceRef.current = null; pendingMessagePayloadRef.current = null; setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
+                  <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { pendingMessageIdRef.current = null; pendingMessagePieceRef.current = null; pendingMessagePayloadRef.current = null; setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
                 </div>
                 <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} enterKeyHint="enter" placeholder={messageEnEdition ? "Modifier ton message…" : "Écrire un message…"} disabled={envoi || !!fichier} />
                 {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className={`fa-solid ${messageEnEdition ? "fa-check" : "fa-paper-plane"}`} />}</button>}

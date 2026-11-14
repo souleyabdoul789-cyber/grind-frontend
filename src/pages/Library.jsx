@@ -52,6 +52,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   const [titre, setTitre] = useState("");
   const [description, setDescription] = useState("");
   const [envoi, setEnvoi] = useState(false);
+  const [progressionEnvoi, setProgressionEnvoi] = useState(0);
 
   const [apercu, setApercu] = useState(null);
   const [documentCible, setDocumentCible] = useState(null);
@@ -60,6 +61,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   const [chargementCommentaires, setChargementCommentaires] = useState(false);
   const [envoiCommentaire, setEnvoiCommentaire] = useState(false);
   const [telechargementDocumentId, setTelechargementDocumentId] = useState(null);
+  const [progressionTelechargement, setProgressionTelechargement] = useState(null);
   const retourLibraryRef = useRef({});
   retourLibraryRef.current = { profil, documentCible, apercu, partageOuvert };
 
@@ -145,7 +147,8 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
     setEnvoi(true);
     setErreur("");
     try {
-      await uploaderDocumentLibrary(sessionToken, fichier, titre.trim(), description.trim());
+      setProgressionEnvoi(0);
+      await uploaderDocumentLibrary(sessionToken, fichier, titre.trim(), description.trim(), setProgressionEnvoi);
       setFichier(null);
       setTitre("");
       setDescription("");
@@ -162,6 +165,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
       setErreur(e.message || "Le document n'a pas pu être partagé.");
     } finally {
       setEnvoi(false);
+      setProgressionEnvoi(0);
     }
   }
 
@@ -249,13 +253,15 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   async function telechargerDocument(doc) {
     if (telechargementDocumentId !== null) return;
     setTelechargementDocumentId(Number(doc.id));
+    setProgressionTelechargement(-1);
     setErreur("");
     try {
-      await telechargerDocumentLibrary(sessionToken, doc);
+      await telechargerDocumentLibrary(sessionToken, doc, value => setProgressionTelechargement(value));
     } catch (e) {
       setErreur(e.message || "Le document n'a pas pu être téléchargé.");
     } finally {
       setTelechargementDocumentId(null);
+      setProgressionTelechargement(null);
     }
   }
 
@@ -284,8 +290,13 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
       <label className="library-file"><i className="fa-solid fa-paperclip" /> {fichier ? fichier.name : "Choisir PDF, Word, Excel ou CSV (30 Mo max)"}
         <input type="file" accept=".pdf,.docx,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={e => setFichier(e.target.files?.[0] || null)} required />
       </label>
+      {envoi && <div className="library-upload-status" role="status">
+        <div className="library-upload-status-line"><span>Envoi du document</span><strong>{progressionEnvoi < 0 ? "En cours…" : `${progressionEnvoi}%`}</strong></div>
+        <div className="grind-upload-progress"><span style={{ width: progressionEnvoi < 0 ? "35%" : `${progressionEnvoi}%` }} /></div>
+        <small>Ne ferme pas cette fenêtre avant la confirmation de GRIND.</small>
+      </div>}
       <div className="library-form-actions">
-        <button type="button" className="bouton-retour" onClick={() => setPartageOuvert(false)}>Annuler</button>
+        <button type="button" className="bouton-retour" onClick={() => setPartageOuvert(false)} disabled={envoi}>Annuler</button>
         <button disabled={envoi || !fichier || !titre.trim()}>{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Partager"}</button>
       </div>
     </form>}
@@ -316,7 +327,11 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
           {doc.description && <p className="library-doc-description">{doc.description}</p>}
           <div className="library-doc-actions">
             <button type="button" title="Prévisualiser" aria-label="Prévisualiser" onClick={() => setApercu(doc)}><i className="fa-regular fa-eye" /></button>
-            <button type="button" onClick={() => telechargerDocument(doc)} disabled={telechargementDocumentId !== null} title="Télécharger" aria-label="Télécharger">{telechargementDocumentId === Number(doc.id) ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-download" />}</button>
+            <button type="button" onClick={() => telechargerDocument(doc)} disabled={telechargementDocumentId !== null} title="Télécharger" aria-label="Télécharger">
+              {telechargementDocumentId === Number(doc.id)
+                ? (progressionTelechargement >= 0 ? `${Math.round(progressionTelechargement)}%` : <i className="fa-solid fa-circle-notch fa-spin" />)
+                : <i className="fa-solid fa-download" />}
+            </button>
             <button type="button" onClick={() => ouvrirCommentaires(doc)} title="Commentaires" aria-label="Commentaires"><i className="fa-regular fa-comment" /> <small>{doc.commentaires || 0}</small></button>
           </div>
         </div>
@@ -328,9 +343,8 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
     {apercu && <div className="library-modal-backdrop" onClick={() => setApercu(null)}>
       <section className="library-preview-modal" role="dialog" aria-modal="true" aria-label={`Aperçu : ${apercu.titre}`} onClick={e => e.stopPropagation()}>
         <header><div><strong>{apercu.titre}</strong><small>Partagé par {apercu.auteur?.nom || "un membre"}</small></div><button onClick={() => setApercu(null)} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></header>
-        {!estGrindEnLigne()
-          ? <div className="library-preview-other"><i className="fa-solid fa-wifi-slash" /><strong>Fichier non disponible hors ligne</strong><span>Les informations du document sont consultables. Le fichier doit être téléchargé lorsque GRIND retrouve Internet.</span></div>
-          : <ApercuDocument document={apercu} sessionToken={sessionToken} />}
+        {!estGrindEnLigne() && <div className="library-preview-other"><i className="fa-solid fa-wifi-slash" /><strong>Mode hors ligne</strong><span>GRIND recherche une copie enregistrée sur cet appareil.</span></div>}
+        <ApercuDocument document={apercu} sessionToken={sessionToken} allowRemote={estGrindEnLigne()} />
       </section>
     </div>}
 

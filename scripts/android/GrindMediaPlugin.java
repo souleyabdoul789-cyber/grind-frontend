@@ -23,6 +23,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.UUID;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -30,6 +32,9 @@ import java.util.concurrent.Executors;
 public class GrindMediaPlugin extends Plugin {
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2);
     private static final long TEMP_TTL_MS = 30L * 24L * 60L * 60L * 1000L;
+    // Quota cache temporaire : les téléchargements permanents ne sont jamais supprimés ici.
+    private static final long TEMP_MAX_BYTES = 200L * 1024L * 1024L;
+    private static final Object TEMP_CLEANUP_LOCK = new Object();
     private static final int CONNECT_TIMEOUT_MS = 20000;
     private static final int READ_TIMEOUT_MS = 300000;
 
@@ -75,15 +80,32 @@ public class GrindMediaPlugin extends Plugin {
     }
 
     private void cleanExpiredTempFiles() {
-        File dir = tempDirectory();
-        File[] files = dir.listFiles();
-        if (files == null) return;
-        long limit = System.currentTimeMillis() - TEMP_TTL_MS;
-        for (File file : files) {
-            if (file.isFile() && !".nomedia".equals(file.getName()) && file.lastModified() < limit) {
-                // Les fichiers explicitement enregistrés sont dans un dossier distinct.
-                // Seul le cache temporaire de discussion est soumis à l'expiration.
-                try { file.delete(); } catch (Exception ignored) { }
+        synchronized (TEMP_CLEANUP_LOCK) {
+            File dir = tempDirectory();
+            File[] files = dir.listFiles();
+            if (files == null) return;
+            long limit = System.currentTimeMillis() - TEMP_TTL_MS;
+            long total = 0L;
+            for (File file : files) {
+                if (!file.isFile() || ".nomedia".equals(file.getName()) || file.getName().endsWith(".part")) continue;
+                if (file.lastModified() < limit) {
+                    // Les fichiers explicitement enregistrés sont dans un dossier distinct.
+                    try { file.delete(); } catch (Exception ignored) { }
+                } else {
+                    total += file.length();
+                }
+            }
+            // Quota LRU : protège le stockage Android lorsque l'utilisateur parcourt
+            // beaucoup de discussions. Les médias les plus récemment consultés restent.
+            if (total <= TEMP_MAX_BYTES) return;
+            files = dir.listFiles();
+            if (files == null) return;
+            Arrays.sort(files, Comparator.comparingLong(File::lastModified));
+            for (File file : files) {
+                if (total <= TEMP_MAX_BYTES) break;
+                if (!file.isFile() || ".nomedia".equals(file.getName()) || file.getName().endsWith(".part")) continue;
+                long size = file.length();
+                if (file.delete()) total = Math.max(0L, total - size);
             }
         }
     }
@@ -224,17 +246,38 @@ public class GrindMediaPlugin extends Plugin {
                     throw new Exception("Adresse de téléchargement non sécurisée.");
                 }
                 URL source = new URL(urlText);
+                if (!"https".equalsIgnoreCase(source.getProtocol()) || source.getUserInfo() != null) {
+                    throw new Exception("Adresse de téléchargement non sécurisée.");
+                }
                 String sourceHost = source.getHost();
-                connection = (HttpURLConnection) source.openConnection();
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-                connection.setReadTimeout(READ_TIMEOUT_MS);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestProperty("Accept-Encoding", "identity");
-                connection.setRequestProperty("Accept", "*/*");
-                connection.setRequestProperty("User-Agent", "GRIND-Android-Media/2.10.6");
-                int status = connection.getResponseCode();
-                String finalHost = connection.getURL().getHost();
+                URL current = source;
+                int status = 0;
+                for (int redirect = 0; redirect <= 3; redirect++) {
+                    connection = (HttpURLConnection) current.openConnection();
+                    connection.setRequestMethod("GET");
+                    connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+                    connection.setReadTimeout(READ_TIMEOUT_MS);
+                    connection.setInstanceFollowRedirects(false);
+                    connection.setRequestProperty("Accept-Encoding", "identity");
+                    connection.setRequestProperty("Accept", "*/*");
+                    connection.setRequestProperty("User-Agent", "GRIND-Android-Media/2.10.9");
+                    status = connection.getResponseCode();
+                    if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) break;
+                    String location = connection.getHeaderField("Location");
+                    connection.disconnect();
+                    connection = null;
+                    if (redirect == 3 || location == null || location.trim().isEmpty()) {
+                        throw new Exception("Le serveur de fichiers a renvoyé trop de redirections.");
+                    }
+                    URL destination = new URL(current, location);
+                    if (!"https".equalsIgnoreCase(destination.getProtocol())
+                            || destination.getUserInfo() != null
+                            || !destination.getHost().equalsIgnoreCase(sourceHost)) {
+                        throw new Exception("Le serveur de fichiers a redirigé vers une adresse inattendue.");
+                    }
+                    current = destination;
+                }
+                String finalHost = current.getHost();
                 if (finalHost == null || !finalHost.equalsIgnoreCase(sourceHost)) {
                     throw new Exception("Le serveur de fichiers a redirigé vers une adresse inattendue.");
                 }
@@ -278,6 +321,7 @@ public class GrindMediaPlugin extends Plugin {
                 finalProgress.put("total", total > 0 ? total : received);
                 finalProgress.put("percent", 100);
                 notifyListeners("downloadProgress", finalProgress);
+                if (!saved) cleanExpiredTempFiles();
                 call.resolve(fileResult(target, mimeType, false));
             } catch (Exception error) {
                 try { if (partial.exists()) partial.delete(); } catch (Exception ignored) { }

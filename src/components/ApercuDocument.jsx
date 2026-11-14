@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { chargerApercuDocumentLibrary } from "../api.js";
+import { chargerApercuDocumentLibrary, urlApercuDocumentLibrary } from "../api.js";
+import { stockageAndroidDisponible, chercherMediaEnregistre, sourceLocaleMedia } from "../mediaStorage.js";
 import { telechargerDocumentLibrary } from "../libraryMedia.js";
 
 const TYPE_PDF = "application/pdf";
@@ -16,7 +17,7 @@ function normaliserCellule(value) {
   return String(value);
 }
 
-export default function ApercuDocument({ document, sessionToken }) {
+export default function ApercuDocument({ document, sessionToken, allowRemote = true }) {
   const stylesRef = useRef(null);
   const contenuRef = useRef(null);
   const urlRef = useRef(null);
@@ -41,9 +42,30 @@ export default function ApercuDocument({ document, sessionToken }) {
 
     async function charger() {
       try {
-        const blob = await chargerApercuDocumentLibrary(sessionToken, document.id, controller.signal);
-        if (!actif) return;
+        let blob = null;
+        if (stockageAndroidDisponible()) {
+          const safeName = String(document.fichier_nom || "document").replace(/[\/:*?"<>|]/g, "_").trim().slice(0, 180) || "document";
+          const local = await chercherMediaEnregistre(`GRIND-${document.id}-${safeName}`, document.fichier_type || "application/octet-stream");
+          if (local?.path) {
+            const localResponse = await fetch(sourceLocaleMedia(local.path), { signal: controller.signal });
+            if (!localResponse.ok) throw new Error("La copie locale de ce document est illisible.");
+            blob = await localResponse.blob();
+          }
+        }
         const extension = String(document.fichier_nom || "").split(".").pop().toLowerCase();
+        if (!blob && (document.fichier_type === TYPE_PDF || extension === "pdf")) {
+          if (!allowRemote) throw new Error("Ce document n'a pas encore été téléchargé sur cet appareil.");
+          const url = await urlApercuDocumentLibrary(sessionToken, document.id);
+          if (!actif) return;
+          setUrlPdf(url);
+          setEtat("pret");
+          return;
+        }
+        if (!blob) {
+          if (!allowRemote) throw new Error("Ce document n'a pas encore été téléchargé sur cet appareil.");
+          blob = await chargerApercuDocumentLibrary(sessionToken, document.id, controller.signal);
+        }
+        if (!actif) return;
         if (document.fichier_type === TYPE_PDF || extension === "pdf") {
           const url = URL.createObjectURL(blob);
           urlRef.current = url;
@@ -87,7 +109,7 @@ export default function ApercuDocument({ document, sessionToken }) {
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
     };
-  }, [document.id, document.fichier_nom, document.fichier_type, sessionToken]);
+  }, [document.id, document.fichier_nom, document.fichier_type, sessionToken, allowRemote]);
 
   function afficherFeuille(classeur, nom, XLSXModule = null) {
     const XLSX = XLSXModule;

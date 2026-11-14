@@ -592,13 +592,14 @@ export async function listerMessagesDiscussion(sessionToken, classeId, beforeId 
   return data;
 }
 
-export async function envoyerVocalDiscussion(sessionToken, classeId, fichier, replyToId = null, onProgress = null) {
+export async function envoyerVocalDiscussion(sessionToken, classeId, fichier, replyToId = null, onProgress = null, clientMessageId = null) {
   if (!fichier || !fichier.type?.startsWith("audio/")) throw new Error("L'enregistrement vocal n'est pas valide.");
   if (fichier.size <= 0 || fichier.size > 8 * 1024 * 1024) throw new Error("Le vocal doit être non vide et ne pas dépasser 8 Mo.");
   const formulaire = new FormData();
   formulaire.append("session_token", sessionToken);
   formulaire.append("file", fichier, fichier.name || "message-vocal.webm");
   if (replyToId) formulaire.append("reply_to_id", String(replyToId));
+  if (clientMessageId) formulaire.append("client_message_id", clientMessageId);
   return envoyerXHR(`${GRIND_URL}/api/classes/${classeId}/discussion/vocaux`, formulaire, {
     onProgress: (charge, total) => onProgress?.(total ? Math.round(charge / total * 100) : 0),
     timeout: 120000,
@@ -656,12 +657,33 @@ export function urlDiscussion(sessionToken, discussionId) {
   return `${base}/ws/discussion/${discussionId}?session_token=${encodeURIComponent(sessionToken)}`;
 }
 
-export function urlPieceDiscussion(sessionToken, classeId, messageId, download = false, poster = false) {
+export function urlPieceDiscussion(classeId, messageId, ticket, download = false, poster = false) {
   const url = new URL(`${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/piece`);
-  url.searchParams.set("session_token", sessionToken);
+  if (ticket) url.searchParams.set("ticket", ticket);
   if (download) url.searchParams.set("download", "1");
   if (poster) url.searchParams.set("poster", "1");
   return url.toString();
+}
+
+export async function obtenirTicketsMediaDiscussion(sessionToken, classeId, messageIds) {
+  const ids = [...new Set((messageIds || []).map(Number).filter(n => Number.isInteger(n) && n > 0))].slice(0, 60);
+  if (!ids.length) return {};
+  const result = await poster(`${GRIND_URL}/api/classes/${classeId}/discussion/media-tickets`, {
+    session_token: sessionToken, message_ids: ids,
+  });
+  const expiresAt = Date.now() + Math.max(60, Number(result.expires_in || 3600)) * 1000;
+  return Object.fromEntries(Object.entries(result.tickets || {}).map(([id, item]) => [id, {
+    url: item.url?.startsWith("/") ? `${GRIND_URL}${item.url}` : item.url,
+    poster_url: item.poster_url?.startsWith("/") ? `${GRIND_URL}${item.poster_url}` : item.poster_url,
+    expiresAt,
+  }]));
+}
+
+export async function obtenirTicketPieceDiscussion(sessionToken, classeId, messageId, download = false) {
+  const result = await poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/media-ticket`, {
+    session_token: sessionToken, download: !!download,
+  });
+  return result.url?.startsWith("/") ? `${GRIND_URL}${result.url}` : result.url;
 }
 
 export async function listerMentionsDiscussion(sessionToken, classeId) {
@@ -1146,16 +1168,22 @@ export async function rechercherDocumentsLibrary(sessionToken, q = "", offset = 
   if (!r.ok) throw new Error(d.detail || "Recherche de documents indisponible.");
   return d;
 }
-export async function uploaderDocumentLibrary(sessionToken, fichier, titre, description = "") {
-  const f = new FormData();
-  f.append("session_token", sessionToken);
-  f.append("titre", String(titre || "").trim());
-  f.append("description", description || "");
-  f.append("file", fichier, fichier.name);
-  const r = await fetchApi(`${GRIND_URL}/api/library/documents`, { method: "POST", body: f });
-  const d = await r.json();
-  if (!r.ok) throw new Error(typeof d.detail === "string" ? d.detail : "Envoi du document impossible.");
-  return d;
+export async function uploaderDocumentLibrary(sessionToken, fichier, titre, description = "", onProgress = null) {
+  if (!sessionToken || !fichier) throw new Error("Session ou document manquant.");
+  if (fichier.size <= 0 || fichier.size > 30 * 1024 * 1024) {
+    throw new Error("Le document doit être non vide et ne pas dépasser 30 Mo.");
+  }
+  const formulaire = new FormData();
+  formulaire.append("session_token", sessionToken);
+  formulaire.append("titre", String(titre || "").trim());
+  formulaire.append("description", description || "");
+  formulaire.append("file", fichier, fichier.name);
+  // XHR est utilisé ici uniquement pour obtenir la progression réelle de l'upload.
+  // Le endpoint est un POST non idempotent : aucune relance automatique n'est faite.
+  return envoyerXHR(`${GRIND_URL}/api/library/documents`, formulaire, {
+    onProgress: (charge, total) => onProgress?.(total > 0 ? Math.min(99, Math.round(charge * 100 / total)) : -1),
+    timeout: 8 * 60 * 1000,
+  }).then(resultat => { onProgress?.(100); return resultat; });
 }
 export function commenterDocumentLibrary(sessionToken, id, contenu) {
   return poster(`${GRIND_URL}/api/library/documents/${id}/commentaires`, { session_token: sessionToken, contenu });
@@ -1198,16 +1226,23 @@ export async function rechercherMentions(sessionToken, q = "") {
 export function likerCommentaire(sessionToken, commentaireId) { return poster(`${GRIND_URL}/api/commentaires/${commentaireId}/like`, { session_token: sessionToken }); }
 export function modifierPost(sessionToken, postId, contenu) { return poster(`${GRIND_URL}/api/posts/${postId}/modifier`, { session_token: sessionToken, contenu }); }
 
-export function urlFichierDocumentLibrary(sessionToken, id) {
-  const u = new URL(`${GRIND_URL}/api/library/documents/${Number(id)}/download`);
-  u.searchParams.set("session_token", sessionToken);
-  return u.toString();
+export async function urlFichierDocumentLibrary(sessionToken, id) {
+  const ticket = await poster(`${GRIND_URL}/api/library/documents/${Number(id)}/media-ticket`, {
+    session_token: sessionToken, purpose: "download",
+  });
+  return ticket.url?.startsWith("/") ? `${GRIND_URL}${ticket.url}` : ticket.url;
+}
+
+export async function urlApercuDocumentLibrary(sessionToken, id) {
+  const ticket = await poster(`${GRIND_URL}/api/library/documents/${Number(id)}/media-ticket`, {
+    session_token: sessionToken, purpose: "preview",
+  });
+  return ticket.url?.startsWith("/") ? `${GRIND_URL}${ticket.url}` : ticket.url;
 }
 
 export async function chargerApercuDocumentLibrary(sessionToken, id, signal) {
-  const u = new URL(`${GRIND_URL}/api/library/documents/${id}/preview`);
-  u.searchParams.set("session_token", sessionToken);
-  const r = await fetchApi(u, { signal });
+  const mediaUrl = await urlApercuDocumentLibrary(sessionToken, id);
+  const r = await fetchApi(mediaUrl, { signal });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
     throw new Error(typeof d.detail === "string" ? d.detail : "Impossible de prévisualiser ce document.");

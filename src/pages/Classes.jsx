@@ -56,14 +56,19 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
         const idsServeur = new Set(entrantes.map((c) => Number(c.classe_id)));
         // Les cartes déjà affichées gardent leur contenu et leur ordre.
         // On retire uniquement les accès révoqués, puis on ajoute les nouvelles classes à la fin.
-        const fusion = anciennes.filter((c) => idsServeur.has(Number(c.classe_id)));
+        const serveurParId = new Map(entrantes.map((c) => [Number(c.classe_id), c]));
+        // On garde l'ordre local, mais on remplace chaque carte par les données
+        // fraîches du serveur (nom, compteurs, rôles et accès révoqués compris).
+        const fusion = anciennes
+          .filter((c) => serveurParId.has(Number(c.classe_id)))
+          .map((c) => ({ ...c, ...serveurParId.get(Number(c.classe_id)) }));
         const idsAffiches = new Set(fusion.map((c) => Number(c.classe_id)));
         entrantes.forEach((c) => { if (!idsAffiches.has(Number(c.classe_id))) fusion.push(c); });
         try { localStorage.setItem(cleCacheClasses, JSON.stringify(fusion.slice(-100))); } catch {}
         return fusion;
       });
     } catch (err) {
-      if ([401, 403].includes(err.status)) {
+      if (err.status === 401) {
         // Le serveur a invalidé la session : ne plus réafficher les classes du cache local.
         localStorage.removeItem(cleCacheClasses);
         setClasses([]);

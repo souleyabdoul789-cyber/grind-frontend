@@ -58,50 +58,67 @@ export async function ecouterProgressionMedia(callback) {
   return GrindMedia.addListener("downloadProgress", callback);
 }
 
-export async function telechargerDansNavigateur(url, fileName, onProgress = null) {
+export async function telechargerDansNavigateur(url, fileName, onProgress = null, options = {}) {
+  const maxBlobBytes = Math.max(0, Number(options.maxBlobBytes ?? 32 * 1024 * 1024));
+  const knownSize = Number(options.size || 0);
+  const nativeDownload = () => {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName || "fichier-grind";
+    anchor.rel = "noopener";
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    return { success: true, delegated: true };
+  };
+  if (knownSize > maxBlobBytes) return nativeDownload();
+
   const response = await fetch(url, { method: "GET", cache: "no-store" });
   if (!response.ok) {
-    // Ne jamais naviguer vers la réponse JSON du serveur ni exposer sa structure brute.
     let detail = "";
-    try {
-      const data = await response.clone().json();
-      detail = typeof data.detail === "string" ? data.detail : "";
-    } catch { /* réponse non JSON */ }
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("Ta session n'autorise plus l'accès à ce fichier. Reconnecte-toi.");
-    }
+    try { const data = await response.clone().json(); detail = typeof data.detail === "string" ? data.detail : ""; } catch {}
+    if (response.status === 401 || response.status === 403) throw new Error("Le lien de téléchargement a expiré. Relance le téléchargement depuis GRIND.");
     if (response.status === 404) throw new Error("Ce fichier n'est plus disponible.");
     throw new Error(detail || "Le fichier n'a pas pu être récupéré. Réessaie plus tard.");
   }
 
-  const total = Number(response.headers.get("content-length") || 0);
-  let blob;
-  if (response.body?.getReader) {
-    const reader = response.body.getReader();
-    const morceaux = [];
-    let received = 0;
+  const total = Number(response.headers.get("content-length") || knownSize || 0);
+  if (total > maxBlobBytes) {
+    try { await response.body?.cancel(); } catch {}
+    return nativeDownload();
+  }
+  const reader = response.body?.getReader?.();
+  if (!reader) {
+    // Sans streaming natif, le navigateur gère directement la sauvegarde :
+    // ne jamais construire un Blob potentiellement volumineux en mémoire.
+    return nativeDownload();
+  }
+  const chunks = [];
+  let received = 0;
+  if (reader) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      morceaux.push(value);
       received += value.byteLength;
+      if (received > maxBlobBytes) {
+        await reader.cancel().catch(() => {});
+        return nativeDownload();
+      }
+      chunks.push(value);
       onProgress?.(total > 0 ? Math.min(99, Math.round(received * 100 / total)) : -1);
     }
-    blob = new Blob(morceaux, { type: response.headers.get("content-type") || "application/octet-stream" });
-    onProgress?.(100);
   } else {
-    blob = await response.blob();
-    onProgress?.(100);
+    const blob = await response.blob();
+    if (blob.size > maxBlobBytes) return nativeDownload();
+    chunks.push(blob); received = blob.size;
   }
-
+  const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+  onProgress?.(100);
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = fileName || "fichier-grind";
-  anchor.style.display = "none";
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+  anchor.href = objectUrl; anchor.download = fileName || "fichier-grind";
+  anchor.style.display = "none"; document.body.appendChild(anchor); anchor.click(); anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
   return { success: true, size: blob.size };
 }

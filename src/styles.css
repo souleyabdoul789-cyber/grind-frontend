@@ -4823,3 +4823,23 @@ button:disabled {
 .formulaire-classe-simple > button[type="submit"] { display:flex; align-items:center; justify-content:center; gap:9px; min-height:46px; margin-top:3px; border:0; border-radius:12px; font-weight:750; }
 .formulaire-classe-simple > button[type="submit"]:disabled { opacity:.55; cursor:not-allowed; }
 @media (max-width:520px) { .formulaire-classe-simple { padding:15px; border-radius:15px; } }
+
+/* File locale des messages, sans confusion avec les messages déjà confirmés par le serveur. */
+.discussion-outbox{position:sticky;top:0;z-index:5;margin:8px auto 12px;width:min(100%,720px);padding:10px 12px;border:1px solid var(--border-soft,rgba(120,110,95,.22));border-radius:14px;background:var(--surface-elevated,rgba(250,248,244,.96));box-shadow:0 5px 18px rgba(35,30,24,.07);backdrop-filter:blur(12px)}
+.discussion-outbox-entete{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary,#756e64)}
+.discussion-outbox-entete i{font-size:13px}
+.discussion-outbox-entete strong{color:var(--text-primary,#302d29);font-size:13px}
+.discussion-outbox-entete small{margin-left:auto;font-size:11px}
+.discussion-outbox-item{display:flex;align-items:center;gap:8px;padding:8px 0 0;min-width:0;border-top:1px solid var(--border-soft,rgba(120,110,95,.14));margin-top:8px;font-size:12px}
+.discussion-outbox-texte{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary,#302d29)}
+.discussion-outbox-etat,.discussion-outbox-erreur{font-size:11px;white-space:nowrap;color:var(--text-secondary,#756e64)}
+.discussion-outbox-erreur{color:#a34a40}
+.discussion-outbox-item button{border:0;background:transparent;color:var(--text-secondary,#756e64);padding:4px 6px;border-radius:8px;font:inherit}
+.discussion-outbox-item button:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.discussion-outbox-item .discussion-outbox-annuler{padding:4px 6px}
+
+/* Progression réelle du partage de document dans la Bibliothèque. */
+.library-upload-status{display:grid;gap:5px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:rgba(0,0,0,.12)}
+.library-upload-status-line{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:var(--text)}
+.library-upload-status-line strong{font-variant-numeric:tabular-nums;color:var(--text)}
+.library-upload-status small{font-size:11px;color:var(--text-dim)}
