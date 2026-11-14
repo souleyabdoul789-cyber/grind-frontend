@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AvatarIcone from "./AvatarIcone.jsx";
 import {
+  stockageAndroidDisponible, sourceLocaleMedia, nettoyerCacheMediaAndroid, effacerCacheClasseMediaAndroid,
+  chercherMediaTemporaire, chercherMediaEnregistre, mettreEnCacheMedia,
+  enregistrerMediaAndroid, enregistrerMediaCacheAndroid, ouvrirFichierAndroid, ecouterProgressionMedia,
+  telechargerDansNavigateur,
+} from "../mediaStorage.js";
+import {
   obtenirDiscussionClasse, listerMessagesDiscussion, envoyerMessageDiscussion, urlDiscussion,
   listerMentionsDiscussion, marquerMentionDiscussionLue, rejoindreVraieClasseDepuisDiscussion,
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
@@ -53,49 +59,197 @@ function dureeLisible(secondes) {
 }
 
 const NOMBRE_BARRES_VOCAL = 30;
+let lecteurVocalActif = null;
+
+function extensionPiece(message) {
+  const piece = message?.piece || {};
+  const nom = String(piece.nom || "");
+  const ext = nom.includes(".") ? nom.split(".").pop().toLowerCase() : "";
+  if (ext) return ext;
+  const mime = String(piece.mime || "").toLowerCase();
+  if (mime.includes("pdf")) return "pdf";
+  if (mime.includes("wordprocessingml")) return "docx";
+  if (mime.includes("png")) return "png";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  if (mime.includes("mp4") && piece.type === "audio") return "m4a";
+  if (mime.includes("mp4")) return "mp4";
+  if (mime.includes("quicktime")) return "mov";
+  if (mime.includes("ogg")) return "ogg";
+  if (mime.includes("mpeg")) return "mp3";
+  return piece.type === "audio" ? "webm" : piece.type === "image" ? "jpg" : piece.type === "video" ? "mp4" : "pdf";
+}
+
+function mimePiece(message) {
+  const piece = message?.piece || {};
+  if (piece.mime) return piece.mime;
+  const ext = extensionPiece(message);
+  return ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+    mp4: piece.type === "audio" ? "audio/mp4" : "video/mp4", mov: "video/quicktime", webm: piece.type === "audio" ? "audio/webm" : "video/webm",
+    ogg: "audio/ogg", m4a: "audio/mp4", mp3: "audio/mpeg", pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })[ext] || "application/octet-stream";
+}
+
+function cleCompteFichier(username) {
+  return String(username || "compte").toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 32) || "compte";
+}
+
+function nomFichierTemporaire(username, classeId, message) {
+  return `u-${cleCompteFichier(username)}-classe-${classeId}-message-${message.id}.${extensionPiece(message)}`;
+}
+
+function nomFichierEnregistre(username, classeId, message) {
+  const nom = String(message?.piece?.nom || `piece-${message?.id || "grind"}`).replace(/[\\/:*?"<>|]/g, "_");
+  const extension = extensionPiece(message);
+  const prefixe = `GRIND-${cleCompteFichier(username)}-${classeId}-${message.id}-`;
+  const base = nom.replace(/\.[^.]+$/, "") || "piece";
+  const longueurBase = Math.max(12, 170 - prefixe.length - extension.length - 1);
+  return `${prefixe}${base.slice(0, longueurBase)}.${extension}`;
+}
+
+function ImageDiscussion({ src, alt, onOpen }) {
+  const [chargee, setChargee] = useState(false);
+  const [echec, setEchec] = useState(false);
+  useEffect(() => { setChargee(false); setEchec(false); }, [src]);
+  return (
+    <button type="button" className={`discussion-image ${chargee ? "media-charge" : ""}`} onClick={onOpen} disabled={!src} aria-label="Afficher l'image partagée">
+      {!chargee && !echec && <span className="discussion-media-skeleton" aria-hidden="true" />}
+      {src ? <img src={src} alt={alt} loading="lazy" onLoad={() => setChargee(true)} onError={() => { setEchec(true); setChargee(false); }} /> : null}
+      {(!src || echec) && <span className="discussion-media-indisponible">{echec ? "Image indisponible" : "Image non enregistrée hors ligne"}</span>}
+    </button>
+  );
+}
+
+function BoutonTelechargement({ progression = null, enCours = false, onClick, label }) {
+  const valeur = Number.isFinite(progression) ? Math.max(0, Math.min(100, progression)) : 0;
+  return (
+    <button
+      type="button"
+      className={`discussion-download-button ${enCours ? "en-cours" : ""}`}
+      style={{ "--download-progress": `${valeur}%` }}
+      onClick={onClick}
+      disabled={enCours}
+      title={label}
+      aria-label={enCours ? `Téléchargement ${progression == null || progression < 0 ? "en cours" : `${valeur}%`}` : label}
+    >
+      <span className="discussion-download-ring" aria-hidden="true">
+        <i className={`fa-solid ${enCours ? "fa-circle-notch fa-spin" : "fa-download"}`} />
+      </span>
+    </button>
+  );
+}
+
+function VideoDiscussion({ src, nom }) {
+  const [active, setActive] = useState(false);
+  const [erreur, setErreur] = useState(false);
+  useEffect(() => { setActive(false); setErreur(false); }, [src]);
+  return (
+    <div className="discussion-video-shell">
+      {!src ? (
+        <div className="discussion-video-placeholder"><span className="discussion-media-skeleton" /><small>Vidéo non disponible hors ligne</small></div>
+      ) : !active ? (
+        <button type="button" className="discussion-video-placeholder" onClick={() => setActive(true)} aria-label={`Lire ${nom || "la vidéo"}`}>
+          <span className="discussion-media-skeleton" />
+          <i className="fa-solid fa-play" aria-hidden="true" />
+          <small>{nom || "Lire la vidéo"}</small>
+        </button>
+      ) : (
+        <>
+          <video className="discussion-video" src={src} controls playsInline preload="metadata"
+            onError={() => setErreur(true)} />
+          {erreur && <div className="discussion-video-error">Cette vidéo ne peut pas être lue sur cet appareil.</div>}
+        </>
+      )}
+    </div>
+  );
+}
 
 function LecteurVocal({ src, id }) {
   const audioRef = useRef(null);
   const [lecture, setLecture] = useState(false);
   const [courant, setCourant] = useState(0);
   const [duree, setDuree] = useState(0);
-  const progression = duree > 0 ? Math.min(100, (courant / duree) * 100) : 0;
+  const [erreur, setErreur] = useState(false);
+  const progression = duree > 0 ? Math.min(100, Math.max(0, (courant / duree) * 100)) : 0;
   const hauteurs = Array.from({ length: NOMBRE_BARRES_VOCAL }, (_, index) => {
     const seed = (Number(id) * 17 + index * 29 + index * index * 7) % 31;
     return 5 + seed % 17;
   });
 
+  useEffect(() => {
+    const audio = audioRef.current;
+    setLecture(false); setCourant(0); setDuree(0); setErreur(false);
+    if (audio) { audio.pause(); audio.currentTime = 0; audio.loop = false; }
+    return () => {
+      if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
+      if (lecteurVocalActif === audio) lecteurVocalActif = null;
+    };
+  }, [src]);
+
   async function basculerLecture() {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !src) return;
     if (audio.paused) {
-      try { await audio.play(); setLecture(true); } catch { setLecture(false); }
+      if (lecteurVocalActif && lecteurVocalActif !== audio) lecteurVocalActif.pause();
+      audio.loop = false;
+      try {
+        await audio.play();
+        lecteurVocalActif = audio;
+      } catch { setLecture(false); setErreur(true); }
     } else {
       audio.pause();
-      setLecture(false);
     }
+  }
+
+  function actualiserDuree(audio) {
+    const value = Number(audio?.duration);
+    if (Number.isFinite(value) && value > 0) setDuree(value);
   }
 
   function chercher(event) {
     const audio = audioRef.current;
-    if (audio && duree > 0) {
+    if (audio && duree > 0 && Number.isFinite(duree)) {
       audio.currentTime = duree * (Number(event.target.value) / 100);
       setCourant(audio.currentTime);
     }
   }
 
+  function terminerLecture() {
+    const audio = audioRef.current;
+    setLecture(false);
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+    setCourant(0);
+    if (lecteurVocalActif === audio) lecteurVocalActif = null;
+  }
+
   return (
-    <div className="discussion-vocal-player" onPointerDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
-      <audio ref={audioRef} src={src} preload="metadata" onLoadedMetadata={event => setDuree(event.currentTarget.duration || 0)} onTimeUpdate={event => setCourant(event.currentTarget.currentTime || 0)} onEnded={() => setLecture(false)} onPause={() => setLecture(false)} onPlay={() => setLecture(true)} />
-      <button type="button" className="discussion-vocal-play" onClick={basculerLecture} aria-label={lecture ? "Mettre en pause le vocal" : "Lire le message vocal"}>
+    <div className={`discussion-vocal-player ${!src ? "sans-source" : ""}`} onPointerDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
+      <audio ref={audioRef} src={src || undefined} preload="metadata" loop={false}
+        onLoadedMetadata={event => actualiserDuree(event.currentTarget)}
+        onDurationChange={event => actualiserDuree(event.currentTarget)}
+        onTimeUpdate={event => { const value = Number(event.currentTarget.currentTime); if (Number.isFinite(value)) setCourant(value); }}
+        onEnded={terminerLecture}
+        onPause={event => {
+          setLecture(false);
+          if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null;
+        }}
+        onPlay={() => { setLecture(true); setErreur(false); }}
+        onError={event => {
+          setLecture(false); setErreur(true);
+          if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null;
+        }} />
+      <button type="button" className="discussion-vocal-play" onClick={basculerLecture} disabled={!src} aria-label={lecture ? "Mettre en pause le vocal" : "Lire le message vocal"}>
         <i className={`fa-solid ${lecture ? "fa-pause" : "fa-play"}`} />
       </button>
       <div className="discussion-vocal-piste">
         <div className="discussion-vocal-ondes" aria-hidden="true">
           {hauteurs.map((h, index) => <span key={index} className={index / hauteurs.length * 100 <= progression ? "jouee" : ""} style={{ height: `${h}px` }} />)}
         </div>
-        <input aria-label="Position du message vocal" type="range" min="0" max="100" step="0.5" value={progression} onChange={chercher} />
-        <small>{dureeLisible(courant)} / {dureeLisible(duree)}</small>
+        <input aria-label="Position du message vocal" type="range" min="0" max="100" step="0.5" value={progression} onChange={chercher} disabled={!src || duree <= 0} />
+        <small>{erreur ? "Audio indisponible" : !src ? "Non disponible hors ligne" : `${dureeLisible(courant)} / ${dureeLisible(duree)}`}</small>
       </div>
     </div>
   );
@@ -134,6 +288,12 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const [menuPiecesOuvert, setMenuPiecesOuvert] = useState(false);
   const [envoi, setEnvoi] = useState(false);
   const [progression, setProgression] = useState(0);
+  const [mediasLocaux, setMediasLocaux] = useState({});
+  const [progressionsMedia, setProgressionsMedia] = useState({});
+  const mediasLocauxRef = useRef({});
+  const promessesCacheMediaRef = useRef(new Map());
+  const requetesMediaRef = useRef(new Map());
+  const composantActifRef = useRef(true);
   const [suggestions, setSuggestions] = useState([]);
   const [panneauMembres, setPanneauMembres] = useState(false);
   const [mentionsNonLues, setMentionsNonLues] = useState(0);
@@ -181,6 +341,70 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const longPressTimer = useRef(null);
   const longPressDeclenche = useRef(false);
   const cacheDiscussionKey = `grind_discussion_${monUsername}_${classe.classe_id}`;
+  const retourDiscussionRef = useRef({});
+  retourDiscussionRef.current = {
+    confirmationSuppressionOuverte, suppressionEnCours, transfertProprietaire,
+    lightbox, panneauMembres, menuSelectionOuvert, messagesSelectionnes,
+    vocalEnCours, vocalPreparation, vocalVerrouille,
+    menuPiecesOuvert, messageEnEdition, reponse, fichier,
+  };
+
+  useEffect(() => {
+    mediasLocauxRef.current = mediasLocaux;
+  }, [mediasLocaux]);
+
+  useEffect(() => {
+    composantActifRef.current = true;
+    nettoyerCacheMediaAndroid().catch(() => {});
+    let abonnement = null;
+    ecouterProgressionMedia(event => {
+      const messageId = requetesMediaRef.current.get(event?.requestId);
+      if (messageId == null || !composantActifRef.current) return;
+      setProgressionsMedia(prev => ({
+        ...prev,
+        [messageId]: event.percent === -1 ? -1 : Math.max(0, Math.min(100, Number(event.percent) || 0)),
+      }));
+    }).then(resultat => { abonnement = resultat; }).catch(() => {});
+    return () => {
+      composantActifRef.current = false;
+      abonnement?.remove?.().catch(() => {});
+    };
+  }, []);
+
+  // Dans une discussion, Retour ferme d'abord l'élément le plus profond :
+  // modale, aperçu, panneau, sélection, édition ou réponse. La vue de classe
+  // ne se ferme que lorsqu'il ne reste plus d'élément interne à dépiler.
+  useEffect(() => {
+    const gererRetourDiscussion = (event) => {
+      if (event.defaultPrevented) return;
+      const vue = retourDiscussionRef.current;
+      if (vue.confirmationSuppressionOuverte) {
+        if (!vue.suppressionEnCours) setConfirmationSuppressionOuverte(false);
+        event.preventDefault();
+        return;
+      }
+      if (vue.transfertProprietaire) { setTransfertProprietaire(null); event.preventDefault(); return; }
+      if (vue.lightbox) { setLightbox(null); event.preventDefault(); return; }
+      if (vue.panneauMembres) { setPanneauMembres(false); event.preventDefault(); return; }
+      if (vue.menuSelectionOuvert) { setMenuSelectionOuvert(false); event.preventDefault(); return; }
+      if (vue.messagesSelectionnes.length) { setMessagesSelectionnes([]); event.preventDefault(); return; }
+      if (vue.vocalEnCours || vue.vocalPreparation || vue.vocalVerrouille) {
+        annulerEnregistrementVocal();
+        event.preventDefault();
+        return;
+      }
+      if (vue.menuPiecesOuvert) { setMenuPiecesOuvert(false); event.preventDefault(); return; }
+      if (vue.messageEnEdition) { setMessageEnEdition(null); setTexte(""); event.preventDefault(); return; }
+      if (vue.reponse) { setReponse(null); event.preventDefault(); return; }
+      if (vue.fichier) {
+        setFichier(null);
+        [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("grind-back", gererRetourDiscussion, true);
+    return () => window.removeEventListener("grind-back", gererRetourDiscussion, true);
+  }, []);
 
   const estAdmin = discussion?.mon_role === "owner" || discussion?.mon_role === "admin";
   const estOwner = discussion?.mon_role === "owner";
@@ -224,6 +448,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           // Le serveur a confirmé que cette session n'a plus accès au groupe :
           // ne pas laisser les anciennes données en cache visibles après reconnexion.
           localStorage.removeItem(cacheDiscussionKey);
+          effacerCacheClasseMediaAndroid(monUsername, classe.classe_id).catch(() => {});
           setDiscussion(null); setMembres([]); setMessages([]);
           messagesActuels.current = [];
           setErreur(error.message || "Tu n'as plus accès à cette discussion.");
@@ -341,6 +566,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       charger().catch(error => {
         if ([401, 403, 404].includes(error.status)) {
           localStorage.removeItem(cacheDiscussionKey);
+          effacerCacheClasseMediaAndroid(monUsername, classe.classe_id).catch(() => {});
           setDiscussion(null); setMembres([]); setMessages([]);
           messagesActuels.current = [];
           setErreur(error.message || "Tu n'as plus accès à cette discussion.");
@@ -399,6 +625,170 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     }
   }, [messages, discussion, membres, cacheDiscussionKey]);
 
+  function enregistrerMediaLocal(messageId, resultat) {
+    if (!resultat?.path) return;
+    const entree = { path: resultat.path, fileName: resultat.fileName, mimeType: resultat.mimeType, size: resultat.size };
+    mediasLocauxRef.current = { ...mediasLocauxRef.current, [messageId]: entree };
+    if (composantActifRef.current) setMediasLocaux(prev => ({ ...prev, [messageId]: entree }));
+  }
+
+  function definirProgressionMedia(messageId, valeur) {
+    if (!composantActifRef.current) return;
+    setProgressionsMedia(prev => ({ ...prev, [messageId]: valeur }));
+  }
+
+  function sourcePieceMessage(message) {
+    const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
+    if (locale?.path) return sourceLocaleMedia(locale.path);
+    return estGrindEnLigne() ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id) : null;
+  }
+
+  async function assurerCacheTemporaire(message) {
+    if (!stockageAndroidDisponible() || !message?.piece || message.piece.type === "video") return null;
+    const messageId = Number(message.id);
+    const deja = mediasLocauxRef.current[messageId];
+    if (deja?.path) return deja;
+    if (promessesCacheMediaRef.current.has(messageId)) return promessesCacheMediaRef.current.get(messageId);
+
+    const promesse = (async () => {
+      const fileName = nomFichierTemporaire(monUsername, classe.classe_id, message);
+      const mimeType = mimePiece(message);
+      try {
+        const cache = await chercherMediaTemporaire(fileName, mimeType);
+        if (cache?.path) { enregistrerMediaLocal(messageId, cache); return cache; }
+        if (!estGrindEnLigne()) return null;
+        const requestId = `cache-${classe.classe_id}-${messageId}`;
+        requetesMediaRef.current.set(requestId, messageId);
+        definirProgressionMedia(messageId, -1);
+        const maxBytes = message.piece.type === "audio" ? 8 * 1024 * 1024 : message.piece.type === "document" ? 15 * 1024 * 1024 : 25 * 1024 * 1024;
+        const resultat = await mettreEnCacheMedia({
+          url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId),
+          fileName, mimeType, requestId, maxBytes,
+        });
+        enregistrerMediaLocal(messageId, resultat);
+        definirProgressionMedia(messageId, 100);
+        return resultat;
+      } catch (error) {
+        console.warn("Cache média GRIND indisponible", messageId, error);
+        return null;
+      } finally {
+        requetesMediaRef.current.delete(`cache-${classe.classe_id}-${messageId}`);
+        promessesCacheMediaRef.current.delete(messageId);
+        if (composantActifRef.current) window.setTimeout(() => {
+          setProgressionsMedia(prev => { const next = { ...prev }; delete next[messageId]; return next; });
+        }, 900);
+      }
+    })();
+    promessesCacheMediaRef.current.set(messageId, promesse);
+    return promesse;
+  }
+
+  async function ouvrirDocumentMessage(message) {
+    const messageId = Number(message.id);
+    const mimeType = mimePiece(message);
+    const fileName = nomFichierTemporaire(monUsername, classe.classe_id, message);
+    const savedName = nomFichierEnregistre(monUsername, classe.classe_id, message);
+    const requestId = `save-doc-${classe.classe_id}-${messageId}`;
+    definirProgressionMedia(messageId, -1);
+    requetesMediaRef.current.set(requestId, messageId);
+    try {
+      if (stockageAndroidDisponible()) {
+        const cacheEnCours = promessesCacheMediaRef.current.get(messageId);
+        if (cacheEnCours) await cacheEnCours;
+        let saved = await chercherMediaEnregistre(savedName, mimeType);
+        if (!saved?.path) {
+          const cache = await chercherMediaTemporaire(fileName, mimeType);
+          if (cache?.path) saved = await enregistrerMediaCacheAndroid(fileName, savedName, mimeType);
+          else if (estGrindEnLigne()) {
+            saved = await enregistrerMediaAndroid({
+              url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true),
+              fileName: savedName, mimeType, requestId, maxBytes: 15 * 1024 * 1024,
+            });
+          } else {
+            throw new Error("Ce document n'est pas disponible hors ligne.");
+          }
+        }
+        enregistrerMediaLocal(messageId, saved);
+        await ouvrirFichierAndroid(saved.path, mimeType);
+      } else {
+        if (!estGrindEnLigne()) throw new Error("Ce document n'est pas disponible hors ligne.");
+        await telechargerDansNavigateur(urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true), message.piece.nom || savedName,
+          pct => definirProgressionMedia(messageId, pct));
+      }
+    } catch (error) {
+      setMessageErreur(error.message || "Le document n'a pas pu être téléchargé.");
+    } finally {
+      requetesMediaRef.current.delete(requestId);
+      if (composantActifRef.current) window.setTimeout(() => setProgressionsMedia(prev => { const next = { ...prev }; delete next[messageId]; return next; }), 900);
+    }
+  }
+
+  async function telechargerVideoMessage(message) {
+    const messageId = Number(message.id);
+    const mimeType = mimePiece(message);
+    const savedName = nomFichierEnregistre(monUsername, classe.classe_id, message);
+    const requestId = `save-video-${classe.classe_id}-${messageId}`;
+    definirProgressionMedia(messageId, -1);
+    requetesMediaRef.current.set(requestId, messageId);
+    try {
+      if (stockageAndroidDisponible()) {
+        let saved = await chercherMediaEnregistre(savedName, mimeType);
+        if (!saved?.path) {
+          if (!estGrindEnLigne()) throw new Error("Cette vidéo n'a pas encore été téléchargée sur cet appareil.");
+          saved = await enregistrerMediaAndroid({
+            url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true),
+            fileName: savedName, mimeType, requestId, maxBytes: 300 * 1024 * 1024,
+          });
+        }
+        enregistrerMediaLocal(messageId, saved);
+        await ouvrirFichierAndroid(saved.path, mimeType);
+      } else {
+        if (!estGrindEnLigne()) throw new Error("Cette vidéo n'est pas disponible hors ligne.");
+        await telechargerDansNavigateur(urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true), message.piece.nom || savedName,
+          pct => definirProgressionMedia(messageId, pct));
+      }
+    } catch (error) {
+      setMessageErreur(error.message || "La vidéo n'a pas pu être téléchargée.");
+    } finally {
+      requetesMediaRef.current.delete(requestId);
+      if (composantActifRef.current) window.setTimeout(() => setProgressionsMedia(prev => { const next = { ...prev }; delete next[messageId]; return next; }), 900);
+    }
+  }
+
+  useEffect(() => {
+    if (!stockageAndroidDisponible() || !messages.length) return undefined;
+    let actif = true;
+    const candidats = messages.filter(message => message?.piece && !message.supprime_pour_tous && ["image", "document", "audio"].includes(message.piece.type));
+    let prochain = 0;
+    const worker = async () => {
+      while (actif && prochain < candidats.length) {
+        const message = candidats[prochain++];
+        await assurerCacheTemporaire(message);
+      }
+    };
+    // Deux transferts en parallèle maximum pour préserver la réactivité des téléphones modestes.
+    Promise.all([worker(), worker()]).catch(() => {});
+    return () => { actif = false; };
+  }, [messages, sessionToken, classe.classe_id]);
+
+  useEffect(() => {
+    if (!stockageAndroidDisponible() || !messages.length) return undefined;
+    let actif = true;
+    const videos = messages.filter(message => message?.piece?.type === "video" && !message.supprime_pour_tous);
+    (async () => {
+      for (const message of videos) {
+        if (!actif) break;
+        const key = Number(message.id);
+        if (mediasLocauxRef.current[key]?.path) continue;
+        try {
+          const saved = await chercherMediaEnregistre(nomFichierEnregistre(monUsername, classe.classe_id, message), mimePiece(message));
+          if (actif && saved?.path) enregistrerMediaLocal(key, saved);
+        } catch { /* recherche locale silencieuse */ }
+      }
+    })();
+    return () => { actif = false; };
+  }, [messages, classe.classe_id]);
+
   useEffect(() => {
     if (!scrollRef.current || !messages.length) return;
     if (!initialScroll.current) {
@@ -414,20 +804,14 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || typeof IntersectionObserver === "undefined") return undefined;
+    // Les vidéos ne se téléchargent et ne se lancent jamais automatiquement.
+    // On interrompt uniquement la lecture manuelle lorsqu'une vidéo quitte la vue.
     const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        const video = entry.target;
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.58) {
-          video.muted = true;
-          video.play().catch(() => {});
-        } else {
-          video.pause();
-        }
-      }
-    }, { root, threshold: [0, 0.58, 1] });
+      for (const entry of entries) if (!entry.isIntersecting) entry.target.pause();
+    }, { root, threshold: 0 });
     root.querySelectorAll("video.discussion-video").forEach(video => observer.observe(video));
     return () => observer.disconnect();
-  }, [messages]);
+  }, [messages, mediasLocaux]);
 
   useEffect(() => {
     const cibleId = Number(messageAouvrirId || 0);
@@ -1002,7 +1386,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         {plusAnciens && messages.length > 0 && <button className="discussion-plus-anciens" type="button" onClick={chargerPlusAnciens} disabled={chargementAnciens}>{chargementAnciens ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-clock-rotate-left" />} Charger les messages précédents</button>}
         {messages.length === 0 ? <div className="discussion-vide"><i className="fa-regular fa-comments" /><strong>La discussion commence ici</strong><span>Pose une question, partage un cours ou aide un camarade.</span></div> : messages.map(message => {
           const propre = message.auteur === monUsername;
-          const mediaPriveUrl = message.piece ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id) : null;
+          const mediaPriveUrl = message.piece ? sourcePieceMessage(message) : null;
+          const progressionMedia = progressionsMedia[message.id];
+          const telechargementActif = progressionMedia !== undefined;
           return (
             <article key={message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
               className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
@@ -1015,16 +1401,22 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     <div className="discussion-message-supprime"><i className="fa-solid fa-ban" /> Ce message a été supprimé.</div>
                   ) : <>
                   {!!message.contenu && <div className="discussion-texte"><TexteMessage texte={message.contenu} onProfil={ouvrirProfil} /></div>}
-                  {message.piece && message.piece.type === "image" && <>
-                    <button type="button" className="discussion-image" onClick={() => setLightbox(mediaPriveUrl)}><img src={mediaPriveUrl} alt={message.piece.nom || "Image partagée"} loading="lazy" /></button>
-                    <div className="discussion-media-actions"><a href={mediaPriveUrl} download={message.piece.nom || "image-grind"} title="Télécharger la photo" aria-label="Télécharger la photo"><i className="fa-solid fa-download" /></a></div>
-                  </>}
+                  {message.piece && message.piece.type === "image" && (
+                    <ImageDiscussion src={mediaPriveUrl} alt={message.piece.nom || "Image partagée"} onOpen={() => mediaPriveUrl && setLightbox(mediaPriveUrl)} />
+                  )}
                   {message.piece && message.piece.type === "video" && <>
-                    <video className="discussion-video" src={mediaPriveUrl} controls playsInline preload="metadata" />
-                    <div className="discussion-media-actions"><a href={mediaPriveUrl} download={message.piece.nom || "video-grind"} title="Télécharger la vidéo" aria-label="Télécharger la vidéo"><i className="fa-solid fa-download" /></a></div>
+                    <VideoDiscussion src={mediaPriveUrl} nom={message.piece.nom} />
+                    <div className="discussion-media-actions">
+                      <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => telechargerVideoMessage(message)} label="Télécharger la vidéo" />
+                      <small>{message.piece.nom || "Vidéo"}</small>
+                    </div>
                   </>}
                   {message.piece && message.piece.type === "audio" && <LecteurVocal src={mediaPriveUrl} id={message.id} />}
-                  {message.piece && message.piece.type === "document" && <a className="discussion-fichier" href={mediaPriveUrl} target="_blank" rel="noreferrer" download><span className="discussion-fichier-icone"><i className="fa-solid fa-file-pdf" /></span><span><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}</small></span><i className="fa-solid fa-download" /></a>}
+                  {message.piece && message.piece.type === "document" && <div className="discussion-fichier">
+                    <span className="discussion-fichier-icone"><i className={`fa-solid ${extensionPiece(message) === "pdf" ? "fa-file-pdf" : "fa-file-word"}`} /></span>
+                    <span className="discussion-fichier-details"><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}{mediasLocaux[message.id] ? " · disponible hors ligne" : ""}</small></span>
+                    <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => ouvrirDocumentMessage(message)} label="Enregistrer et ouvrir le document" />
+                  </div>}
                   </>}
                   <span className="discussion-heure">{heure(message.created_at)}{message.modifie && <small className="discussion-message-modifie"> · modifié</small>}</span>
                 </div>
@@ -1071,7 +1463,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   <input ref={videoPieceRef} type="file" hidden accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
                   <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
                 </div>
-                <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); envoyer(); } }} placeholder={messageEnEdition ? "Modifier ton message…" : "Écrire un message…"} disabled={envoi || !!fichier} />
+                <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} enterKeyHint="enter" placeholder={messageEnEdition ? "Modifier ton message…" : "Écrire un message…"} disabled={envoi || !!fichier} />
                 {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className={`fa-solid ${messageEnEdition ? "fa-check" : "fa-paper-plane"}`} />}</button>}
               </>
             )}

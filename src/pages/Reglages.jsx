@@ -1,6 +1,6 @@
 import PageCgu from "../components/PageCgu.jsx";
 import ContactSupport from "../components/ContactSupport.jsx";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { obtenirMonProfil, modifierIdentite } from "../api.js";
 
 export default function Reglages({ sessionToken, monUsername, onDeconnexion }) {
@@ -46,6 +46,20 @@ export default function Reglages({ sessionToken, monUsername, onDeconnexion }) {
 
   const [cguOuvertes, setCguOuvertes] = useState(false);
   const [contactOuvert, setContactOuvert] = useState(false);
+  const retourReglagesRef = useRef({});
+  retourReglagesRef.current = { contactOuvert, cguOuvertes, editionIdentite };
+
+  useEffect(() => {
+    const gererRetourReglages = (event) => {
+      if (event.defaultPrevented) return;
+      const vue = retourReglagesRef.current;
+      if (vue.contactOuvert) { setContactOuvert(false); event.preventDefault(); return; }
+      if (vue.cguOuvertes) { setCguOuvertes(false); event.preventDefault(); return; }
+      if (vue.editionIdentite) { setEditionIdentite(false); setIdentiteErreur(""); event.preventDefault(); }
+    };
+    window.addEventListener("grind-back", gererRetourReglages);
+    return () => window.removeEventListener("grind-back", gererRetourReglages);
+  }, []);
 
   const [notifAide, setNotifAide] = useState(
     localStorage.getItem("grind_pref_notif_aide") !== "0"

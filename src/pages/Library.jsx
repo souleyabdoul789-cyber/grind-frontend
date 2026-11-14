@@ -58,6 +58,21 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   const [commentaire, setCommentaire] = useState("");
   const [chargementCommentaires, setChargementCommentaires] = useState(false);
   const [envoiCommentaire, setEnvoiCommentaire] = useState(false);
+  const retourLibraryRef = useRef({});
+  retourLibraryRef.current = { profil, documentCible, apercu, partageOuvert };
+
+  useEffect(() => {
+    const gererRetourLibrary = (event) => {
+      if (event.defaultPrevented) return;
+      const vue = retourLibraryRef.current;
+      if (vue.profil) { setProfil(null); event.preventDefault(); return; }
+      if (vue.documentCible) { setDocumentCible(null); event.preventDefault(); return; }
+      if (vue.apercu) { setApercu(null); event.preventDefault(); return; }
+      if (vue.partageOuvert) { setPartageOuvert(false); setFichier(null); event.preventDefault(); }
+    };
+    window.addEventListener("grind-back", gererRetourLibrary);
+    return () => window.removeEventListener("grind-back", gererRetourLibrary);
+  }, []);
 
   useEffect(() => {
     const statutApi = event => { if (event.detail?.online) setReconnexion(value => value + 1); };

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 import Connexion from "./pages/Connexion.jsx";
 import Questionnaire from "./pages/Questionnaire.jsx";
@@ -20,6 +21,7 @@ import Library from "./pages/Library.jsx";
 import BienvenueGrind from "./components/BienvenueGrind.jsx";
 import PaysIndisponible from "./components/PaysIndisponible.jsx";
 import { statutBienvenue, verifierAccesPays, GRIND_URL } from "./api.js";
+import { nettoyerCacheMediaAndroid } from "./mediaStorage.js";
 
 function extraireCodeDepuisUrl() {
   const correspondance = window.location.pathname.match(/^\/rejoindre\/(.+)$/);
@@ -33,7 +35,22 @@ export default function App() {
   const [profilErreur, setProfilErreur] = useState("");
   const [username, setUsername] = useState(null);
   const [codeAttente, setCodeAttente] = useState(extraireCodeDepuisUrl());
-  const [onglet, setOnglet] = useState(codeAttente ? "classes" : "fil");
+  const ongletInitial = codeAttente ? "classes" : "fil";
+  const [onglet, setOngletEtat] = useState(ongletInitial);
+  const pileOngletsRef = useRef(codeAttente ? ["fil", "classes"] : ["fil"]);
+  const ongletActifRef = useRef(ongletInitial);
+  ongletActifRef.current = onglet;
+  const setOnglet = useCallback((destination) => {
+    const cible = typeof destination === "function" ? destination(ongletActifRef.current) : destination;
+    if (typeof cible !== "string" || !cible || cible === ongletActifRef.current) return;
+    const pile = pileOngletsRef.current;
+    const indexExistant = pile.lastIndexOf(cible);
+    pileOngletsRef.current = indexExistant >= 0
+      ? pile.slice(0, indexExistant + 1)
+      : [...pile, cible].slice(-12);
+    ongletActifRef.current = cible;
+    setOngletEtat(cible);
+  }, []);
   const [statut, setStatut] = useState(null); // { role, est_equipe, cgu_a_accepter, ... }
   const [role, setRole] = useState(null); // rôle global de l'équipe GRIND
   const [typeCompte, setTypeCompte] = useState("eleve");
@@ -53,7 +70,68 @@ export default function App() {
   const [bandeauHorsLigneMasque, setBandeauHorsLigneMasque] = useState(false);
   const [toastGrind, setToastGrind] = useState("");
   const toastTimerRef = useRef(null);
+  const retourAppRef = useRef({});
+  retourAppRef.current = { gestionComptesOuverte };
   const notifierModeDiscussion = useCallback((actif) => setDiscussionPleineEcran(Boolean(actif)), []);
+
+  // Le bouton Retour Android doit d'abord dépiler les vues GRIND, sans laisser
+  // Android fermer la WebView ou renvoyer directement l'utilisateur au navigateur.
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "android") return undefined;
+    let actif = true;
+    let ecouteur = null;
+
+    const enregistrerRetourAndroid = async () => {
+      try {
+        const handle = await CapacitorApp.addListener("backButton", async () => {
+          const retourInterne = new Event("grind-back", { cancelable: true });
+          window.dispatchEvent(retourInterne);
+          if (retourInterne.defaultPrevented) return;
+
+          if (retourAppRef.current.gestionComptesOuverte) {
+            setGestionComptesOuverte(false);
+            return;
+          }
+
+          const pile = pileOngletsRef.current;
+          if (pile.length > 1) {
+            const nouvellePile = pile.slice(0, -1);
+            const precedent = nouvellePile[nouvellePile.length - 1] || "fil";
+            pileOngletsRef.current = nouvellePile;
+            ongletActifRef.current = precedent;
+            setOngletEtat(precedent);
+            return;
+          }
+
+          if (ongletActifRef.current !== "fil") {
+            pileOngletsRef.current = ["fil"];
+            ongletActifRef.current = "fil";
+            setOngletEtat("fil");
+            return;
+          }
+
+          // À la racine, on minimise l'application sans forcer sa fermeture.
+          try { await CapacitorApp.minimizeApp(); }
+          catch (erreur) { console.warn("Impossible de minimiser GRIND", erreur); }
+        });
+        if (!actif) await handle.remove();
+        else ecouteur = handle;
+      } catch (erreur) {
+        console.warn("Gestion du bouton Retour Android indisponible", erreur);
+      }
+    };
+
+    enregistrerRetourAndroid();
+    return () => {
+      actif = false;
+      if (ecouteur) ecouteur.remove().catch(() => {});
+    };
+  }, []);
+
+  // Purge au lancement des médias temporaires conservés depuis plus de 30 jours.
+  useEffect(() => {
+    if (Capacitor.getPlatform() === "android") nettoyerCacheMediaAndroid().catch(() => {});
+  }, []);
 
   // Sur Android, demander les notifications dès le premier lancement, même avant la connexion.
   // Android 12 et antérieur n'affichent pas de dialogue runtime pour cette permission.
@@ -146,9 +224,11 @@ export default function App() {
   }, [tentativeConnexion]);
 
   useEffect(() => {
-    // Les composants enfants peuvent ainsi bloquer les actions même lorsque
-    // Android indique encore « en ligne » sur un Wi-Fi sans accès Internet.
-    const apiEnLigne = Capacitor.getPlatform() !== "android" || (etatConnexion.verifiee && etatConnexion.disponible);
+    // La vérification réseau ne doit pas retarder l'interface : tant qu'elle
+    // tourne, navigator.onLine sert de signal provisoire. Dès qu'un contrôle
+    // GRIND échoue, les actions serveur sont bloquées jusqu'à la reconnexion.
+    const apiEnLigne = Capacitor.getPlatform() !== "android"
+      || (etatConnexion.verifiee ? etatConnexion.disponible : navigator.onLine !== false);
     window.__GRIND_API_ONLINE = apiEnLigne;
     window.dispatchEvent(new CustomEvent("grind-api-status", { detail: { online: apiEnLigne } }));
     if (etatConnexion.disponible) setBandeauHorsLigneMasque(false);
@@ -470,10 +550,6 @@ export default function App() {
   }
 
 
-  if (paysAccess.loading) {
-    return <div className="country-check" role="status"><span className="grind-spinner" /><p>Vérification de la disponibilité de GRIND…</p></div>;
-  }
-
   if (paysAccess.blocked && role !== "admin" && (!forcerConnexionAdmin || !!sessionToken)) {
     return <PaysIndisponible
       pays={paysAccess.country}
@@ -563,10 +639,11 @@ export default function App() {
     <div className={`app-shell ${discussionPleineEcran ? "app-shell-discussion" : ""}`}>
       <FondAnime />
       {Capacitor.getPlatform() === "android" && etatConnexion.verifiee && !etatConnexion.disponible && !bandeauHorsLigneMasque && (
-        <div className="grind-offline-chip" role="status" aria-label="Aucune connexion Internet">
+        <div className="grind-offline-chip" role="status" aria-label="Aucune connexion à Internet">
           <img src="/icon-192.png" alt="GRIND" />
-          <i className="fa-solid fa-wifi-slash" aria-hidden="true" />
-          <button type="button" onClick={() => setBandeauHorsLigneMasque(true)} aria-label="Masquer l'indicateur hors ligne"><i className="fa-solid fa-xmark" /></button>
+          <span className="grind-offline-wifi" aria-hidden="true"><i className="fa-solid fa-wifi" /></span>
+          <strong>Aucune connexion à Internet</strong>
+          <button type="button" onClick={() => setBandeauHorsLigneMasque(true)} aria-label="Fermer l'indicateur hors ligne"><i className="fa-solid fa-xmark" /></button>
         </div>
       )}
       {toastGrind && <div className="grind-toast" role="status">{toastGrind}</div>}

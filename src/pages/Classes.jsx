@@ -36,6 +36,12 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [classeEnEdition, setClasseEnEdition] = useState(null);
   const [nomEdition, setNomEdition] = useState("");
   const [classeASupprimer, setClasseASupprimer] = useState(null);
+  const retourInterneRef = useRef({});
+  retourInterneRef.current = {
+    qrClasse, classeASupprimer, profilConsulte, discussionActive, salleActive,
+    classeEnEdition, formulaireOuvert,
+    actualiserClasses: () => charger({ silencieux: true }),
+  };
 
   async function charger({ silencieux = false } = {}) {
     if (!estGrindEnLigne()) { setChargement(false); return; }
@@ -85,6 +91,34 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     onModeDiscussion?.(Boolean(discussionActive && !profilConsulte && !salleActive));
     return () => onModeDiscussion?.(false);
   }, [discussionActive, profilConsulte, salleActive, onModeDiscussion]);
+
+  // Le retour matériel Android ferme d'abord le sous-écran ou la modale active.
+  useEffect(() => {
+    const gererRetourInterne = (event) => {
+      if (event.defaultPrevented) return;
+      const vue = retourInterneRef.current;
+      if (vue.qrClasse) { setQrClasse(null); event.preventDefault(); return; }
+      if (vue.classeASupprimer) { setClasseASupprimer(null); event.preventDefault(); return; }
+      if (vue.profilConsulte) { setProfilConsulte(null); event.preventDefault(); return; }
+      if (vue.discussionActive) {
+        setDiscussionActive(null);
+        setMessageInitialDiscussion(null);
+        vue.actualiserClasses?.();
+        event.preventDefault();
+        return;
+      }
+      if (vue.salleActive) { setSalleActive(null); event.preventDefault(); return; }
+      if (vue.classeEnEdition !== null) { setClasseEnEdition(null); event.preventDefault(); return; }
+      if (vue.formulaireOuvert) {
+        setFormulaireOuvert(null);
+        setCodeInvitationSaisi("");
+        setErreurScanner("");
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("grind-back", gererRetourInterne);
+    return () => window.removeEventListener("grind-back", gererRetourInterne);
+  }, []);
 
   useEffect(() => {
     let actif = true;

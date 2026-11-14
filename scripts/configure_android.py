@@ -62,6 +62,41 @@ def configure_manifest() -> None:
         metadata = ET.SubElement(application, "meta-data")
     metadata.set(android_attr("name"), "com.google.mlkit.vision.DEPENDENCIES")
     metadata.set(android_attr("value"), "barcode_ui")
+
+    # FCM : utilise le symbole monochrome GRIND dans la barre de notifications.
+    notification_icon = next(
+        (node for node in application.findall("meta-data")
+         if node.get(android_attr("name")) == "com.google.firebase.messaging.default_notification_icon"),
+        None,
+    )
+    if notification_icon is None:
+        notification_icon = ET.SubElement(application, "meta-data")
+    notification_icon.set(android_attr("name"), "com.google.firebase.messaging.default_notification_icon")
+    notification_icon.set(android_attr("resource"), "@drawable/ic_stat_grind")
+
+    # FileProvider : ouvre les fichiers locaux GRIND avec les applications Android
+    # sans exposer de file:// URI directement aux autres applications.
+    provider = next(
+        (node for node in application.findall("provider")
+         if node.get(android_attr("authorities")) == "${applicationId}.grindmedia.fileprovider"),
+        None,
+    )
+    if provider is None:
+        provider = ET.SubElement(application, "provider")
+    provider.set(android_attr("name"), "androidx.core.content.FileProvider")
+    provider.set(android_attr("authorities"), "${applicationId}.grindmedia.fileprovider")
+    provider.set(android_attr("exported"), "false")
+    provider.set(android_attr("grantUriPermissions"), "true")
+    provider_meta = next(
+        (node for node in provider.findall("meta-data")
+         if node.get(android_attr("name")) == "android.support.FILE_PROVIDER_PATHS"),
+        None,
+    )
+    if provider_meta is None:
+        provider_meta = ET.SubElement(provider, "meta-data")
+    provider_meta.set(android_attr("name"), "android.support.FILE_PROVIDER_PATHS")
+    provider_meta.set(android_attr("resource"), "@xml/grind_media_file_paths")
+
     ET.indent(tree, space="    ")
     tree.write(MANIFEST, encoding="utf-8", xml_declaration=True)
 
@@ -202,6 +237,69 @@ def configure_edge_to_edge() -> None:
     activity.write_text(source, encoding="utf-8")
 
 
+def configure_media_storage() -> None:
+    """Installe le plugin local GRIND et son FileProvider dans le projet natif généré."""
+    java_root = ANDROID / "app" / "src" / "main" / "java"
+    candidates = sorted(java_root.rglob("MainActivity.java")) if java_root.is_dir() else []
+    if not candidates:
+        raise SystemExit(f"MainActivity.java introuvable sous : {java_root}")
+    activity = candidates[0]
+    source = activity.read_text(encoding="utf-8")
+    package_match = re.search(r"^package\s+([\w.]+);", source, re.MULTILINE)
+    if not package_match:
+        raise SystemExit(f"Package Android introuvable dans : {activity}")
+    package_name = package_match.group(1)
+
+    plugin_source_path = ROOT / "scripts" / "android" / "GrindMediaPlugin.java"
+    if not plugin_source_path.is_file():
+        raise SystemExit(f"Source du plugin média introuvable : {plugin_source_path}")
+    package_dir = java_root / Path(*package_name.split("."))
+    package_dir.mkdir(parents=True, exist_ok=True)
+    plugin_destination = package_dir / "GrindMediaPlugin.java"
+    plugin_source = plugin_source_path.read_text(encoding="utf-8").replace("__APP_PACKAGE__", package_name)
+    plugin_destination.write_text(plugin_source, encoding="utf-8")
+
+    plugin_import = f"import {package_name}.GrindMediaPlugin;"
+    if plugin_import not in source:
+        bridge_import = "import com.getcapacitor.BridgeActivity;"
+        if bridge_import not in source:
+            raise SystemExit(f"Import BridgeActivity introuvable dans : {activity}")
+        source = source.replace(bridge_import, bridge_import + "\n" + plugin_import, 1)
+
+    if "registerPlugin(GrindMediaPlugin.class);" not in source:
+        super_call = re.search(r"super\.onCreate\(\s*savedInstanceState\s*\)\s*;", source)
+        if super_call:
+            source = source[:super_call.start()] + "registerPlugin(GrindMediaPlugin.class);\n        " + source[super_call.start():]
+        else:
+            class_open = re.search(
+                r"public\s+class\s+MainActivity\s+extends\s+BridgeActivity\s*\{",
+                source,
+            )
+            if not class_open:
+                raise SystemExit(f"Début de MainActivity introuvable dans : {activity}")
+            method = (
+                "\n    @Override\n"
+                "    public void onCreate(android.os.Bundle savedInstanceState) {\n"
+                "        registerPlugin(GrindMediaPlugin.class);\n"
+                "        super.onCreate(savedInstanceState);\n"
+                "    }\n"
+            )
+            source = source[:class_open.end()] + method + source[class_open.end():]
+    activity.write_text(source, encoding="utf-8")
+
+    xml_dir = RES / "xml"
+    xml_dir.mkdir(parents=True, exist_ok=True)
+    paths_file = xml_dir / "grind_media_file_paths.xml"
+    paths_file.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<paths xmlns:android="http://schemas.android.com/apk/res/android">\n'
+        '    <external-media-path name="grind_external_media" path="." />\n'
+        '    <external-files-path name="grind_external_files" path="." />\n'
+        '</paths>\n',
+        encoding="utf-8",
+    )
+
+
 def configure_launcher_icons() -> None:
     if not ICON_SOURCE.is_file():
         raise SystemExit(f"Icône GRIND introuvable : {ICON_SOURCE}")
@@ -258,6 +356,38 @@ def configure_launcher_icons() -> None:
     (adaptive / "ic_launcher_round.xml").write_text(adaptive_xml, encoding="utf-8")
 
 
+def configure_notification_icon() -> None:
+    """Génère un petit pictogramme blanc transparent dédié aux notifications FCM."""
+    if not ICON_SOURCE.is_file():
+        raise SystemExit(f"Icône GRIND introuvable : {ICON_SOURCE}")
+
+    # Les icônes de notification Android sont des masques monochromes :
+    # le système applique sa propre couleur. On conserve la silhouette claire
+    # du cerveau GRIND et on élimine le fond sombre du logo de lancement.
+    from PIL import ImageOps
+
+    source = Image.open(ICON_SOURCE).convert("RGB")
+    niveaux = ImageOps.grayscale(source)
+    masque = niveaux.point(lambda valeur: 0 if valeur < 55 else 255 if valeur > 115 else round((valeur - 55) * 255 / 60))
+    limites = masque.getbbox()
+    if limites is None:
+        raise SystemExit("Impossible d'extraire la silhouette du logo GRIND pour les notifications.")
+    masque = masque.crop(limites)
+
+    tailles = {"mdpi": 24, "hdpi": 36, "xhdpi": 48, "xxhdpi": 72, "xxxhdpi": 96}
+    for densite, taille in tailles.items():
+        dimension_art = max(1, round(taille * 0.82))
+        forme = masque.copy()
+        forme.thumbnail((dimension_art, dimension_art), Image.Resampling.LANCZOS)
+        pictogramme = Image.new("RGBA", forme.size, (255, 255, 255, 0))
+        pictogramme.putalpha(forme)
+        canevas = Image.new("RGBA", (taille, taille), (255, 255, 255, 0))
+        position = ((taille - forme.width) // 2, (taille - forme.height) // 2)
+        canevas.alpha_composite(pictogramme, position)
+        dossier = RES / f"drawable-{densite}"
+        dossier.mkdir(parents=True, exist_ok=True)
+        canevas.save(dossier / "ic_stat_grind.png", optimize=True)
+
 def configure_app_version() -> None:
     """Expose le numéro de version GRIND dans les informations Android."""
     gradle = ANDROID / "app" / "build.gradle"
@@ -277,7 +407,7 @@ def configure_app_version() -> None:
     if depth:
         raise SystemExit("Bloc defaultConfig Gradle incomplet.")
     block = source[start:index - 1]
-    for key, value in (("versionCode", "21003"), ("versionName", '"2.10.3"')):
+    for key, value in (("versionCode", "21005"), ("versionName", '"2.10.5"')):
         pattern = rf"(?m)^([ \t]*){key}\s+[^\n]+$"
         if re.search(pattern, block):
             block = re.sub(pattern, lambda m: f"{m.group(1)}{key} {value}", block, count=1)
@@ -294,7 +424,9 @@ def main() -> int:
     configure_native_window_theme()
     configure_edge_to_edge()
     configure_launcher_icons()
-    print("Manifest, QR scanner ML Kit, version 2.10.3, thème natif, bord-à-bord, permissions et icône GRIND configurés.")
+    configure_notification_icon()
+    configure_media_storage()
+    print("Manifest, stockage média local, FileProvider, QR scanner ML Kit, version 2.10.5, thème natif, bord-à-bord et icônes GRIND configurés.")
     return 0
 
 

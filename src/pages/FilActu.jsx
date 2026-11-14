@@ -10,6 +10,21 @@ import BandeauAnnonces from "../components/BandeauAnnonces.jsx";
 import ChampMention from "../components/ChampMention.jsx";
 
 const LIMITE_LEGENDE = 500;
+const EXTENSIONS_IMAGES = new Set(["jpg", "jpeg", "png", "webp"]);
+const EXTENSIONS_VIDEOS = new Set(["mp4", "mov", "webm"]);
+
+function extensionFichier(fichier) {
+  return String(fichier?.name || "").split(".").pop().toLowerCase();
+}
+
+function estImage(fichier) {
+  const mime = String(fichier?.type || "").split(";", 1)[0].trim().toLowerCase();
+  return ["image/jpeg", "image/png", "image/webp"].includes(mime) || EXTENSIONS_IMAGES.has(extensionFichier(fichier));
+}
+
+function estVideo(fichier) {
+  return String(fichier?.type || "").toLowerCase().startsWith("video/") || EXTENSIONS_VIDEOS.has(extensionFichier(fichier));
+}
 
 export default function FilActu({ sessionToken, monUsername, modeInstitutionnel = false, etablissements = [], postAouvrir = null }) {
   const [profilConsulte, setProfilConsulte] = useState(null);
@@ -47,6 +62,23 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
   const [progressionUpload, setProgressionUpload] = useState(0);
   const [erreur, setErreur] = useState(null);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
+  const retourFilRef = useRef({});
+  retourFilRef.current = { profilConsulte, editeurOuvert, menuPiecesOuvert, apercuMedia, documentFinal, formulaireOuvert };
+
+  useEffect(() => {
+    const gererRetourFil = (event) => {
+      if (event.defaultPrevented) return;
+      const vue = retourFilRef.current;
+      if (vue.profilConsulte) { setProfilConsulte(null); event.preventDefault(); return; }
+      if (vue.editeurOuvert) { annulerEdition(); event.preventDefault(); return; }
+      if (vue.menuPiecesOuvert) { setMenuPiecesOuvert(false); event.preventDefault(); return; }
+      if (vue.apercuMedia) { retirerMedia(); event.preventDefault(); return; }
+      if (vue.documentFinal) { retirerDocument(); event.preventDefault(); return; }
+      if (vue.formulaireOuvert) { setFormulaireOuvert(false); event.preventDefault(); }
+    };
+    window.addEventListener("grind-back", gererRetourFil);
+    return () => window.removeEventListener("grind-back", gererRetourFil);
+  }, []);
 
   useEffect(() => {
     const url = apercuMedia?.url;
@@ -131,8 +163,8 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     setMenuPiecesOuvert(false);
     if (!selection.length) return;
     if (selection.length > 1) {
-      if (selection.length > 10 || selection.some(f => !f.type.startsWith("image/"))) {
-        setErreur("Sélectionne au maximum 10 images. Les vidéos et documents se publient séparément.");
+      if (selection.length > 10 || selection.some(f => !estImage(f))) {
+        setErreur("Choisis jusqu’à 10 images JPG, PNG ou WebP. Les vidéos et documents se publient séparément.");
         e.target.value = "";
         return;
       }
@@ -143,33 +175,37 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     }
     const fichier = selection[0];
     setFichiersGalerie([]);
-    if ((fichier.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "")) && fichier.size > 300 * 1024 * 1024) {
+    if (estVideo(fichier) && fichier.size > 300 * 1024 * 1024) {
       setFichierBrut(null); setFichierFinal(null); setApercuMedia(null);
       setErreur("La vidéo ne doit pas dépasser 300 Mo.");
       e.target.value = "";
       return;
     }
     setFichierBrut(fichier);
-    if (fichier.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "")) setEditeurOuvert("video");
-    else if (fichier.type.startsWith("image/")) setEditeurOuvert("photo");
+    if (estVideo(fichier)) setEditeurOuvert("video");
+    else if (estImage(fichier)) setEditeurOuvert("photo");
     else {
       setFichierBrut(null);
       setFichierFinal(null);
       setApercuMedia(null);
-      setErreur("Pour un média, choisis une image ou une vidéo. Les documents disposent de leur propre bouton.");
+      setErreur("Format non pris en charge. Choisis une image JPG, PNG, WebP ou une vidéo MP4, MOV, WebM.");
     }
   }
 
   function gererChoixDocument(e) {
     const fichier = e.target.files?.[0];
     if (!fichier) return;
-    const extension = fichier.name.split(".").pop().toLowerCase();
-    const valide = ["pdf", "docx"].includes(extension) && (fichier.type === "application/pdf" || fichier.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || !fichier.type || fichier.type === "application/octet-stream");
-    if (!valide || fichier.size > 15 * 1024 * 1024) {
-      setErreur("Ajoute un PDF ou DOCX de 15 Mo maximum.");
+    const extension = extensionFichier(fichier);
+    const mime = String(fichier.type || "").toLowerCase();
+    const extensionDepuisMime = mime === "application/pdf" ? "pdf" : mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx" : "";
+    const format = ["pdf", "docx"].includes(extension) ? extension : extensionDepuisMime;
+    if (!format || fichier.size <= 0 || fichier.size > 15 * 1024 * 1024) {
+      setErreur("Choisis un document PDF ou DOCX de 15 Mo maximum.");
     } else {
+      // Le type MIME fourni par certains sélecteurs Android est imprécis.
+      // L'extension détermine le format attendu ; le serveur vérifie ensuite la signature réelle.
       setDocumentFinal(fichier);
-      setDocumentTitre(fichier.name.replace(/\.[^.]+$/, "").trim());
+      setDocumentTitre(String(fichier.name || `document.${format}`).replace(/\.[^.]+$/, "").trim());
       setErreur(null); setMenuPiecesOuvert(false);
     }
     e.target.value = "";
@@ -282,7 +318,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
           title="Problèmes"
           aria-label="Problèmes"
         >
-          <i className="fa-solid fa-circle-question"></i> Prob
+          <i className="fa-solid fa-circle-question"></i> Prob.
         </button>
         <button
           className={filtre === "demonstration" ? "filtre-actif" : "filtre"}
@@ -312,16 +348,18 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
             <button
               type="button"
               className={categorie === "demonstration" ? "chip chip-actif" : "chip"}
+              title="Démonstration" aria-label="Démonstration"
               onClick={() => setCategorie("demonstration")}
             >
-              <i className="fa-solid fa-star"></i> Démonstration
+              <i className="fa-solid fa-star"></i> Démo
             </button>
             {!modeInstitutionnel && <button
               type="button"
               className={categorie === "probleme" ? "chip chip-actif" : "chip"}
+              title="Problème" aria-label="Problème"
               onClick={() => setCategorie("probleme")}
             >
-              <i className="fa-solid fa-circle-question"></i> Problème
+              <i className="fa-solid fa-circle-question"></i> Prob.
             </button>}
           </div>
 
@@ -341,7 +379,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
             <button type="button" className="bouton-retirer-media" onClick={retirerMedia} aria-label="Retirer le média"><i className="fa-solid fa-xmark" /></button>
           </div>}
           <div className="publication-attachments-picker">
-            <input ref={imagesInputRef} type="file" accept="image/*" multiple hidden onChange={gererChoixFichier} />
+            <input ref={imagesInputRef} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple hidden onChange={gererChoixFichier} />
             <input ref={videoInputRef} type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden onChange={gererChoixFichier} />
             <input ref={documentInputRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden onChange={gererChoixDocument} />
             <button type="button" className={`publication-attachment-trigger ${menuPiecesOuvert ? "actif" : ""}`} onClick={() => setMenuPiecesOuvert(v => !v)} aria-expanded={menuPiecesOuvert} aria-label="Ajouter une pièce jointe">

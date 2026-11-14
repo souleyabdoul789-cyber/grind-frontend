@@ -13,7 +13,9 @@ async function fetchApi(url, options) {
     return await fetch(url, options);
   } catch (cause) {
     const erreur = new Error(
-      "Impossible de joindre le serveur GRIND. Vérifie la connexion, l'URL VITE_GRIND_URL sur le frontend et l'origine autorisée dans GRIND_FRONTEND_ORIGINS sur Render."
+      navigator.onLine === false
+        ? "Aucune connexion à Internet. Vérifie ton réseau puis réessaie."
+        : "Le serveur GRIND ne répond pas."
     );
     erreur.cause = cause;
     throw erreur;
@@ -178,14 +180,31 @@ export async function listerPosts(categorie, sessionToken) {
   return res.json();
 }
 
-export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, media_items, document_url, document_name, document_type, document_categorie, etablissement_id }) {
+export function creerPost(sessionToken, { categorie, contenu, date_limite, media_url, media_type, media_items, document_url, document_name, document_title, document_type, document_categorie, etablissement_id }) {
   return poster(`${GRIND_URL}/api/posts`, {
     session_token: sessionToken, categorie, contenu, date_limite,
-    media_url, media_type, media_items, document_url, document_name, document_type, document_categorie, etablissement_id,
+    media_url, media_type, media_items, document_url, document_name, document_title, document_type, document_categorie, etablissement_id,
   });
 }
 
 // ---------- Média (upload direct vers Cloudinary) ----------
+
+const EXTENSION_PAR_MIME = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "video/mp4": ".mp4",
+  "video/quicktime": ".mov",
+  "video/webm": ".webm",
+};
+
+function nomFichierTransfert(fichier, base = "media") {
+  const nom = String(fichier?.name || "").trim();
+  if (/\.[a-z0-9]{2,8}$/i.test(nom)) return nom;
+  const type = String(fichier?.type || "").split(";", 1)[0].trim().toLowerCase();
+  const extension = EXTENSION_PAR_MIME[type] || "";
+  return `${nom || base}${extension}`;
+}
 
 function envoyerXHR(url, formulaire, { headers = {}, onProgress = null, timeout = 15 * 60 * 1000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -200,7 +219,13 @@ function envoyerXHR(url, formulaire, { headers = {}, onProgress = null, timeout 
       let data = {};
       try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* réponse non JSON */ }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(typeof data.detail === "string" ? data.detail : data.error?.message || `Échec du transfert (${xhr.status || "réseau"}).`));
+      else {
+        const detail = typeof data.detail === "string" ? data.detail : "";
+        const message = detail && !/cloudinary|signature|api[_ -]?key|upload[_ -]?preset/i.test(detail)
+          ? detail
+          : "Le transfert du fichier n’a pas abouti. Réessaie dans quelques instants.";
+        reject(new Error(message));
+      }
     };
     xhr.onerror = () => reject(new Error("La connexion a été interrompue pendant l'envoi. Réessaie avec une connexion stable."));
     xhr.ontimeout = () => reject(new Error("Le transfert a dépassé le délai autorisé. Réessaie avec une connexion plus stable."));
@@ -209,14 +234,14 @@ function envoyerXHR(url, formulaire, { headers = {}, onProgress = null, timeout 
 }
 
 async function uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress) {
-  const nom = fichier.name || (fichier.type === "video/webm" ? "cours.webm" : fichier.type === "video/quicktime" ? "cours.mov" : "cours.mp4");
+  const nom = nomFichierTransfert(fichier, "cours");
   const signature = await poster(`${GRIND_URL}/api/media/upload/signature`, {
     session_token: sessionToken, file_name: nom, file_size: fichier.size,
     content_type: fichier.type || "application/octet-stream",
     debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin,
   });
   const chunkSize = signature.taille_chunk_octets;
-  if (!chunkSize || chunkSize < 5 * 1024 * 1024) throw new Error("Configuration des segments Cloudinary invalide.");
+  if (!chunkSize || chunkSize < 5 * 1024 * 1024) throw new Error("Le transfert de la vidéo n’a pas pu être initialisé. Réessaie dans quelques instants.");
   const uploadId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let resultatFinal = null;
   for (let debut = 0; debut < fichier.size; debut += chunkSize) {
@@ -237,13 +262,13 @@ async function uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgr
       onProgress: (charge, total) => onProgress?.(Math.min(99, Math.round((debut + Math.min(charge, total)) / fichier.size * 100))),
     });
     const dernierSegment = finExclusive === fichier.size;
-    if (!dernierSegment && resultat.done !== false) throw new Error("Cloudinary n'a pas confirmé la réception d'un segment intermédiaire.");
+    if (!dernierSegment && resultat.done !== false) throw new Error("Le transfert de la vidéo a échoué. Réessaie avec une connexion plus stable.");
     if (dernierSegment) {
-      if (resultat.done !== true) throw new Error("Cloudinary n'a pas confirmé la fin du transfert.");
+      if (resultat.done !== true) throw new Error("Le transfert de la vidéo a échoué. Réessaie avec une connexion plus stable.");
       resultatFinal = resultat;
     }
   }
-  if (!resultatFinal?.secure_url || !resultatFinal?.signature) throw new Error("Cloudinary n'a pas confirmé le dernier segment du fichier.");
+  if (!resultatFinal?.secure_url || !resultatFinal?.signature) throw new Error("Le transfert de la vidéo n’a pas pu être finalisé. Réessaie dans quelques instants.");
   onProgress?.(99);
   const confirmation = await poster(`${GRIND_URL}/api/media/upload/confirm`, {
     session_token: sessionToken, asset: resultatFinal,
@@ -255,13 +280,13 @@ async function uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgr
 
 export async function uploaderMedia(sessionToken, fichier, decoupeVideo, onProgress = null) {
   if (!fichier) throw new Error("Choisis un média avant de publier.");
-  const estVideo = fichier.type.startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "");
+  const estVideo = String(fichier.type || "").startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "");
   const limiteMo = estVideo ? 300 : 25;
   if (fichier.size <= 0 || fichier.size > limiteMo * 1024 * 1024) throw new Error(`Le média doit être non vide et ne pas dépasser ${limiteMo} Mo${estVideo ? " pour une vidéo" : " pour une image"}.`);
   if (estVideo && fichier.size > 90 * 1024 * 1024) return uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress);
   const formulaire = new FormData();
   formulaire.append("session_token", sessionToken);
-  formulaire.append("file", fichier, fichier.name || "media");
+  formulaire.append("file", fichier, nomFichierTransfert(fichier, estVideo ? "video" : "image"));
   if (decoupeVideo?.debut !== undefined && decoupeVideo?.fin !== undefined) {
     formulaire.append("debut_video", String(decoupeVideo.debut));
     formulaire.append("fin_video", String(decoupeVideo.fin));
@@ -272,22 +297,35 @@ export async function uploaderMedia(sessionToken, fichier, decoupeVideo, onProgr
 }
 
 export async function uploaderDocument(sessionToken, fichier) {
-  const formats = [
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ];
-  const extension = String(fichier?.name || "").split(".").pop().toLowerCase();
-  const typeOk = formats.includes(fichier?.type) ||
-    (extension === "pdf" && (!fichier.type || fichier.type === "application/octet-stream")) ||
-    (extension === "docx" && (!fichier.type || fichier.type === "application/octet-stream"));
-  if (!fichier || !typeOk) throw new Error("Seuls les documents PDF et DOCX sont acceptés.");
+  if (!fichier) throw new Error("Choisis un document avant de publier.");
+  const nomOriginal = String(fichier.name || "").trim();
+  const typeFourni = String(fichier.type || "").split(";", 1)[0].trim().toLowerCase();
+  const extensionDepuisMime = typeFourni === "application/pdf" ? "pdf"
+    : typeFourni === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx" : "";
+  const extensionNom = nomOriginal.split(".").pop().toLowerCase();
+  const extension = ["pdf", "docx"].includes(extensionNom) ? extensionNom : extensionDepuisMime;
+  const mimeParExtension = {
+    pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+  const typeAttendu = mimeParExtension[extension];
+  if (!typeAttendu) throw new Error("Seuls les documents PDF et DOCX sont acceptés.");
   if (fichier.size <= 0 || fichier.size > 15 * 1024 * 1024) throw new Error("Le document doit être non vide et ne pas dépasser 15 Mo.");
+
+  // Certains fournisseurs Android renvoient un MIME générique ou un nom incomplet.
+  // On normalise le nom et le MIME ; le backend vérifie la signature binaire
+  // et la structure réelle du fichier avant de l'accepter.
+  const nom = /\.(pdf|docx)$/i.test(nomOriginal) ? nomOriginal : `document.${extension}`;
+  const fichierNormalise = new File([fichier], nom, {
+    type: typeAttendu,
+    lastModified: Number(fichier.lastModified) || Date.now(),
+  });
   const formulaire = new FormData();
   formulaire.append("session_token", sessionToken);
-  formulaire.append("file", fichier, fichier.name || "document");
-  const res = await fetch(`${GRIND_URL}/api/media/document`, { method: "POST", body: formulaire });
+  formulaire.append("file", fichierNormalise, nom);
+  const res = await fetchApi(`${GRIND_URL}/api/media/document`, { method: "POST", body: formulaire });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Échec de l'envoi du document.");
+  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "L'envoi du document a échoué. Réessaie.");
   return data;
 }
 
@@ -499,9 +537,10 @@ export function urlDiscussion(sessionToken, discussionId) {
   return `${base}/ws/discussion/${discussionId}?session_token=${encodeURIComponent(sessionToken)}`;
 }
 
-export function urlPieceDiscussion(sessionToken, classeId, messageId) {
+export function urlPieceDiscussion(sessionToken, classeId, messageId, download = false) {
   const url = new URL(`${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/piece`);
   url.searchParams.set("session_token", sessionToken);
+  if (download) url.searchParams.set("download", "1");
   return url.toString();
 }
 

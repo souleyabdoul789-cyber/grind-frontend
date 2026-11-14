@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { GRIND_URL, obtenirMonAvatar, modifierNomProfil } from "../api.js";
 import { nomPays } from "../paysListe.js";
 import AvatarPersonnage from "../components/AvatarPersonnage.jsx";
@@ -13,6 +13,19 @@ export default function Profil({ sessionToken, monUsername }) {
   const [editionNom, setEditionNom] = useState(false);
   const [erreurNom, setErreurNom] = useState("");
   const [enregistrementNom, setEnregistrementNom] = useState(false);
+  const retourProfilRef = useRef({});
+  retourProfilRef.current = { personnalisationOuverte, editionNom };
+
+  useEffect(() => {
+    const gererRetourProfil = (event) => {
+      if (event.defaultPrevented) return;
+      const vue = retourProfilRef.current;
+      if (vue.personnalisationOuverte) { setPersonnalisationOuverte(false); return event.preventDefault(); }
+      if (vue.editionNom) { setEditionNom(false); setNomEdite(monUsername || ""); return event.preventDefault(); }
+    };
+    window.addEventListener("grind-back", gererRetourProfil);
+    return () => window.removeEventListener("grind-back", gererRetourProfil);
+  }, [monUsername]);
 
   async function chargerTout() {
     setChargement(true);
