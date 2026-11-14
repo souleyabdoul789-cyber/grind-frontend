@@ -232,7 +232,7 @@ public class GrindMediaPlugin extends Plugin {
                 connection.setInstanceFollowRedirects(true);
                 connection.setRequestProperty("Accept-Encoding", "identity");
                 connection.setRequestProperty("Accept", "*/*");
-                connection.setRequestProperty("User-Agent", "GRIND-Android-Media/2.10.5");
+                connection.setRequestProperty("User-Agent", "GRIND-Android-Media/2.10.6");
                 int status = connection.getResponseCode();
                 String finalHost = connection.getURL().getHost();
                 if (finalHost == null || !finalHost.equalsIgnoreCase(sourceHost)) {

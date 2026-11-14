@@ -407,7 +407,7 @@ def configure_app_version() -> None:
     if depth:
         raise SystemExit("Bloc defaultConfig Gradle incomplet.")
     block = source[start:index - 1]
-    for key, value in (("versionCode", "21005"), ("versionName", '"2.10.5"')):
+    for key, value in (("versionCode", "21006"), ("versionName", '"2.10.6"')):
         pattern = rf"(?m)^([ \t]*){key}\s+[^\n]+$"
         if re.search(pattern, block):
             block = re.sub(pattern, lambda m: f"{m.group(1)}{key} {value}", block, count=1)
@@ -426,7 +426,7 @@ def main() -> int:
     configure_launcher_icons()
     configure_notification_icon()
     configure_media_storage()
-    print("Manifest, stockage média local, FileProvider, QR scanner ML Kit, version 2.10.5, thème natif, bord-à-bord et icônes GRIND configurés.")
+    print("Manifest, stockage média local, FileProvider, QR scanner ML Kit, version 2.10.6, thème natif, bord-à-bord et icônes GRIND configurés.")
     return 0
 
 

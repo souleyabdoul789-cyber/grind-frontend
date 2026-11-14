@@ -33,10 +33,41 @@ async function poster(url, body) {
     const detail = data.detail;
     // Le serveur renvoie parfois un détail structuré (ex. compte sanctionné) : on le garde dans `donnees`.
     const erreur = new Error(typeof detail === "string" ? detail : detail?.message || "Une erreur est survenue");
+    erreur.status = res.status;
     if (detail && typeof detail === "object" && !Array.isArray(detail)) erreur.donnees = detail;
     throw erreur;
   }
   return data;
+}
+
+const pauseReessaiMedia = (delai) => new Promise((resolve) => window.setTimeout(resolve, delai));
+
+// Les opérations de signature/confirmation ne créent pas de message. Elles
+// peuvent donc être retentées brièvement quand Render se réveille ou répond 502/503.
+// Ne pas utiliser cette fonction pour publier un message : un POST non idempotent
+// pourrait créer un doublon si la réponse réseau se perd après le commit SQL.
+async function posterMediaAvecReprise(url, body, etape) {
+  const delais = [1200, 2800];
+  let derniereErreur = null;
+
+  for (let tentative = 0; tentative <= delais.length; tentative += 1) {
+    try {
+      return await poster(url, body);
+    } catch (erreur) {
+      derniereErreur = erreur;
+      const statut = Number(erreur?.status || 0);
+      const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+      if (!temporaire || tentative === delais.length) break;
+      await pauseReessaiMedia(delais[tentative]);
+    }
+  }
+
+  const statut = Number(derniereErreur?.status || 0);
+  if (!statut || [502, 503, 504].includes(statut)) {
+    const suffixe = statut ? ` (HTTP ${statut})` : "";
+    throw new Error(`GRIND n'a pas répondu pendant ${etape}${suffixe}. Le fichier n'a pas encore été publié ; vérifie la connexion puis réessaie.`);
+  }
+  throw derniereErreur;
 }
 
 // ---------- Compte GRIND (propre à GRIND, distinct de G-SOCIETY) ----------
@@ -220,26 +251,70 @@ function envoyerXHR(url, formulaire, { headers = {}, onProgress = null, timeout 
       try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* réponse non JSON */ }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
       else {
-        const detail = typeof data.detail === "string" ? data.detail : "";
-        const message = detail && !/cloudinary|signature|api[_ -]?key|upload[_ -]?preset/i.test(detail)
-          ? detail
-          : "Le transfert du fichier n’a pas abouti. Réessaie dans quelques instants.";
-        reject(new Error(message));
+        const detail = typeof data.detail === "string" ? data.detail : data.detail?.message;
+        const fournisseur = typeof data.error?.message === "string" ? data.error.message : "";
+        const brut = detail || fournisseur;
+        const message = brut && !/cloudinary|signature|api[_ -]?key|upload[_ -]?preset|secret/i.test(brut)
+          ? brut
+          : xhr.status === 401
+            ? "Ta session GRIND a expiré. Reconnecte-toi puis réessaie."
+            : xhr.status === 413
+              ? "Le fichier dépasse la limite autorisée."
+              : xhr.status === 415
+                ? "Ce format de fichier n'est pas accepté."
+                : xhr.status >= 500
+                  ? "Le service de stockage rencontre une difficulté. Réessaie dans quelques instants."
+                  : "Le transfert du fichier n’a pas abouti. Réessaie dans quelques instants.";
+        const erreur = new Error(message);
+        erreur.status = xhr.status;
+        reject(erreur);
       }
     };
-    xhr.onerror = () => reject(new Error("La connexion a été interrompue pendant l'envoi. Réessaie avec une connexion stable."));
-    xhr.ontimeout = () => reject(new Error("Le transfert a dépassé le délai autorisé. Réessaie avec une connexion plus stable."));
+    xhr.onerror = () => {
+      const erreur = new Error("Le service de transfert n'a pas répondu. Vérifie Internet puis réessaie.");
+      erreur.status = xhr.status || 0;
+      reject(erreur);
+    };
+    xhr.ontimeout = () => {
+      const erreur = new Error("Le transfert a dépassé le délai autorisé. Ta publication n'a pas été envoyée ; réessaie avec une connexion plus stable.");
+      erreur.status = 408;
+      reject(erreur);
+    };
     xhr.send(formulaire);
   });
 }
 
+function verifierUrlUploadCloudinary(url, ressource) {
+  try {
+    const cible = new URL(url);
+    return cible.protocol === "https:" && cible.hostname === "api.cloudinary.com"
+      && /^\/v1_1\/[A-Za-z0-9_-]+\/(image|video|raw)\/upload$/.test(cible.pathname)
+      && cible.pathname.endsWith(`/${ressource}/upload`);
+  } catch {
+    return false;
+  }
+}
+
+function formulaireUploadSigne(fichier, nom, signature) {
+  const formulaire = new FormData();
+  formulaire.append("file", fichier, nom);
+  formulaire.append("api_key", signature.api_key);
+  formulaire.append("timestamp", String(signature.timestamp));
+  formulaire.append("signature", signature.signature);
+  Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
+  return formulaire;
+}
+
 async function uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress) {
   const nom = nomFichierTransfert(fichier, "cours");
-  const signature = await poster(`${GRIND_URL}/api/media/upload/signature`, {
+  const signature = await posterMediaAvecReprise(`${GRIND_URL}/api/media/upload/signature`, {
     session_token: sessionToken, file_name: nom, file_size: fichier.size,
     content_type: fichier.type || "application/octet-stream",
     debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin,
-  });
+  }, "la préparation de l'envoi média");
+  if (!verifierUrlUploadCloudinary(signature.upload_url, "video")) {
+    throw new Error("Le serveur GRIND a renvoyé une destination de transfert invalide.");
+  }
   const chunkSize = signature.taille_chunk_octets;
   if (!chunkSize || chunkSize < 5 * 1024 * 1024) throw new Error("Le transfert de la vidéo n’a pas pu être initialisé. Réessaie dans quelques instants.");
   const uploadId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -270,33 +345,65 @@ async function uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgr
   }
   if (!resultatFinal?.secure_url || !resultatFinal?.signature) throw new Error("Le transfert de la vidéo n’a pas pu être finalisé. Réessaie dans quelques instants.");
   onProgress?.(99);
-  const confirmation = await poster(`${GRIND_URL}/api/media/upload/confirm`, {
+  const confirmation = await posterMediaAvecReprise(`${GRIND_URL}/api/media/upload/confirm`, {
     session_token: sessionToken, asset: resultatFinal,
     debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin,
-  });
+  }, "la validation du média");
   onProgress?.(100);
   return confirmation;
 }
 
 export async function uploaderMedia(sessionToken, fichier, decoupeVideo, onProgress = null) {
   if (!fichier) throw new Error("Choisis un média avant de publier.");
-  const estVideo = String(fichier.type || "").startsWith("video/") || /\.(mp4|mov|webm)$/i.test(fichier.name || "");
+  const nom = nomFichierTransfert(fichier, "media");
+  const extension = nom.split(".").pop().toLowerCase();
+  const estVideo = String(fichier.type || "").startsWith("video/") || ["mp4", "mov", "webm"].includes(extension);
+  const groupe = estVideo ? "video" : "image";
   const limiteMo = estVideo ? 300 : 25;
-  if (fichier.size <= 0 || fichier.size > limiteMo * 1024 * 1024) throw new Error(`Le média doit être non vide et ne pas dépasser ${limiteMo} Mo${estVideo ? " pour une vidéo" : " pour une image"}.`);
-  if (estVideo && fichier.size > 90 * 1024 * 1024) return uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress);
-  const formulaire = new FormData();
-  formulaire.append("session_token", sessionToken);
-  formulaire.append("file", fichier, nomFichierTransfert(fichier, estVideo ? "video" : "image"));
-  if (decoupeVideo?.debut !== undefined && decoupeVideo?.fin !== undefined) {
-    formulaire.append("debut_video", String(decoupeVideo.debut));
-    formulaire.append("fin_video", String(decoupeVideo.fin));
+  if (fichier.size <= 0 || fichier.size > limiteMo * 1024 * 1024) {
+    throw new Error(`Le média doit être non vide et ne pas dépasser ${limiteMo} Mo${estVideo ? " pour une vidéo" : " pour une image"}.`);
   }
-  const data = await envoyerXHR(`${GRIND_URL}/api/media/upload`, formulaire, { onProgress: (charge, total) => onProgress?.(total ? Math.round(charge / total * 100) : 0) });
+
+  // Les très grosses vidéos utilisent le transfert Cloudinary par segments.
+  if (estVideo && fichier.size > 90 * 1024 * 1024) {
+    return uploaderVideoChunked(sessionToken, fichier, decoupeVideo, onProgress);
+  }
+
+  // Le fichier part directement vers Cloudinary après signature par GRIND.
+  // GRIND ne relaie donc plus le corps du fichier : on évite les timeouts Render.
+  const signature = await posterMediaAvecReprise(`${GRIND_URL}/api/media/upload/signature`, {
+    session_token: sessionToken,
+    file_name: nom,
+    file_size: fichier.size,
+    content_type: fichier.type || "application/octet-stream",
+    debut_video: decoupeVideo?.debut,
+    fin_video: decoupeVideo?.fin,
+  }, "la préparation de l'envoi média");
+  if (!verifierUrlUploadCloudinary(signature.upload_url, groupe)) {
+    throw new Error("Le serveur GRIND a renvoyé une destination de transfert invalide.");
+  }
+
+  const formulaire = formulaireUploadSigne(fichier, nom, signature);
+  const asset = await envoyerXHR(signature.upload_url, formulaire, {
+    onProgress: (charge, total) => onProgress?.(total ? Math.min(98, Math.round(charge / total * 98)) : 0),
+    timeout: 15 * 60 * 1000,
+  });
+  if (!asset?.secure_url || !asset?.public_id || !asset?.version || !asset?.signature) {
+    throw new Error("Le stockage n'a pas confirmé la réception complète du média.");
+  }
+
+  onProgress?.(99);
+  const resultat = await posterMediaAvecReprise(`${GRIND_URL}/api/media/upload/confirm`, {
+    session_token: sessionToken,
+    asset,
+    debut_video: decoupeVideo?.debut,
+    fin_video: decoupeVideo?.fin,
+  }, "la validation du média");
   onProgress?.(100);
-  return data;
+  return resultat;
 }
 
-export async function uploaderDocument(sessionToken, fichier) {
+export async function uploaderDocument(sessionToken, fichier, onProgress = null) {
   if (!fichier) throw new Error("Choisis un document avant de publier.");
   const nomOriginal = String(fichier.name || "").trim();
   const typeFourni = String(fichier.type || "").split(";", 1)[0].trim().toLowerCase();
@@ -313,20 +420,38 @@ export async function uploaderDocument(sessionToken, fichier) {
   if (fichier.size <= 0 || fichier.size > 15 * 1024 * 1024) throw new Error("Le document doit être non vide et ne pas dépasser 15 Mo.");
 
   // Certains fournisseurs Android renvoient un MIME générique ou un nom incomplet.
-  // On normalise le nom et le MIME ; le backend vérifie la signature binaire
-  // et la structure réelle du fichier avant de l'accepter.
+  // Le serveur revalide taille/type et inspecte les premiers octets du fichier stocké.
   const nom = /\.(pdf|docx)$/i.test(nomOriginal) ? nomOriginal : `document.${extension}`;
+  const signature = await posterMediaAvecReprise(`${GRIND_URL}/api/media/document/signature`, {
+    session_token: sessionToken,
+    file_name: nom,
+    file_size: fichier.size,
+    content_type: typeAttendu,
+  }, "la préparation de l'envoi du document");
+  if (!verifierUrlUploadCloudinary(signature.upload_url, "raw")) {
+    throw new Error("Le serveur GRIND a renvoyé une destination de transfert invalide.");
+  }
+
   const fichierNormalise = new File([fichier], nom, {
     type: typeAttendu,
     lastModified: Number(fichier.lastModified) || Date.now(),
   });
-  const formulaire = new FormData();
-  formulaire.append("session_token", sessionToken);
-  formulaire.append("file", fichierNormalise, nom);
-  const res = await fetchApi(`${GRIND_URL}/api/media/document`, { method: "POST", body: formulaire });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "L'envoi du document a échoué. Réessaie.");
-  return data;
+  const formulaire = formulaireUploadSigne(fichierNormalise, nom, signature);
+  const asset = await envoyerXHR(signature.upload_url, formulaire, {
+    onProgress: (charge, total) => onProgress?.(total ? Math.min(98, Math.round(charge / total * 98)) : 0),
+    timeout: 5 * 60 * 1000,
+  });
+  if (!asset?.secure_url || !asset?.public_id || !asset?.version || !asset?.signature) {
+    throw new Error("Le stockage n'a pas confirmé la réception complète du document.");
+  }
+  onProgress?.(99);
+  const resultat = await posterMediaAvecReprise(`${GRIND_URL}/api/media/document/confirm`, {
+    session_token: sessionToken,
+    file_name: nom,
+    asset,
+  }, "la validation du document");
+  onProgress?.(100);
+  return resultat;
 }
 
 export function togglerLike(sessionToken, postId) {
@@ -493,8 +618,15 @@ export async function envoyerVocalDiscussion(sessionToken, classeId, fichier, re
   });
 }
 
-export function envoyerMessageDiscussion(sessionToken, classeId, payload) {
-  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, { session_token: sessionToken, ...payload });
+export async function envoyerMessageDiscussion(sessionToken, classeId, payload) {
+  try {
+    return await poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, { session_token: sessionToken, ...payload });
+  } catch (erreur) {
+    if (!erreur?.status) {
+      throw new Error("GRIND n'a pas confirmé la publication du message. Vérifie d'abord s'il apparaît déjà dans le groupe avant de réessayer, pour éviter un doublon.");
+    }
+    throw erreur;
+  }
 }
 
 export async function modifierMessageDiscussion(sessionToken, classeId, messageId, contenu) {

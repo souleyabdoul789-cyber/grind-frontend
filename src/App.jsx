@@ -278,6 +278,17 @@ export default function App() {
     const nouveauType = donnees.type_compte ?? localStorage.getItem("grind_type_compte") ?? "eleve";
     const nouveauUsername = donnees.username ?? localStorage.getItem("grind_username");
 
+    // L'App est la source de vérité de la session : un login réussi doit être
+    // persisté avant que les contrôles asynchrones (PIN/profil) commencent.
+    if (token) localStorage.setItem("grind_session_token", token);
+    if (nouveauUsername) localStorage.setItem("grind_username", nouveauUsername);
+    if (nouveauRole) localStorage.setItem("grind_role", nouveauRole);
+    if (nouveauType) localStorage.setItem("grind_type_compte", nouveauType);
+
+    // Réinitialise immédiatement l'état de sécurité : ne jamais réutiliser le
+    // statut PIN d'un ancien compte pendant le premier rendu du nouveau login.
+    setPinStatus(token ? { loading: true } : null);
+    setStatut(null);
     setSessionToken(token);
     setUsername(nouveauUsername);
     setRole(nouveauRole);
@@ -309,6 +320,22 @@ export default function App() {
     // Session ancienne ou mémorisée : vérifier le profil après la validation éventuelle du PIN.
     // Le middleware de session refuse volontairement les routes privées tant que le PIN est expiré.
     setProfilPret(false);
+  }
+
+  function invaliderSessionConfirmee(token) {
+    // Seul un HTTP 401 du contrôle de session constitue une preuve que le
+    // jeton est invalide. Une panne réseau/500/503 ne doit jamais déconnecter.
+    if (!token || localStorage.getItem("grind_session_token") === token) {
+      localStorage.removeItem("grind_session_token");
+      localStorage.removeItem("grind_username");
+      localStorage.removeItem("grind_profil_complet");
+    }
+    setSessionToken(null);
+    setUsername(null);
+    setPinStatus(null);
+    setProfilComplet(false);
+    setProfilPret(true);
+    setStatut(null);
   }
 
   async function verifierProfilServeur(token) {
@@ -383,8 +410,13 @@ export default function App() {
         try { localStorage.setItem(pinCacheKey, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
         setPinStatus({ ...status, loading: false });
       })
-      .catch(() => {
+      .catch((erreur) => {
         if (!actif) return;
+        if (erreur?.status === 401) {
+          invaliderSessionConfirmee(sessionToken);
+          return;
+        }
+
         let cache = null;
         try { cache = JSON.parse(localStorage.getItem(pinCacheKey) || "null"); } catch {}
         const elapsed = cache?.checkedAt ? Math.max(0, (Date.now() - cache.checkedAt) / 1000) : Infinity;
@@ -395,16 +427,43 @@ export default function App() {
           setPinStatus({ ...cache.status, required: false, remaining_seconds: Math.floor(secondesRestantes), loading: false, offline: true });
           return;
         }
-        if (!estGrindEnLigne()) {
-          setPinStatus({ loading: false, required: true, configured: true, offline: true });
-          return;
-        }
-        localStorage.removeItem("grind_session_token");
-        localStorage.removeItem("grind_username");
-        setSessionToken(null); setUsername(null); setPinStatus(null);
+        // Render peut être en réveil ou une requête peut échouer ponctuellement.
+        // On garde le jeton et on retente le contrôle au lieu de renvoyer au login
+        // ou de deviner à tort si le compte possède déjà un PIN.
+        setPinStatus({ loading: true, verification_pending: true });
       });
     return () => { actif = false; };
   }, [sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken || !pinStatus?.verification_pending) return undefined;
+    let actif = true;
+    let timer = null;
+
+    const retenter = async () => {
+      try {
+        const status = await statutPin(sessionToken);
+        if (!actif) return;
+        const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
+        try { localStorage.setItem(pinCacheKey, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
+        setPinStatus({ ...status, loading: false });
+      } catch (erreur) {
+        if (!actif) return;
+        if (erreur?.status === 401) {
+          invaliderSessionConfirmee(sessionToken);
+          return;
+        }
+        // Réessai borné en fréquence : pas de boucle rapide ni de déconnexion.
+        timer = window.setTimeout(retenter, 10000);
+      }
+    };
+
+    timer = window.setTimeout(retenter, 2500);
+    return () => {
+      actif = false;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [sessionToken, pinStatus?.verification_pending]);
 
   useEffect(() => {
     if (!sessionToken || !pinStatus || pinStatus.loading || pinStatus.required || profilPret) return;
@@ -436,9 +495,9 @@ export default function App() {
       try {
         const nouveauStatut = await statutPin(sessionToken);
         setPinStatus({ ...nouveauStatut, loading: false });
-      } catch {
-        localStorage.removeItem("grind_session_token");
-        setSessionToken(null); setUsername(null); setPinStatus(null);
+      } catch (erreur) {
+        if (erreur?.status === 401) invaliderSessionConfirmee(sessionToken);
+        else setPinStatus({ loading: true, verification_pending: true });
       }
     }, delai);
     return () => window.clearTimeout(timer);
@@ -448,22 +507,43 @@ export default function App() {
     try {
       const nouveauStatut = await statutPin(sessionToken);
       setPinStatus({ ...nouveauStatut, loading: false });
-    } catch {
-      localStorage.removeItem("grind_session_token");
-      setSessionToken(null); setUsername(null); setPinStatus(null);
+    } catch (erreur) {
+      if (erreur?.status === 401) invaliderSessionConfirmee(sessionToken);
+      else setPinStatus({ loading: true, verification_pending: true });
     }
   }
 
   // Statut du compte : droits d'administration et acceptation des CGU.
+  // IMPORTANT : /api/moderation/moi passe par le middleware de session protégé
+  // par le PIN. L'appeler avant la validation du PIN renvoie un 401 légitime,
+  // qui ne signifie PAS que le mot de passe ou la session fraîche sont invalides.
   useEffect(() => {
-    if (!sessionToken || !profilComplet || role === "admin" || typeCompte === "proviseur") return;
+    if (
+      !sessionToken || !profilComplet || role === "admin" || typeCompte === "proviseur"
+      || !pinStatus || pinStatus.loading || pinStatus.required || pinStatus.verification_pending
+    ) return undefined;
+
+    let actif = true;
     obtenirMonStatut(sessionToken)
-      .then(setStatut)
-      .catch((err) => {
-        // Session morte (expirée, ou compte suspendu/banni entre-temps) : retour à la connexion.
-        if (String(err.message).includes("Session GRIND invalide")) deconnecter();
+      .then((resultat) => {
+        if (actif && localStorage.getItem("grind_session_token") === sessionToken) {
+          setStatut(resultat);
+        }
+      })
+      .catch((erreur) => {
+        if (!actif) return;
+        // Seul un 401 reçu APRÈS le contrôle PIN réussi peut invalider cette session.
+        // Une panne réseau, un 5xx ou un changement de compte ne doit jamais déconnecter.
+        if (
+          erreur?.status === 401
+          && localStorage.getItem("grind_session_token") === sessionToken
+        ) {
+          invaliderSessionConfirmee(sessionToken);
+        }
       });
-  }, [sessionToken, profilComplet, role, typeCompte]);
+
+    return () => { actif = false; };
+  }, [sessionToken, profilComplet, role, typeCompte, pinStatus?.loading, pinStatus?.required, pinStatus?.verification_pending]);
 
   function deconnecter() {
     // Déconnexion RÉELLE : la session est aussi supprimée côté serveur (le jeton ne sert plus, même volé).

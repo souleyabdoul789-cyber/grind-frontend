@@ -110,11 +110,33 @@ function nomFichierEnregistre(username, classeId, message) {
 function ImageDiscussion({ src, alt, onOpen }) {
   const [chargee, setChargee] = useState(false);
   const [echec, setEchec] = useState(false);
-  useEffect(() => { setChargee(false); setEchec(false); }, [src]);
+  const [ratio, setRatio] = useState(4 / 3);
+
+  useEffect(() => {
+    setChargee(false);
+    setEchec(false);
+    setRatio(4 / 3);
+  }, [src]);
+
+  function imageChargee(event) {
+    const image = event.currentTarget;
+    if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setRatio(image.naturalWidth / image.naturalHeight);
+    }
+    setChargee(true);
+  }
+
   return (
-    <button type="button" className={`discussion-image ${chargee ? "media-charge" : ""}`} onClick={onOpen} disabled={!src} aria-label="Afficher l'image partagée">
+    <button
+      type="button"
+      className={`discussion-image ${chargee ? "media-charge" : ""} ${echec ? "media-echec" : ""}`}
+      style={{ aspectRatio: ratio }}
+      onClick={onOpen}
+      disabled={!src || echec}
+      aria-label="Afficher l'image partagée"
+    >
       {!chargee && !echec && <span className="discussion-media-skeleton" aria-hidden="true" />}
-      {src ? <img src={src} alt={alt} loading="lazy" onLoad={() => setChargee(true)} onError={() => { setEchec(true); setChargee(false); }} /> : null}
+      {src ? <img src={src} alt={alt} loading="lazy" decoding="async" onLoad={imageChargee} onError={() => { setEchec(true); setChargee(false); }} /> : null}
       {(!src || echec) && <span className="discussion-media-indisponible">{echec ? "Image indisponible" : "Image non enregistrée hors ligne"}</span>}
     </button>
   );
@@ -929,7 +951,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       if (fichier) {
         const ext = fichier.name.split(".").pop().toLowerCase();
         if (["pdf", "docx"].includes(ext)) {
-          const doc = await uploaderDocument(sessionToken, fichier);
+          const doc = await uploaderDocument(sessionToken, fichier, setProgression);
           piece = { url: doc.document_url, type: "document", nom: doc.document_name || fichier.name, mime: doc.document_type || fichier.type, taille: fichier.size };
         } else {
           const estVideo = fichier.type.startsWith("video/") || ["mp4", "mov", "webm"].includes(ext);
@@ -1396,7 +1418,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
               <div className="discussion-bulle-wrap">
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
                 {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span>{message.reply.contenu || "Message"}</span></button>}
-                <div className={`discussion-bulle style-${message.style_texte || "normal"}`}>
+                <div className={`discussion-bulle style-${message.style_texte || "normal"} ${message.piece?.type === "image" ? "discussion-bulle-avec-image" : ""}`}>
                   {message.supprime_pour_tous ? (
                     <div className="discussion-message-supprime"><i className="fa-solid fa-ban" /> Ce message a été supprimé.</div>
                   ) : <>
