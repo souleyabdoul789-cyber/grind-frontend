@@ -339,11 +339,23 @@ function nouveauClientMessageId() {
     || `grind-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
+function ordonnerMessagesDiscussion(messages) {
+  return [...(messages || [])].sort((a, b) => {
+    const aOptimiste = Boolean(a.optimistic);
+    const bOptimiste = Boolean(b.optimistic);
+    if (aOptimiste !== bOptimiste) return aOptimiste ? 1 : -1;
+    if (aOptimiste && bOptimiste) {
+      return Date.parse(a.created_at || 0) - Date.parse(b.created_at || 0);
+    }
+    return Number(a.id) - Number(b.id);
+  });
+}
+
 function fusionnerMessageDiscussion(messages, entrant) {
   const suivant = (messages || []).filter(message => message.id !== entrant.id
     && !(entrant.client_message_id && message.client_message_id === entrant.client_message_id));
   suivant.push(entrant);
-  return suivant.sort((a, b) => Number(a.id) - Number(b.id));
+  return ordonnerMessagesDiscussion(suivant);
 }
 
 export default function DiscussionClasse({ sessionToken, classe, monUsername, messageAouvrirId = null, onQuitter }) {
@@ -399,6 +411,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const pendingMessagePayloadRef = useRef(null);
   const pendingVocalIdRef = useRef(null);
   const fileAttenteEnCoursRef = useRef(false);
+  const tentativesFileAttenteRef = useRef(new Map());
+  const prochaineTentativeFileAttenteRef = useRef(0);
+  const prochaineIdOptimisteRef = useRef(0);
+  const messagesEnAttenteRef = useRef(messagesEnAttente);
+  messagesEnAttenteRef.current = messagesEnAttente;
   const messagesActuels = useRef([]);
   const dernierMessageLuRef = useRef(0);
   const lectureEnAttenteRef = useRef(0);
@@ -598,23 +615,77 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }, [messagesEnAttente, cleOutboxDiscussion]);
 
   useEffect(() => {
-    const reveiller = () => setRevisionReseau(value => value + 1);
-    window.addEventListener("online", reveiller);
-    window.addEventListener("grind-api-status", reveiller);
-    const intervalle = window.setInterval(reveiller, 15000);
+    const verifierReseau = () => setRevisionReseau(value => value + 1);
+    const reconnexion = () => {
+      tentativesFileAttenteRef.current.clear();
+      prochaineTentativeFileAttenteRef.current = 0;
+      verifierReseau();
+    };
+    window.addEventListener("online", reconnexion);
+    window.addEventListener("grind-api-status", reconnexion);
+    const intervalle = window.setInterval(verifierReseau, 15000);
     return () => {
-      window.removeEventListener("online", reveiller);
-      window.removeEventListener("grind-api-status", reveiller);
+      window.removeEventListener("online", reconnexion);
+      window.removeEventListener("grind-api-status", reconnexion);
       window.clearInterval(intervalle);
     };
   }, []);
+
+  // Reconstitue dans le fil les messages placés en file avant une fermeture de l'app.
+  // Le client_message_id reste la clé de rapprochement avec la réponse serveur.
+  useEffect(() => {
+    if (!messagesEnAttente.length) return;
+    setMessages(prev => {
+      let suivant = prev;
+      for (const element of messagesEnAttente) {
+        if (suivant.some(message => message.client_message_id === element.client_message_id)) continue;
+        if (suivant === prev) suivant = [...prev];
+        const auteur = membres.find(membre => membre.username === monUsername);
+        const reponseCible = element.reply_to_id
+          ? suivant.find(message => Number(message.id) === Number(element.reply_to_id))
+          : null;
+        const sequence = prochaineIdOptimisteRef.current++ % 1000;
+        const idOptimiste = -(Date.now() * 1000 + sequence);
+        suivant.push({
+          id: idOptimiste,
+          client_message_id: element.client_message_id,
+          auteur: monUsername,
+          auteur_nom: auteur?.nom || monUsername,
+          contenu: element.contenu || "",
+          piece: element.piece || null,
+          reply_to_id: element.reply_to_id || null,
+          reply: reponseCible ? {
+            id: reponseCible.id,
+            auteur: reponseCible.auteur,
+            auteur_nom: reponseCible.auteur_nom || reponseCible.auteur,
+            contenu: reponseCible.contenu || "",
+          } : null,
+          style_texte: element.style_texte || "normal",
+          created_at: element.created_at || new Date().toISOString(),
+          optimistic: true,
+          supprime_pour_tous: false,
+          lu_par_au_moins_un: false,
+        });
+      }
+      return suivant === prev ? prev : ordonnerMessagesDiscussion(suivant);
+    });
+  }, [messagesEnAttente, membres, monUsername]);
 
   // Envoi séquentiel des messages texte déjà placés dans la file locale.
   // Chaque élément conserve son client_message_id : un retry après réponse perdue
   // retrouve le message côté serveur au lieu d'en créer un second.
   useEffect(() => {
     if (!discussion?.id || !sessionToken || !messagesEnAttente.length || !estGrindEnLigne()) return undefined;
+    const attenteRestante = prochaineTentativeFileAttenteRef.current - Date.now();
+    if (attenteRestante > 0) {
+      const timer = window.setTimeout(() => {
+        prochaineTentativeFileAttenteRef.current = 0;
+        setRevisionReseau(value => value + 1);
+      }, attenteRestante);
+      return () => window.clearTimeout(timer);
+    }
     let actif = true;
+    let timerNouvelleTentative = null;
     const synchroniser = async () => {
       if (fileAttenteEnCoursRef.current) return;
       fileAttenteEnCoursRef.current = true;
@@ -631,13 +702,26 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
               client_message_id: element.client_message_id,
             });
             if (!actif) return;
+            tentativesFileAttenteRef.current.delete(element.client_message_id);
             setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
             envoyes.push(element.client_message_id);
           } catch (erreur) {
             if (!actif) return;
             const statut = Number(erreur?.status || 0);
             const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
-            if (!temporaire) {
+            if (temporaire) {
+              const tentatives = (tentativesFileAttenteRef.current.get(element.client_message_id) || 0) + 1;
+              tentativesFileAttenteRef.current.set(element.client_message_id, tentatives);
+              const delai = Math.min(30000, 1200 * (2 ** Math.min(tentatives - 1, 5)))
+                + Math.floor(Math.random() * 500);
+              // Backoff exponentiel borné : évite de marteler une API instable.
+              prochaineTentativeFileAttenteRef.current = Date.now() + delai;
+              timerNouvelleTentative = window.setTimeout(() => {
+                if (!actif) return;
+                prochaineTentativeFileAttenteRef.current = 0;
+                setRevisionReseau(value => value + 1);
+              }, delai);
+            } else {
               setMessagesEnAttente(prev => prev.map(item => item.client_message_id === element.client_message_id
                 ? { ...item, failed: true, error: erreur.message || "Le serveur a refusé ce message." } : item));
             }
@@ -650,17 +734,32 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           const ids = new Set(envoyes);
           setMessagesEnAttente(prev => prev.filter(item => !ids.has(item.client_message_id)));
         }
+        // Si la file a changé pendant une requête, le nouvel effet a pu trouver
+        // le verrou occupé. On le réveille aussitôt après la libération du verrou.
+        if (!actif && composantActifRef.current
+            && messagesEnAttenteRef.current.some(item => !item.failed)) {
+          window.setTimeout(() => {
+            if (composantActifRef.current) setRevisionReseau(value => value + 1);
+          }, 0);
+        }
       }
     };
     synchroniser();
-    return () => { actif = false; };
+    return () => {
+      actif = false;
+      if (timerNouvelleTentative !== null) window.clearTimeout(timerNouvelleTentative);
+    };
   }, [discussion?.id, sessionToken, classe.classe_id, messagesEnAttente, revisionReseau]);
 
   function annulerMessageEnAttente(clientMessageId) {
+    tentativesFileAttenteRef.current.delete(clientMessageId);
     setMessagesEnAttente(prev => prev.filter(item => item.client_message_id !== clientMessageId));
+    setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
   }
 
   function retenterMessageEnAttente(clientMessageId) {
+    tentativesFileAttenteRef.current.delete(clientMessageId);
+    prochaineTentativeFileAttenteRef.current = 0;
     setMessagesEnAttente(prev => prev.map(item => item.client_message_id === clientMessageId
       ? { ...item, failed: false, error: null } : item));
     setRevisionReseau(value => value + 1);
@@ -803,7 +902,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     // après veille mobile et les déploiements exécutés avec plusieurs processus.
     const actualiserMessages = async () => {
       if (!actif || !estGrindEnLigne()) return;
-      const dernierId = messagesActuels.current.at(-1)?.id || 0;
+      const dernierId = messagesActuels.current.filter(message => Number(message.id) > 0).at(-1)?.id || 0;
       try {
         const [data, mentions] = await Promise.all([
           listerMessagesDiscussion(sessionToken, classe.classe_id, null, dernierId),
@@ -1230,7 +1329,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           setMessages(prev => {
             const map = new Map(prev.map(m => [m.id, m]));
             (anciens.messages || []).forEach(m => map.set(m.id, m));
-            const next = [...map.values()].sort((a, b) => a.id - b.id);
+            const next = ordonnerMessagesDiscussion([...map.values()]);
             messagesActuels.current = next;
             return next;
           });
@@ -1310,13 +1409,17 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Les anciens messages non enregistrés sur cet appareil nécessitent Internet." }));
       return;
     }
-    if (!messages.length || chargementAnciens) return;
+    const premierMessageConfirme = messages.find(message => Number(message.id) > 0);
+    if (!premierMessageConfirme || chargementAnciens) return;
     setChargementAnciens(true);
     const scroll = scrollRef.current;
     const avant = scroll?.scrollHeight || 0;
     try {
-      const data = await listerMessagesDiscussion(sessionToken, classe.classe_id, messages[0].id);
-      setMessages(prev => [...(data.messages || []).filter(m => !prev.some(p => p.id === m.id)), ...prev]);
+      const data = await listerMessagesDiscussion(sessionToken, classe.classe_id, premierMessageConfirme.id);
+      setMessages(prev => ordonnerMessagesDiscussion([
+        ...(data.messages || []).filter(message => !prev.some(existing => existing.id === message.id)),
+        ...prev,
+      ]));
       setPlusAnciens(data.has_more);
       requestAnimationFrame(() => { if (scroll) scroll.scrollTop += scroll.scrollHeight - avant; });
     } catch (error) { setMessageErreur(error.message); }
@@ -1325,6 +1428,59 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   async function envoyer() {
     if (envoi || (!texte.trim() && !fichier)) return;
+
+    // Les messages texte simples sont affichés immédiatement, puis envoyés en
+    // arrière-plan par la file idempotente. Le champ reste libre pour la suite.
+    if (texte.trim() && !fichier && !pendingMessagePieceRef.current && !messageEnEdition) {
+      const contenu = texte.trim();
+      const replyToId = reponse?.id || null;
+      const payloadIdempotence = JSON.stringify({ contenu, reply_to_id: replyToId, style_texte: "normal", piece_url: null });
+      if (!pendingMessageIdRef.current || pendingMessagePayloadRef.current !== payloadIdempotence) {
+        pendingMessageIdRef.current = nouveauClientMessageId();
+        pendingMessagePayloadRef.current = payloadIdempotence;
+      }
+      const clientMessageId = pendingMessageIdRef.current;
+      if (messagesEnAttente.length >= 20 && !messagesEnAttente.some(item => item.client_message_id === clientMessageId)) {
+        setMessageErreur("La file d'envoi contient déjà 20 messages. Attends la synchronisation avant d'en ajouter d'autres.");
+        return;
+      }
+      const createdAt = new Date().toISOString();
+      const nouvelElement = {
+        client_message_id: clientMessageId, contenu, reply_to_id: replyToId, style_texte: "normal",
+        piece: null, created_at: createdAt, failed: false,
+      };
+      const membreAuteur = membres.find(membre => membre.username === monUsername);
+      const reponseCible = replyToId ? messages.find(message => Number(message.id) === Number(replyToId)) : null;
+      const sequence = prochaineIdOptimisteRef.current++ % 1000;
+      const messageOptimiste = {
+        id: -(Date.now() * 1000 + sequence),
+        client_message_id: clientMessageId,
+        auteur: monUsername,
+        auteur_nom: membreAuteur?.nom || monUsername,
+        contenu,
+        piece: null,
+        reply_to_id: replyToId,
+        reply: reponseCible ? {
+          id: reponseCible.id, auteur: reponseCible.auteur,
+          auteur_nom: reponseCible.auteur_nom || reponseCible.auteur, contenu: reponseCible.contenu || "",
+        } : null,
+        style_texte: "normal", created_at: createdAt, optimistic: true,
+        supprime_pour_tous: false, lu_par_au_moins_un: false,
+      };
+      setMessages(prev => fusionnerMessageDiscussion(prev, messageOptimiste));
+      setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), nouvelElement].slice(0, 20));
+      pendingMessageIdRef.current = null;
+      pendingMessagePayloadRef.current = null;
+      setTexte("");
+      setReponse(null);
+      setMessageErreur("");
+      setMenuPiecesOuvert(false);
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "typing", typing: false }));
+      return;
+    }
+
     if (!estGrindEnLigne()) {
       const pieceDejaChargee = pendingMessagePieceRef.current;
       if (fichier && !pieceDejaChargee) {
@@ -1459,7 +1615,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         value => setProgression(value), pendingVocalIdRef.current,
       );
       pendingVocalIdRef.current = null;
-      setMessages(prev => prev.some(m => m.id === resultat.message.id) ? prev : [...prev, resultat.message].sort((a, b) => a.id - b.id));
+      setMessages(prev => prev.some(m => m.id === resultat.message.id) ? prev : ordonnerMessagesDiscussion([...prev, resultat.message]));
       setReponse(null);
     } catch (error) {
       setMessageErreur(error.message || "Impossible d'envoyer le message vocal.");
@@ -1636,7 +1792,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       let cible = messages.find(m => m.id === mention.message_id);
       if (!cible) {
         const anciens = await listerMessagesDiscussion(sessionToken, classe.classe_id, mention.message_id + 1);
-        setMessages(prev => [...(anciens.messages || []).filter(m => !prev.some(p => p.id === m.id)), ...prev].sort((a, b) => a.id - b.id));
+        setMessages(prev => ordonnerMessagesDiscussion([
+          ...(anciens.messages || []).filter(message => !prev.some(existing => existing.id === message.id)),
+          ...prev,
+        ]));
         cible = (anciens.messages || []).find(m => m.id === mention.message_id);
       }
       await marquerMentionDiscussionLue(sessionToken, classe.classe_id, mention.id);
@@ -1708,13 +1867,14 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   function messageEditable(message) {
-    if (!message || message.supprime_pour_tous || message.auteur !== monUsername || message.piece || !message.contenu) return false;
+    if (!message || message.optimistic || Number(message.id) <= 0 || message.supprime_pour_tous || message.auteur !== monUsername || message.piece || !message.contenu) return false;
     const date = Date.parse(message.created_at || "");
     return Number.isFinite(date) && Date.now() - date >= 0 && Date.now() - date <= 15 * 60 * 1000;
   }
 
   function peutSupprimerMessagePourTous(message) {
-    return !!message && !message.supprime_pour_tous && (message.auteur === monUsername || estAdmin);
+    return !!message && !message.optimistic && Number(message.id) > 0
+      && !message.supprime_pour_tous && (message.auteur === monUsername || estAdmin);
   }
 
   function basculerSelectionMessage(messageId) {
@@ -1723,6 +1883,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   function commencerPressMessage(event, message) {
+    if (message?.optimistic || Number(message?.id) <= 0) return;
     if (event.target?.closest?.("button, input, audio, video, a, textarea")) return;
     if (messagesSelectionnes.length) return;
     clearTimeout(longPressTimer.current);
@@ -1743,6 +1904,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   function terminerPressMessage(event, message) {
     clearTimeout(longPressTimer.current);
+    if (message?.optimistic || Number(message?.id) <= 0) return;
     if (!longPressDeclenche.current) finSwipe(event, message);
   }
 
@@ -1792,6 +1954,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   function cliquerMessageEnModeSelection(event, message) {
+    if (message?.optimistic || Number(message?.id) <= 0) return;
     if (longPressDeclenche.current) { longPressDeclenche.current = false; event.preventDefault(); return; }
     if (messagesSelectionnes.length && !event.target?.closest?.("button, input, audio, video, a")) {
       event.preventDefault(); basculerSelectionMessage(message.id);
@@ -1921,12 +2084,15 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
             <button type="button" className="danger" onClick={supprimerSelectionPourMoi} disabled={suppressionEnCours}><i className="fa-solid fa-trash" /> {suppressionEnCours ? "Suppression…" : "Supprimer pour moi"}</button>
           </div>}
         </div>}
-        {plusAnciens && messages.length > 0 && <button className="discussion-plus-anciens" type="button" onClick={chargerPlusAnciens} disabled={chargementAnciens}>{chargementAnciens ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-clock-rotate-left" />} Charger les messages précédents</button>}
+        {plusAnciens && messages.some(message => Number(message.id) > 0) && <button className="discussion-plus-anciens" type="button" onClick={chargerPlusAnciens} disabled={chargementAnciens}>{chargementAnciens ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-clock-rotate-left" />} Charger les messages précédents</button>}
         {messages.length === 0 ? <div className="discussion-vide"><i className="fa-regular fa-comments" /><strong>La discussion commence ici</strong><span>Pose une question, partage un cours ou aide un camarade.</span></div> : messages.map(message => {
           const propre = message.auteur === monUsername;
           const mediaPriveUrl = message.piece ? sourcePieceMessage(message) : null;
           const progressionMedia = progressionsMedia[message.id];
           const telechargementActif = progressionMedia !== undefined;
+          const elementEnAttente = message.client_message_id
+            ? messagesEnAttente.find(item => item.client_message_id === message.client_message_id)
+            : null;
           return (
             <article key={message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
               className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} data-has-media={message.piece && !message.supprime_pour_tous ? "true" : "false"} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
@@ -1961,9 +2127,16 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => ouvrirDocumentMessage(message)} label="Enregistrer et ouvrir le document" />
                   </div>}
                   </>}
-                  <span className="discussion-heure">{heure(message.created_at)}{message.modifie && <small className="discussion-message-modifie"> · modifié</small>}{propre && Number(message.id) > 0 && !message.supprime_pour_tous && <span className={`discussion-etat-message ${message.lu_par_au_moins_un ? "lu" : ""}`} title={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"} aria-label={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"}><i className={`fa-solid ${message.lu_par_au_moins_un ? "fa-check-double" : "fa-check"}`} /></span>}</span>
+                  <span className="discussion-heure">
+                    {heure(message.created_at)}
+                    {message.modifie && <small className="discussion-message-modifie"> · modifié</small>}
+                    {elementEnAttente && <small className={`discussion-message-envoi ${elementEnAttente.failed ? "echec" : ""}`}>
+                      · {elementEnAttente.failed ? "Non envoyé" : (estGrindEnLigne() ? "Envoi…" : "En attente")}
+                    </small>}
+                    {propre && Number(message.id) > 0 && !message.supprime_pour_tous && <span className={`discussion-etat-message ${message.lu_par_au_moins_un ? "lu" : ""}`} title={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"} aria-label={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"}><i className={`fa-solid ${message.lu_par_au_moins_un ? "fa-check-double" : "fa-check"}`} /></span>}
+                  </span>
                 </div>
-                {!message.supprime_pour_tous && <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>}
+                {!message.supprime_pour_tous && !message.optimistic && <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>}
               </div>
               {propre && <AvatarIcone username={message.auteur} taille={30} />}
             </article>

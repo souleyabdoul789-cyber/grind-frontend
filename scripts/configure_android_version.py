@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-VERSION_CODE = "21011"
-VERSION_NAME = '"2.10.11"'
+VERSION_CODE = "21012"
+VERSION_NAME = '"2.10.12"'
 GRADLE = Path(__file__).resolve().parents[1] / "android" / "app" / "build.gradle"
 
 
@@ -39,11 +39,11 @@ def main() -> int:
     GRADLE.write_text(source[:start] + block + source[index - 1:], encoding="utf-8")
 
     updated = GRADLE.read_text(encoding="utf-8")
-    if not re.search(r"(?m)^\s*versionCode\s+21011\s*$", updated):
+    if not re.search(r"(?m)^\s*versionCode\s+21012\s*$", updated):
         raise SystemExit("La versionCode Android n'a pas été mise à jour.")
-    if not re.search(r'(?m)^\s*versionName\s+"2\.10\.11"\s*$', updated):
+    if not re.search(r'(?m)^\s*versionName\s+"2\.10\.12"\s*$', updated):
         raise SystemExit("La versionName Android n'a pas été mise à jour.")
-    print("Version Android GRIND configurée : 2.10.11 (21011).")
+    print("Version Android GRIND configurée : 2.10.12 (21012).")
     return 0
 
 

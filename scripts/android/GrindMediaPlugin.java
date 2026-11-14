@@ -43,6 +43,9 @@ public class GrindMediaPlugin extends Plugin {
     // Quota cache temporaire : les téléchargements permanents ne sont jamais supprimés ici.
     private static final long TEMP_MAX_BYTES = 200L * 1024L * 1024L;
     private static final Object TEMP_CLEANUP_LOCK = new Object();
+    // État UI sauvegardé pour masquer les barres uniquement pendant la salle de classe.
+    private Integer previousSystemUiVisibility = null;
+    private boolean previousFullscreenFlag = false;
     private static final int CONNECT_TIMEOUT_MS = 20000;
     private static final int READ_TIMEOUT_MS = 300000;
 
@@ -131,6 +134,69 @@ public class GrindMediaPlugin extends Plugin {
             result.put("size", file.length());
         }
         return result;
+    }
+
+    /**
+     * Mode immersif limité à la salle de classe. L'état Android initial est
+     * mémorisé puis restauré à la fermeture du composant React.
+     */
+    @PluginMethod
+    public void setImmersiveMode(PluginCall call) {
+        final boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled"));
+        if (getActivity() == null) {
+            call.reject("L'activité Android GRIND n'est pas disponible.");
+            return;
+        }
+        getActivity().runOnUiThread(() -> {
+            try {
+                android.view.Window window = getActivity().getWindow();
+                android.view.View decor = window.getDecorView();
+                if (enabled) {
+                    if (previousSystemUiVisibility == null) {
+                        previousSystemUiVisibility = decor.getSystemUiVisibility();
+                        previousFullscreenFlag = (window.getAttributes().flags
+                            & android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN) != 0;
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= 30 && window.getInsetsController() != null) {
+                        android.view.WindowInsetsController controller = window.getInsetsController();
+                        controller.setSystemBarsBehavior(
+                            android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        );
+                        controller.hide(android.view.WindowInsets.Type.systemBars());
+                    } else {
+                        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                        decor.setSystemUiVisibility(
+                            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        );
+                    }
+                } else if (previousSystemUiVisibility != null) {
+                    if (android.os.Build.VERSION.SDK_INT >= 30 && window.getInsetsController() != null) {
+                        window.getInsetsController().show(android.view.WindowInsets.Type.systemBars());
+                    }
+                    decor.setSystemUiVisibility(previousSystemUiVisibility);
+                    if (previousFullscreenFlag) {
+                        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                    } else {
+                        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN);
+                    }
+                    previousSystemUiVisibility = null;
+                    previousFullscreenFlag = false;
+                }
+                // Sans activation préalable réussie, ne touche pas aux barres
+                // système : leur état peut appartenir à un autre écran natif.
+                JSObject result = new JSObject();
+                result.put("success", true);
+                result.put("immersive", enabled);
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject("Impossible de modifier l'affichage système Android.", error);
+            }
+        });
     }
 
     @PluginMethod

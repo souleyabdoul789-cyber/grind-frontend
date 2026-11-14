@@ -4933,3 +4933,41 @@ button:disabled {
 @media (prefers-reduced-motion: reduce) {
   .feuille-papier-actions { transition: none; }
 }
+
+
+/* Panneau Feuilles : titre lisible et fermeture centrée, séparée des onglets. */
+.panneau-feuille-entete {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 2px 0 9px;
+  text-align: center;
+}
+.panneau-feuille-entete > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.panneau-feuille-entete .panneau-feuille-fermer {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,.09);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.panneau-feuille-entete .panneau-feuille-fermer i { font-size: 14px; }
+.panneau-feuille-entete .panneau-feuille-fermer:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+/* Les bulles optimistes restent visibles pendant la synchronisation réseau. */
+.discussion-message-envoi { color: var(--text-dim); font-size: 10px; font-weight: 600; }
+.discussion-message-envoi.echec { color: #d58a7e; }
+.discussion-ligne.moi .discussion-message-envoi { opacity: .9; }

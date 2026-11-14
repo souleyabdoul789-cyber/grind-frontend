@@ -94,6 +94,7 @@ jobs:
         run: |
           python3 -m pip install --user pillow
           python3 scripts/configure_android.py
+          python3 scripts/configure_android_splash.py
           python3 scripts/configure_android_version.py
 
       - name: Build debug APK
@@ -114,7 +115,7 @@ jobs:
           {
             echo "### GRIND Android debug APK"
             echo "Package Android : com.gsociety.grind"
-            echo "Version : 2.10.11"
+            echo "Version : 2.10.12"
             echo "Le SHA-1 du certificat debug est dans l'artifact android-debug-sha1.txt."
             echo "Pour Google OAuth Android, créer un client OAuth Android avec ce package et ce SHA-1."
             echo "Cette clé est réservée aux builds de test, pas à une publication Play Store."
@@ -123,7 +124,7 @@ jobs:
       - name: Upload APK and OAuth fingerprint
         uses: actions/upload-artifact@v4
         with:
-          name: GRIND-Android-Debug-2.10.11
+          name: GRIND-Android-Debug-2.10.12
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android-debug-sha1.txt

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Room, RoomEvent, Track } from "livekit-client";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { ScreenOrientation } from "@capacitor/screen-orientation";
 import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf, obtenirEtatSalle, modererMicroClasse } from "../api.js";
 import SceneClasse, { NB_SIEGES } from "./SceneClasse.jsx";
@@ -13,6 +13,8 @@ import {
 } from "../classeSalleApi.js";
 import { telechargerDocumentSallePdf } from "../utils/classePdf.js";
 
+const GrindMedia = registerPlugin("GrindMedia");
+
 /**
  * SalleClasse — audio à N personnes via LiveKit (notre WebRTC fait
  * main de l'étape précédente ne tenait qu'à deux). LiveKit gère pour
@@ -24,6 +26,26 @@ import { telechargerDocumentSallePdf } from "../utils/classePdf.js";
  * du rôle professeur et reste contrôlée côté serveur.
  */
 export default function SalleClasse({ sessionToken, demandeId, monUsername, profInitial, nomClasse, onQuitter }) {
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "android") return undefined;
+
+    let actif = true;
+    const appliquerPleinEcran = () => {
+      if (!actif || document.visibilityState === "hidden") return;
+      GrindMedia.setImmersiveMode({ enabled: true }).catch(() => {});
+    };
+    appliquerPleinEcran();
+    document.addEventListener("visibilitychange", appliquerPleinEcran);
+
+    return () => {
+      actif = false;
+      document.removeEventListener("visibilitychange", appliquerPleinEcran);
+      // La barre d'état et la navigation Android reviennent à leur état initial
+      // lorsque l'utilisateur quitte la salle.
+      GrindMedia.setImmersiveMode({ enabled: false }).catch(() => {});
+    };
+  }, []);
+
   const [permission, setPermission] = useState("attente");
   const [microActif, setMicroActif] = useState(true);
   const [connexion, setConnexion] = useState("connexion");
@@ -815,8 +837,10 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       {panneauOuvert && (
         <div className="panneau-feuille">
           <div className="panneau-feuille-entete">
-            <span><i className="fa-solid fa-file-lines"></i> Feuilles</span>
-            <button type="button" className="hud-bouton hud-bouton-rond" onClick={() => setPanneauOuvert(false)} aria-label="Fermer"><i className="fa-solid fa-xmark"></i></button>
+            <span><i className="fa-solid fa-file-lines" aria-hidden="true"></i> Feuilles</span>
+            <button type="button" className="hud-bouton hud-bouton-rond panneau-feuille-fermer" onClick={() => setPanneauOuvert(false)} aria-label="Fermer le panneau des feuilles" title="Fermer">
+              <i className="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
           </div>
 
           <div className="bloc-feuille">
