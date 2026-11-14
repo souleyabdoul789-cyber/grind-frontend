@@ -1,119 +1,67 @@
-import { useState, useEffect } from "react";
-import { creerClasse, catalogueScolaire, estGrindEnLigne } from "../api.js";
-import ChargementGrind from "./ChargementGrind.jsx";
+import { useState } from "react";
+import { creerClasse, estGrindEnLigne } from "../api.js";
 
-/**
- * FormulaireClasse — créer une classe.
- * Le niveau et la matière se CHOISISSENT dans le catalogue (cohérents entre eux : pas de philosophie en 6e) ;
- * seul le complément du nom (« Groupe A », « Révisions BEPC »...) est libre, et le serveur le contrôle.
- */
 export default function FormulaireClasse({ sessionToken, onCree }) {
-  const [catalogue, setCatalogue] = useState(null);
-  const [niveauId, setNiveauId] = useState("");
-  const [filiere, setFiliere] = useState("");
-  const [matiere, setMatiere] = useState("");
-  const [complement, setComplement] = useState("");
+  const [nom, setNom] = useState("");
   const [envoi, setEnvoi] = useState(false);
-  const [erreur, setErreur] = useState(null);
+  const [erreur, setErreur] = useState("");
 
-  function chargerCatalogue() {
-    setErreur(null);
-    catalogueScolaire()
-      .then(setCatalogue)
-      .catch((err) => setErreur(err.message || "Impossible de charger la liste des niveaux."));
-  }
-
-  useEffect(() => { chargerCatalogue(); }, []);
-
-  if (!catalogue) {
-    return (
-      <div className="carte-post formulaire-post">
-        {erreur ? <><div className="erreur" role="alert">{erreur}</div><button type="button" onClick={chargerCatalogue}>Réessayer</button></> : <ChargementGrind texte="Chargement du catalogue scolaire..." />}
-      </div>
-    );
-  }
-
-  const niveau = catalogue.niveaux.find((n) => n.id === niveauId) || null;
-  const matieres = niveau ? catalogue.matieres_par_niveau[niveau.id] : [];
-  const labelNiveau = niveau ? niveau.label + (filiere ? ` ${filiere}` : "") : "";
-
-  async function creer(e) {
-    e.preventDefault();
-    setErreur(null);
+  async function creer(event) {
+    event.preventDefault();
+    setErreur("");
+    const nomNormalise = nom.trim().replace(/\s+/g, " ");
+    if (nomNormalise.length < 2) {
+      setErreur("Le nom de la classe doit contenir au moins 2 caractères.");
+      return;
+    }
+    if (nomNormalise.length > 128) {
+      setErreur("Le nom de la classe ne peut pas dépasser 128 caractères.");
+      return;
+    }
     if (!estGrindEnLigne()) {
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour créer une classe." }));
       return;
     }
-    if (!niveau) return setErreur("Choisis le niveau de la classe.");
-    if (!matiere) return setErreur("Choisis la matière de la classe.");
+
     setEnvoi(true);
     try {
-      await creerClasse(sessionToken, { niveau: labelNiveau, matiere, complement: complement.trim() || null });
-      onCree();
-    } catch (err) {
-      setErreur(err.message);
+      await creerClasse(sessionToken, { nom: nomNormalise });
+      setNom("");
+      onCree?.();
+    } catch (cause) {
+      setErreur(cause?.message || "La classe n'a pas pu être créée. Réessaie.");
+    } finally {
       setEnvoi(false);
     }
   }
 
   return (
-    <form className="carte-post formulaire-post" onSubmit={creer} noValidate>
-      <label><i className="fa-solid fa-graduation-cap"></i> Niveau</label>
-      <div className="choix-categorie choix-puces">
-        {catalogue.niveaux.map((n) => (
-          <button
-            key={n.id}
-            type="button"
-            className={`chip ${niveauId === n.id ? "chip-actif" : ""}`}
-            onClick={() => { setNiveauId(n.id); setFiliere(""); setMatiere(""); }}
-          >
-            {n.label}
-          </button>
-        ))}
-      </div>
-
-      {niveau?.cycle === "lycee" && (
-        <>
-          <label>Série (facultatif)</label>
-          <div className="choix-categorie choix-puces">
-            {catalogue.filieres.map((f) => (
-              <button key={f} type="button" className={`chip ${filiere === f ? "chip-actif" : ""}`} onClick={() => setFiliere(filiere === f ? "" : f)}>
-                {f}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      {niveau && (
-        <>
-          <label><i className="fa-solid fa-book-open"></i> Matière</label>
-          <div className="choix-categorie choix-puces">
-            {matieres.map((m) => (
-              <button key={m} type="button" className={`chip ${matiere === m ? "chip-actif" : ""}`} onClick={() => setMatiere(m)}>
-                {m}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      <label><i className="fa-solid fa-tag"></i> Complément du nom (facultatif)</label>
-      <input
-        value={complement}
-        onChange={(e) => setComplement(e.target.value)}
-        placeholder="ex. Groupe A, Révisions BEPC"
-        maxLength={30}
-      />
-
-      {matiere && (
-        <div className="info champ-aide">
-          Nom de la classe : <strong>{matiere} · {labelNiveau}{complement.trim() ? ` — ${complement.trim()}` : ""}</strong>
+    <form className="carte-post formulaire-post formulaire-classe-simple" onSubmit={creer} noValidate>
+      <div className="formulaire-classe-simple-entete">
+        <span className="formulaire-classe-simple-icone" aria-hidden="true"><i className="fa-solid fa-users" /></span>
+        <div>
+          <strong>Créer une classe</strong>
+          <small>Donne un nom clair à ton groupe.</small>
         </div>
-      )}
-
-      <button type="submit" disabled={envoi}>{envoi ? <span className="grind-spinner" aria-label="Création" /> : "Créer"}</button>
-      {erreur && <div className="erreur" role="alert"><i className="fa-solid fa-triangle-exclamation"></i>{erreur}</div>}
+      </div>
+      <label htmlFor="grind-nom-classe">Nom de la classe</label>
+      <input
+        id="grind-nom-classe"
+        className="formulaire-classe-simple-input"
+        type="text"
+        value={nom}
+        onChange={event => setNom(event.target.value)}
+        placeholder="Ex. Groupe de révision BEPC"
+        minLength={2}
+        maxLength={128}
+        autoComplete="off"
+        required
+      />
+      <small className="formulaire-classe-simple-aide">Tu pourras modifier ce nom plus tard.</small>
+      {erreur && <div className="erreur" role="alert"><i className="fa-solid fa-triangle-exclamation" /> {erreur}</div>}
+      <button type="submit" disabled={envoi || nom.trim().length < 2}>
+        {envoi ? <><span className="grind-spinner" aria-hidden="true" /> Création...</> : "Créer la classe"}
+      </button>
     </form>
   );
 }

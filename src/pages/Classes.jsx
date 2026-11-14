@@ -472,7 +472,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
                     <input
                       value={nomEdition}
                       placeholder={c.niveau && c.matiere ? "Complément du nom (facultatif)" : "Nom de la classe"}
-                      maxLength={c.niveau && c.matiere ? 30 : 60}
+                      maxLength={c.niveau && c.matiere ? 30 : 128}
                       onChange={(e) => setNomEdition(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && validerRenommage(c.classe_id)}
                       autoFocus

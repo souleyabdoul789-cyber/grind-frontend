@@ -9,6 +9,7 @@ import {
 import ProfilPublic from "../components/ProfilPublic.jsx";
 import ChargementGrind from "../components/ChargementGrind.jsx";
 import ApercuDocument from "../components/ApercuDocument.jsx";
+import { telechargerDocumentLibrary } from "../libraryMedia.js";
 
 function dateCourte(value) {
   if (!value) return "";
@@ -58,6 +59,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   const [commentaire, setCommentaire] = useState("");
   const [chargementCommentaires, setChargementCommentaires] = useState(false);
   const [envoiCommentaire, setEnvoiCommentaire] = useState(false);
+  const [telechargementDocumentId, setTelechargementDocumentId] = useState(null);
   const retourLibraryRef = useRef({});
   retourLibraryRef.current = { profil, documentCible, apercu, partageOuvert };
 
@@ -244,6 +246,19 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
     }
   }
 
+  async function telechargerDocument(doc) {
+    if (telechargementDocumentId !== null) return;
+    setTelechargementDocumentId(Number(doc.id));
+    setErreur("");
+    try {
+      await telechargerDocumentLibrary(sessionToken, doc);
+    } catch (e) {
+      setErreur(e.message || "Le document n'a pas pu être téléchargé.");
+    } finally {
+      setTelechargementDocumentId(null);
+    }
+  }
+
   if (profil) return <ProfilPublic username={profil} onRetour={() => setProfil(null)} sessionToken={sessionToken} monUsername={monUsername} />;
 
   return <main className="library-page">
@@ -301,7 +316,7 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
           {doc.description && <p className="library-doc-description">{doc.description}</p>}
           <div className="library-doc-actions">
             <button type="button" title="Prévisualiser" aria-label="Prévisualiser" onClick={() => setApercu(doc)}><i className="fa-regular fa-eye" /></button>
-            <a href={doc.fichier_url} download={doc.fichier_nom} target="_blank" rel="noreferrer" title="Télécharger" aria-label="Télécharger"><i className="fa-solid fa-download" /></a>
+            <button type="button" onClick={() => telechargerDocument(doc)} disabled={telechargementDocumentId !== null} title="Télécharger" aria-label="Télécharger">{telechargementDocumentId === Number(doc.id) ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-download" />}</button>
             <button type="button" onClick={() => ouvrirCommentaires(doc)} title="Commentaires" aria-label="Commentaires"><i className="fa-regular fa-comment" /> <small>{doc.commentaires || 0}</small></button>
           </div>
         </div>

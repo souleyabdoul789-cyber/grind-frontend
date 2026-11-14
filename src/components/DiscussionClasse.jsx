@@ -98,6 +98,10 @@ function nomFichierTemporaire(username, classeId, message) {
   return `u-${cleCompteFichier(username)}-classe-${classeId}-message-${message.id}.${extensionPiece(message)}`;
 }
 
+function nomPosterTemporaire(username, classeId, message) {
+  return `u-${cleCompteFichier(username)}-classe-${classeId}-message-${message.id}-poster.jpg`;
+}
+
 function nomFichierEnregistre(username, classeId, message) {
   const nom = String(message?.piece?.nom || `piece-${message?.id || "grind"}`).replace(/[\\/:*?"<>|]/g, "_");
   const extension = extensionPiece(message);
@@ -161,17 +165,49 @@ function BoutonTelechargement({ progression = null, enCours = false, onClick, la
   );
 }
 
-function VideoDiscussion({ src, poster, nom }) {
+function VideoDiscussion({ src, poster, nom, messageId }) {
   const [erreur, setErreur] = useState(false);
-  useEffect(() => setErreur(false), [src, poster]);
+  const [chargement, setChargement] = useState(true);
+  const [ratio, setRatio] = useState(16 / 9);
+  useEffect(() => {
+    setErreur(false);
+    setChargement(true);
+    setRatio(16 / 9);
+  }, [src, poster]);
+
+  function actualiserRatio(event) {
+    const video = event.currentTarget;
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      setRatio(Math.max(0.5625, Math.min(2.4, video.videoWidth / video.videoHeight)));
+    }
+  }
+
   return (
-    <div className="discussion-video-shell">
-      {!src ? (
-        <div className="discussion-video-placeholder"><span className="discussion-media-skeleton" /><small>Vidéo non disponible hors ligne. Télécharge-la pour la conserver sur cet appareil.</small></div>
-      ) : (
-        <video className="discussion-video" src={src} poster={poster || undefined} controls playsInline preload="metadata"
-          aria-label={nom || "Vidéo partagée dans la discussion"} onError={() => setErreur(true)} />
-      )}
+    <div className="discussion-video-shell" style={{ aspectRatio: ratio }}>
+      {!src && <div className="discussion-video-placeholder">
+        <span className="discussion-video-skeleton" aria-hidden="true" />
+        <i className="fa-solid fa-circle-play" aria-hidden="true" />
+        <small>Vidéo non disponible hors ligne. Elle sera lisible dès que le fichier sera disponible.</small>
+      </div>}
+      {src && <>
+        {chargement && <span className="discussion-video-skeleton" aria-hidden="true" />}
+        <video
+          className="discussion-video"
+          data-message-id={messageId}
+          src={src}
+          poster={poster || undefined}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label={nom || "Vidéo partagée dans la discussion"}
+          onLoadedMetadata={actualiserRatio}
+          onLoadedData={() => setChargement(false)}
+          onCanPlay={() => setChargement(false)}
+          onWaiting={() => setChargement(true)}
+          onPlaying={() => setChargement(false)}
+          onError={() => { setErreur(true); setChargement(false); }}
+        />
+      </>}
       {erreur && <div className="discussion-video-error">Cette vidéo ne peut pas être lue sur cet appareil.</div>}
     </div>
   );
@@ -640,9 +676,35 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   function enregistrerMediaLocal(messageId, resultat) {
     if (!resultat?.path) return;
-    const entree = { path: resultat.path, fileName: resultat.fileName, mimeType: resultat.mimeType, size: resultat.size };
+    const precedent = mediasLocauxRef.current[messageId] || {};
+    const entree = { ...precedent, path: resultat.path, fileName: resultat.fileName, mimeType: resultat.mimeType, size: resultat.size };
     mediasLocauxRef.current = { ...mediasLocauxRef.current, [messageId]: entree };
-    if (composantActifRef.current) setMediasLocaux(prev => ({ ...prev, [messageId]: entree }));
+    if (composantActifRef.current) setMediasLocaux(prev => ({ ...prev, [messageId]: { ...prev[messageId], ...entree } }));
+  }
+
+  function enregistrerVideoCacheSansInterrompre(messageId, resultat) {
+    const video = scrollRef.current?.querySelector(`video.discussion-video[data-message-id="${Number(messageId)}"]`);
+    if (!video || video.paused || video.ended) {
+      enregistrerMediaLocal(messageId, resultat);
+      return;
+    }
+    // Ne remplace pas le src d'une vidéo en cours de lecture : on conserve
+    // le flux jusqu'à sa pause/fin, puis les prochaines lectures utiliseront le cache.
+    const appliquer = () => {
+      video.removeEventListener("ended", appliquer);
+      video.removeEventListener("pause", appliquer);
+      enregistrerMediaLocal(messageId, resultat);
+    };
+    video.addEventListener("ended", appliquer, { once: true });
+    video.addEventListener("pause", appliquer, { once: true });
+  }
+
+  function enregistrerPosterLocal(messageId, resultat) {
+    if (!resultat?.path) return;
+    const precedent = mediasLocauxRef.current[messageId] || {};
+    const entree = { ...precedent, posterPath: resultat.path };
+    mediasLocauxRef.current = { ...mediasLocauxRef.current, [messageId]: entree };
+    if (composantActifRef.current) setMediasLocaux(prev => ({ ...prev, [messageId]: { ...prev[messageId], ...entree } }));
   }
 
   function definirProgressionMedia(messageId, valeur) {
@@ -656,8 +718,45 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     return estGrindEnLigne() ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id) : null;
   }
 
+  function sourcePosterMessage(message) {
+    const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
+    if (locale?.posterPath) return sourceLocaleMedia(locale.posterPath);
+    return estGrindEnLigne() ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id, false, true) : null;
+  }
+
+  async function assurerPosterTemporaire(message) {
+    if (!stockageAndroidDisponible() || !message?.piece || message.piece.type !== "video") return null;
+    const messageId = Number(message.id);
+    const deja = mediasLocauxRef.current[messageId]?.posterPath;
+    if (deja) return { path: deja };
+    const fileName = nomPosterTemporaire(monUsername, classe.classe_id, message);
+    try {
+      const cache = await chercherMediaTemporaire(fileName, "image/jpeg");
+      if (cache?.path) { enregistrerPosterLocal(messageId, cache); return cache; }
+      if (!estGrindEnLigne()) return null;
+      const resultat = await mettreEnCacheMedia({
+        url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, false, true),
+        fileName,
+        mimeType: "image/jpeg",
+        requestId: `poster-cache-${classe.classe_id}-${messageId}`,
+        maxBytes: 2 * 1024 * 1024,
+      });
+      enregistrerPosterLocal(messageId, resultat);
+      return resultat;
+    } catch (error) {
+      console.debug("Miniature vidéo GRIND non mise en cache", messageId, error?.message || "");
+      return null;
+    }
+  }
+
   async function assurerCacheTemporaire(message) {
-    if (!stockageAndroidDisponible() || !message?.piece || message.piece.type === "video") return null;
+    if (!stockageAndroidDisponible() || !message?.piece) return null;
+    const typePiece = message.piece.type;
+    const tailleOctets = Number(message.piece.taille || 0);
+    const tailleVideoMin = 1024;
+    const tailleVideoMax = 10 * 1024 * 1024;
+    if (typePiece === "video" && (tailleOctets < tailleVideoMin || tailleOctets > tailleVideoMax)) return null;
+    if (!["image", "document", "audio", "video"].includes(typePiece)) return null;
     const messageId = Number(message.id);
     const deja = mediasLocauxRef.current[messageId];
     if (deja?.path) return deja;
@@ -668,17 +767,29 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       const mimeType = mimePiece(message);
       try {
         const cache = await chercherMediaTemporaire(fileName, mimeType);
-        if (cache?.path) { enregistrerMediaLocal(messageId, cache); return cache; }
+        if (cache?.path) {
+          if (typePiece === "video") {
+            enregistrerVideoCacheSansInterrompre(messageId, cache);
+            await assurerPosterTemporaire(message);
+          } else {
+            enregistrerMediaLocal(messageId, cache);
+          }
+          return cache;
+        }
         if (!estGrindEnLigne()) return null;
+        if (typePiece === "video") await assurerPosterTemporaire(message);
         const requestId = `cache-${classe.classe_id}-${messageId}`;
         requetesMediaRef.current.set(requestId, messageId);
         definirProgressionMedia(messageId, -1);
-        const maxBytes = message.piece.type === "audio" ? 8 * 1024 * 1024 : message.piece.type === "document" ? 15 * 1024 * 1024 : 25 * 1024 * 1024;
+        const maxBytes = typePiece === "audio" ? 8 * 1024 * 1024
+          : typePiece === "document" ? 15 * 1024 * 1024
+            : typePiece === "video" ? 10 * 1024 * 1024 : 25 * 1024 * 1024;
         const resultat = await mettreEnCacheMedia({
           url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId),
           fileName, mimeType, requestId, maxBytes,
         });
-        enregistrerMediaLocal(messageId, resultat);
+        if (typePiece === "video") enregistrerVideoCacheSansInterrompre(messageId, resultat);
+        else enregistrerMediaLocal(messageId, resultat);
         definirProgressionMedia(messageId, 100);
         return resultat;
       } catch (error) {
@@ -745,13 +856,21 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     requetesMediaRef.current.set(requestId, messageId);
     try {
       if (stockageAndroidDisponible()) {
+        const cacheEnCours = promessesCacheMediaRef.current.get(messageId);
+        if (cacheEnCours) await cacheEnCours;
         let saved = await chercherMediaEnregistre(savedName, mimeType);
         if (!saved?.path) {
-          if (!estGrindEnLigne()) throw new Error("Cette vidéo n'a pas encore été téléchargée sur cet appareil.");
-          saved = await enregistrerMediaAndroid({
-            url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true),
-            fileName: savedName, mimeType, requestId, maxBytes: 300 * 1024 * 1024,
-          });
+          const cache = await chercherMediaTemporaire(nomFichierTemporaire(monUsername, classe.classe_id, message), mimeType);
+          if (cache?.path) {
+            saved = await enregistrerMediaCacheAndroid(cache.fileName || nomFichierTemporaire(monUsername, classe.classe_id, message), savedName, mimeType);
+          } else if (estGrindEnLigne()) {
+            saved = await enregistrerMediaAndroid({
+              url: urlPieceDiscussion(sessionToken, classe.classe_id, messageId, true),
+              fileName: savedName, mimeType, requestId, maxBytes: 300 * 1024 * 1024,
+            });
+          } else {
+            throw new Error("Cette vidéo n'a pas encore été mise en cache sur cet appareil.");
+          }
         }
         enregistrerMediaLocal(messageId, saved);
         await ouvrirFichierAndroid(saved.path, mimeType);
@@ -788,19 +907,30 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     if (!stockageAndroidDisponible() || !messages.length) return undefined;
     let actif = true;
     const videos = messages.filter(message => message?.piece?.type === "video" && !message.supprime_pour_tous);
-    (async () => {
-      for (const message of videos) {
-        if (!actif) break;
+    let prochain = 0;
+    const worker = async () => {
+      while (actif && prochain < videos.length) {
+        const message = videos[prochain++];
         const key = Number(message.id);
         if (mediasLocauxRef.current[key]?.path) continue;
         try {
-          const saved = await chercherMediaEnregistre(nomFichierEnregistre(monUsername, classe.classe_id, message), mimePiece(message));
-          if (actif && saved?.path) enregistrerMediaLocal(key, saved);
-        } catch { /* recherche locale silencieuse */ }
+          const mimeType = mimePiece(message);
+          let local = await chercherMediaEnregistre(nomFichierEnregistre(monUsername, classe.classe_id, message), mimeType);
+          const taille = Number(message.piece?.taille || 0);
+          if (!local?.path && taille >= 1024 && taille <= 10 * 1024 * 1024) {
+            local = await chercherMediaTemporaire(nomFichierTemporaire(monUsername, classe.classe_id, message), mimeType);
+          }
+          if (!actif) return;
+          if (local?.path) enregistrerMediaLocal(key, local);
+          const posterLocal = await chercherMediaTemporaire(nomPosterTemporaire(monUsername, classe.classe_id, message), "image/jpeg");
+          if (actif && posterLocal?.path) enregistrerPosterLocal(key, posterLocal);
+        } catch { /* recherche locale silencieuse, aucun téléchargement ici */ }
       }
-    })();
+    };
+    Promise.all([worker(), worker()]).catch(() => {});
     return () => { actif = false; };
-  }, [messages, classe.classe_id]);
+  }, [messages, classe.classe_id, monUsername]);
+
 
   useEffect(() => {
     if (!scrollRef.current || !messages.length) return;
@@ -817,12 +947,25 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || typeof IntersectionObserver === "undefined") return undefined;
-    // Les vidéos ne se téléchargent et ne se lancent jamais automatiquement.
-    // On interrompt uniquement la lecture manuelle lorsqu'une vidéo quitte la vue.
+    const parId = new Map(messages.map(message => [Number(message.id), message]));
+    // Préchargement limité aux vidéos légères proches de l'écran : aucune lecture
+    // automatique et aucun téléchargement de tout l'historique de la discussion.
     const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) if (!entry.isIntersecting) entry.target.pause();
-    }, { root, threshold: 0 });
-    root.querySelectorAll("video.discussion-video").forEach(video => observer.observe(video));
+      for (const entry of entries) {
+        const video = entry.target;
+        if (!entry.isIntersecting) {
+          if (!video.paused) video.pause();
+          continue;
+        }
+        if (!stockageAndroidDisponible()) continue;
+        const message = parId.get(Number(video.dataset.messageId));
+        const taille = Number(message?.piece?.taille || 0);
+        if (message?.piece?.type === "video" && taille >= 1024 && taille <= 10 * 1024 * 1024) {
+          assurerCacheTemporaire(message).catch(() => {});
+        }
+      }
+    }, { root, rootMargin: "220px 0px", threshold: 0.01 });
+    root.querySelectorAll("video.discussion-video[data-message-id]").forEach(video => observer.observe(video));
     return () => observer.disconnect();
   }, [messages, mediasLocaux]);
 
@@ -1406,10 +1549,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
             <article key={message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
               className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
               {!propre && <AvatarIcone username={message.auteur} taille={34} onClic={ouvrirProfil} />}
-              <div className="discussion-bulle-wrap">
+              <div className={`discussion-bulle-wrap ${message.piece?.type === "video" ? "discussion-bulle-wrap-video" : ""}`}>
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
                 {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span>{message.reply.contenu || "Message"}</span></button>}
-                <div className={`discussion-bulle style-${message.style_texte || "normal"} ${message.piece?.type === "image" ? "discussion-bulle-avec-image" : ""}`}>
+                <div className={`discussion-bulle style-${message.style_texte || "normal"} ${message.piece?.type === "image" ? "discussion-bulle-avec-image" : ""} ${message.piece?.type === "video" ? "discussion-bulle-avec-video" : ""}`}>
                   {message.supprime_pour_tous ? (
                     <div className="discussion-message-supprime"><i className="fa-solid fa-ban" /> Ce message a été supprimé.</div>
                   ) : <>
@@ -1420,8 +1563,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   {message.piece && message.piece.type === "video" && <>
                     <VideoDiscussion
                       src={mediaPriveUrl}
-                      poster={mediaPriveUrl && /^https:\/\//.test(mediaPriveUrl) ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id, false, true) : null}
+                      poster={sourcePosterMessage(message)}
                       nom={message.piece.nom}
+                      messageId={message.id}
                     />
                     <div className="discussion-media-actions">
                       <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => telechargerVideoMessage(message)} label="Télécharger la vidéo" />

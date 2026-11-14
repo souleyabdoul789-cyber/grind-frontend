@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { chargerApercuDocumentLibrary } from "../api.js";
+import { telechargerDocumentLibrary } from "../libraryMedia.js";
 
 const TYPE_PDF = "application/pdf";
 const TYPES_WORD = ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
@@ -27,6 +28,8 @@ export default function ApercuDocument({ document, sessionToken }) {
   const [feuilleActive, setFeuilleActive] = useState("");
   const [lignes, setLignes] = useState([]);
   const [nombreLignes, setNombreLignes] = useState(0);
+  const [telechargement, setTelechargement] = useState(false);
+  const [erreurTelechargement, setErreurTelechargement] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -53,13 +56,8 @@ export default function ApercuDocument({ document, sessionToken }) {
           const { renderAsync } = await import("docx-preview");
           if (!actif || !contenuRef.current || !stylesRef.current) return;
           await renderAsync(buffer, contenuRef.current, stylesRef.current, {
-            className: "grind-docx",
-            inWrapper: true,
-            ignoreWidth: true,
-            ignoreHeight: true,
-            breakPages: true,
-            renderHeaders: true,
-            renderFooters: true,
+            className: "grind-docx", inWrapper: true, ignoreWidth: true,
+            ignoreHeight: true, breakPages: true, renderHeaders: true, renderFooters: true,
           });
           if (actif) setEtat("pret");
           return;
@@ -114,16 +112,37 @@ export default function ApercuDocument({ document, sessionToken }) {
     }
   }
 
+  async function telecharger() {
+    if (telechargement) return;
+    setTelechargement(true);
+    setErreurTelechargement("");
+    try {
+      await telechargerDocumentLibrary(sessionToken, document);
+    } catch (cause) {
+      setErreurTelechargement(cause.message || "Le document n'a pas pu être téléchargé.");
+    } finally {
+      setTelechargement(false);
+    }
+  }
+
   const typeDocument = document.fichier_type === TYPE_PDF ? "PDF" : TYPES_WORD.includes(document.fichier_type) ? "Word" : "Tableur";
+  const boutonTelecharger = (texte = false) => (
+    <button type="button" onClick={telecharger} disabled={telechargement}
+      title="Télécharger le document" aria-label="Télécharger le document">
+      {telechargement ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-download" />}
+      {texte ? (telechargement ? " Enregistrement…" : " Télécharger le fichier") : null}
+    </button>
+  );
 
   return (
     <div className="library-preview-body">
       <div className="library-preview-toolbar">
         <div><span className="library-preview-type">{typeDocument}</span><span>{document.fichier_nom}</span></div>
-        <a href={document.fichier_url} target="_blank" rel="noreferrer" title="Télécharger le document" aria-label="Télécharger le document"><i className="fa-solid fa-download" /></a>
+        {boutonTelecharger()}
       </div>
+      {erreurTelechargement && <div className="library-preview-status library-preview-error" role="alert">{erreurTelechargement}</div>}
       {etat === "chargement" && <div className="library-preview-status"><span className="grind-spinner" /> Préparation de l'aperçu…</div>}
-      {etat === "erreur" && <div className="library-preview-status library-preview-error"><i className="fa-solid fa-circle-exclamation" /><p>{erreur}</p><a href={document.fichier_url} target="_blank" rel="noreferrer">Télécharger le fichier</a></div>}
+      {etat === "erreur" && <div className="library-preview-status library-preview-error"><i className="fa-solid fa-circle-exclamation" /><p>{erreur}</p>{boutonTelecharger(true)}</div>}
       {etat === "pret" && urlPdf && <iframe className="library-preview-pdf" title={`Aperçu de ${document.titre}`} src={urlPdf} />}
       {etat === "pret" && (TYPES_WORD.includes(document.fichier_type) || String(document.fichier_nom || "").toLowerCase().endsWith(".docx")) && <div className="library-docx-scroll"><div ref={stylesRef} className="library-docx-styles" /><div ref={contenuRef} className="library-docx-content" /></div>}
       {etat === "pret" && feuilles.length > 0 && <div className="library-sheet-preview">

@@ -468,9 +468,12 @@ export async function supprimerPost(sessionToken, postId) {
 
 // ---------- Classes ----------
 
-export function creerClasse(sessionToken, { niveau, matiere, complement }) {
+export function creerClasse(sessionToken, { nom, niveau, matiere, complement } = {}) {
+  // Le contrat moderne ne demande que le nom. Les trois champs historiques
+  // restent transmis lorsqu'un ancien écran les fournit encore.
   return poster(`${GRIND_URL}/api/classes`, {
     session_token: sessionToken,
+    nom,
     niveau,
     matiere,
     complement,
@@ -1194,6 +1197,12 @@ export async function rechercherMentions(sessionToken, q = "") {
 }
 export function likerCommentaire(sessionToken, commentaireId) { return poster(`${GRIND_URL}/api/commentaires/${commentaireId}/like`, { session_token: sessionToken }); }
 export function modifierPost(sessionToken, postId, contenu) { return poster(`${GRIND_URL}/api/posts/${postId}/modifier`, { session_token: sessionToken, contenu }); }
+
+export function urlFichierDocumentLibrary(sessionToken, id) {
+  const u = new URL(`${GRIND_URL}/api/library/documents/${Number(id)}/download`);
+  u.searchParams.set("session_token", sessionToken);
+  return u.toString();
+}
 
 export async function chargerApercuDocumentLibrary(sessionToken, id, signal) {
   const u = new URL(`${GRIND_URL}/api/library/documents/${id}/preview`);
