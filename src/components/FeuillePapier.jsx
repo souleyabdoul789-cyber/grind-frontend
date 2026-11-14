@@ -1,11 +1,26 @@
 import { useId } from "react";
 
 /** Feuille de cahier dessinée en SVG ; la saisie reste un vrai champ accessible. */
-export default function FeuillePapier({ value, onChange, readOnly = false, placeholder = "Écris tes notes ici…", label = "Feuille de notes" }) {
+export default function FeuillePapier({
+  value,
+  onChange,
+  readOnly = false,
+  placeholder = "Écris tes notes ici…",
+  label = "Feuille de notes",
+  onDownload,
+  onHistory,
+  exportDisabled = false,
+}) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const lignes = Array.from({ length: 19 }, (_, index) => 38 + index * 26);
   return (
-    <div className={`feuille-papier${readOnly ? " feuille-papier-lecture" : ""}`}>
+    <div className={`feuille-papier${readOnly ? " feuille-papier-lecture" : ""}${(onDownload || onHistory) ? " feuille-papier-avec-outils" : ""}`}>
+      {(onDownload || onHistory) && (
+        <div className="feuille-papier-actions">
+          {onHistory && <button type="button" onClick={onHistory} title="Historique de la feuille" aria-label="Historique de la feuille"><i className="fa-solid fa-clock-rotate-left" /></button>}
+          {onDownload && <button type="button" onClick={onDownload} disabled={exportDisabled} title={exportDisabled ? "La feuille est vide" : "Télécharger la feuille en PDF"} aria-label="Télécharger la feuille en PDF"><i className="fa-solid fa-download" /></button>}
+        </div>
+      )}
       <svg className="feuille-papier-dessin" viewBox="0 0 390 540" preserveAspectRatio="none" aria-hidden="true">
         <defs>
           <linearGradient id={`papierGrind-${uid}`} x1="0" y1="0" x2="1" y2="1">

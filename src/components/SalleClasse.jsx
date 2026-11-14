@@ -5,6 +5,13 @@ import { ScreenOrientation } from "@capacitor/screen-orientation";
 import { obtenirJetonLiveKit, urlSession, obtenirAvatarDe, transfererProf, obtenirEtatSalle, modererMicroClasse } from "../api.js";
 import SceneClasse, { NB_SIEGES } from "./SceneClasse.jsx";
 import FeuillePapier from "./FeuillePapier.jsx";
+import {
+  capturerHistoriqueSalle,
+  listerHistoriqueSalle,
+  obtenirVersionHistoriqueSalle,
+  restaurerVersionHistoriqueSalle,
+} from "../classeSalleApi.js";
+import { telechargerDocumentSallePdf } from "../utils/classePdf.js";
 
 /**
  * SalleClasse — audio à N personnes via LiveKit (notre WebRTC fait
@@ -12,9 +19,9 @@ import FeuillePapier from "./FeuillePapier.jsx";
  * nous : la connexion, la détection de qui parle réellement (pas
  * juste le volume brut), l'état micro de chacun, les arrivées/départs.
  *
- * Notre propre canal WebSocket (/ws/session/{classe_id}) reste utilisé,
- * mais seulement pour ce que LiveKit ne fait pas : les feuilles privées,
- * le tableau noir partagé et la demande/transfert du rôle de professeur.
+ * Le canal WebSocket conserve les feuilles privées et le tableau partagé.
+ * La délégation temporaire du tableau est distincte du transfert permanent
+ * du rôle professeur et reste contrôlée côté serveur.
  */
 export default function SalleClasse({ sessionToken, demandeId, monUsername, profInitial, nomClasse, onQuitter }) {
   const [permission, setPermission] = useState("attente");
@@ -25,7 +32,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const [microMessage, setMicroMessage] = useState("");
 
   const [monAvatarConfig, setMonAvatarConfig] = useState(null);
-  const [participants, setParticipants] = useState([]); // [{identity, avatarConfig, micActif}]
+  const [participants, setParticipants] = useState([]);
   const [parlants, setParlants] = useState(new Set());
 
   const [profActuel, setProfActuel] = useState(profInitial);
@@ -40,8 +47,21 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const [mesViewers, setMesViewers] = useState(new Set());
   const [demandesRecues, setDemandesRecues] = useState([]);
   const [demandesEnvoyees, setDemandesEnvoyees] = useState(new Set());
-  const [feuillesAutorisees, setFeuillesAutorisees] = useState({}); // { username: texte }
+  const [feuillesAutorisees, setFeuillesAutorisees] = useState({});
   const [participantSelectionne, setParticipantSelectionne] = useState(null);
+
+  const [tableauInvitation, setTableauInvitation] = useState(null);
+  const [tableauDelegation, setTableauDelegation] = useState(null);
+  const [tableauActionEnCours, setTableauActionEnCours] = useState(false);
+
+  const [historiqueOuvert, setHistoriqueOuvert] = useState(false);
+  const [historiqueType, setHistoriqueType] = useState("feuille");
+  const [historiqueItems, setHistoriqueItems] = useState([]);
+  const [historiqueSelection, setHistoriqueSelection] = useState(null);
+  const [historiqueChargement, setHistoriqueChargement] = useState(false);
+  const [historiqueErreur, setHistoriqueErreur] = useState("");
+  const [restaurationEnCours, setRestaurationEnCours] = useState(false);
+  const [exportEnCours, setExportEnCours] = useState(false);
 
   const roomRef = useRef(null);
   const socketRef = useRef(null);
@@ -51,10 +71,21 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   const elementsAudioRef = useRef({});
   const delaiEnvoiRef = useRef(null);
   const delaiTableauRef = useRef(null);
+  const delaiHistoriqueFeuilleRef = useRef(null);
+  const delaiHistoriqueTableauRef = useRef(null);
   const [panneauOuvert, setPanneauOuvert] = useState(false);
 
   const estProf = profActuel === monUsername;
   const estOwner = etatSalle?.est_owner === true;
+  // Le callback LiveKit est installé une seule fois : ces refs lui donnent
+  // l'état de délégation/professeur le plus récent, sans stale closure.
+  const tableauDelegationRef = useRef(tableauDelegation);
+  const estProfRef = useRef(estProf);
+  tableauDelegationRef.current = tableauDelegation;
+  estProfRef.current = estProf;
+  const eleveAuTableau = tableauDelegation?.statut === "actif"
+    && tableauDelegation?.eleve_username === monUsername;
+  const peutEcrireTableau = estProf || eleveAuTableau;
   const [estPaysage, setEstPaysage] = useState(
     window.matchMedia("(orientation: landscape)").matches
   );
@@ -66,12 +97,10 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     media.addEventListener("change", gerer);
 
     if (Capacitor.isNativePlatform()) {
-      // Dans l'APK, verrouillage Android natif pendant la salle LiveKit seulement.
       ScreenOrientation.lock({ orientation: "landscape" })
         .then(() => { if (actif) setEstPaysage(media.matches); })
         .catch(() => {});
     } else if (window.screen?.orientation?.lock) {
-      // Sur le web, conserver la tentative existante lorsque le navigateur l'autorise.
       window.screen.orientation.lock("landscape").catch(() => {});
     }
 
@@ -96,6 +125,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     const nouveauProf = info.nouveau_prof;
     if (!nouveauProf) return;
     setProfActuel(nouveauProf);
+    setTableauDelegation(null);
     setEtatSalle((prev) => {
       if (!prev) return prev;
       const ancienProf = info.ancien_prof;
@@ -152,13 +182,17 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       return reste;
     });
     setDemandesRecues((prev) => prev.filter((u) => u !== identity));
+    if (estProfRef.current && tableauDelegationRef.current?.eleve_username === identity) {
+      // Si l'élève quitte réellement la salle LiveKit, le professeur révoque
+      // immédiatement sa main temporaire côté serveur.
+      envoyer({ type: "tableau-reprendre" });
+    }
   }
 
   useEffect(() => {
     let arrete = false;
 
     async function demarrer() {
-      // L'état initial vient du serveur : roster, pupitre stable, feuille persistante et tableau.
       let etatInitial;
       try {
         etatInitial = await obtenirEtatSalle(sessionToken, demandeId);
@@ -173,6 +207,8 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         setMesViewers(new Set(mesViewersRef.current));
         setFeuillesAutorisees(etatInitial.feuilles_autorisees || {});
         setTableauTexte(etatInitial.tableau || "");
+        setTableauDelegation(etatInitial.tableau_delegation || null);
+        setTableauInvitation(etatInitial.tableau_invitation || null);
         const monMembre = (etatInitial.membres || []).find((m) => m.username === monUsername);
         const droitMicro = monMembre?.micro_autorise !== false;
         setMicroAutoriseParProf(droitMicro);
@@ -186,7 +222,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         return;
       }
 
-      // ---- WebSocket sécurisé : accès membre vérifié côté serveur ----
       const socket = new WebSocket(urlSession(sessionToken, demandeId, true));
       socketRef.current = socket;
 
@@ -201,7 +236,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
           setMicroMessage("Le professeur a coupé ton micro. Tu peux continuer à écouter.");
         }
         if (msg.type === "micro-permission" && msg.autorise === true) {
-          // Le droit est rétabli, mais l'élève choisit lui-même de rallumer son micro.
           setMicroAutoriseParProf(true);
           if (membresSalleRef.current[monUsername]) membresSalleRef.current[monUsername].micro_autorise = true;
           setMicroActif(false);
@@ -239,15 +273,43 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
             });
           }
         }
-        if (msg.type === "demande-devenir-prof") {
-          setDemandeProfRecue(msg.sender);
-        }
+        if (msg.type === "demande-devenir-prof") setDemandeProfRecue(msg.sender);
         if (msg.type === "reponse-devenir-prof") {
           setDemandeProfEnvoyee(false);
           if (msg.accepte) appliquerTransfertProf(msg);
         }
-        if (msg.type === "prof-change") {
-          appliquerTransfertProf(msg);
+        if (msg.type === "prof-change") appliquerTransfertProf(msg);
+
+        if (msg.type === "tableau-invitation") {
+          setTableauInvitation({
+            sender: msg.sender,
+            duree_secondes: Number(msg.duree_secondes) || 180,
+            expire_at: msg.invitation_expire_at || null,
+          });
+        }
+        if (msg.type === "error" && msg.message) {
+          setErreur(msg.message);
+          setTableauActionEnCours(false);
+        }
+        if (msg.type === "tableau-invitation-terminee") setTableauInvitation(null);
+        if (msg.type === "tableau-delegation") {
+          setTableauDelegation(msg.delegation || null);
+          setTableauActionEnCours(false);
+        }
+        if (msg.type === "tableau-delegation-active") {
+          setTableauDelegation(msg.delegation || null);
+          setTableauInvitation(null);
+          setTableauActionEnCours(false);
+          if (msg.delegation?.eleve_username === monUsername) {
+            setOngletFeuille("tableau");
+            setPanneauOuvert(true);
+          }
+        }
+        if (msg.type === "tableau-delegation-terminee") {
+          setTableauDelegation(null);
+          setTableauActionEnCours(false);
+          setTableauInvitation(null);
+          if (msg.eleve_username === monUsername) setOngletFeuille("moi");
         }
       };
 
@@ -264,7 +326,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       }
       if (arrete) return;
 
-      // ---- LiveKit : audio à N personnes ----
       let jetonData;
       try {
         jetonData = await obtenirJetonLiveKit(sessionToken, demandeId);
@@ -280,11 +341,9 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
 
       room.on(RoomEvent.ParticipantConnected, (p) => ajouterParticipant(p.identity));
       room.on(RoomEvent.ParticipantDisconnected, (p) => retirerParticipant(p.identity));
-
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
         setParlants(new Set(speakers.map((p) => p.identity)));
       });
-
       room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
         if (track.kind === Track.Kind.Audio) {
           const el = track.attach();
@@ -293,10 +352,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
           elementsAudioRef.current[participant.identity] = el;
         }
       });
-      room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        track.detach().forEach((el) => el.remove());
-      });
-
+      room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
       room.on(RoomEvent.TrackPublished, (publication, participant) => {
         if (publication.kind === Track.Kind.Audio) {
           setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: !publication.isMuted } : p)));
@@ -313,27 +369,20 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       room.on(RoomEvent.TrackUnmuted, (_pub, participant) => {
         setParticipants((prev) => prev.map((p) => (p.identity === participant.identity ? { ...p, micActif: true } : p)));
       });
-
-      room.on(RoomEvent.Disconnected, () => {
-        if (!arrete) setConnexion("echec");
-      });
+      room.on(RoomEvent.Disconnected, () => { if (!arrete) setConnexion("echec"); });
 
       try {
         await room.connect(jetonData.url, jetonData.token);
-      } catch (err) {
+      } catch {
         setErreur("Connexion à la salle impossible");
         setConnexion("echec");
         return;
       }
       if (arrete) return;
       setConnexion("connecte");
-
-      for (const p of room.remoteParticipants.values()) {
-        ajouterParticipant(p.identity);
-      }
+      for (const p of room.remoteParticipants.values()) ajouterParticipant(p.identity);
 
       if (etatInitial.membres?.find((m) => m.username === monUsername)?.micro_autorise === false) {
-        // Ne pas demander ni publier le micro tant que le professeur l'interdit.
         setPermission("accordee");
         setMicroActif(false);
       } else {
@@ -357,8 +406,37 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       Object.values(elementsAudioRef.current).forEach((el) => el.remove());
       clearTimeout(delaiEnvoiRef.current);
       clearTimeout(delaiTableauRef.current);
+      clearTimeout(delaiHistoriqueFeuilleRef.current);
+      clearTimeout(delaiHistoriqueTableauRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!tableauDelegation?.expire_at) return undefined;
+    const duree = new Date(tableauDelegation.expire_at).getTime() - Date.now();
+    const timer = window.setTimeout(() => {
+      setTableauDelegation(null);
+      if (!estProf && ongletFeuille === "tableau") setOngletFeuille("moi");
+    }, Math.max(0, duree));
+    return () => window.clearTimeout(timer);
+  }, [tableauDelegation?.expire_at, estProf, ongletFeuille]);
+
+  useEffect(() => {
+    if (tableauDelegation?.statut !== "invite" || !tableauDelegation?.invitation_expire_at) return undefined;
+    const duree = new Date(tableauDelegation.invitation_expire_at).getTime() - Date.now();
+    const timer = window.setTimeout(() => {
+      setTableauDelegation(null);
+      setTableauActionEnCours(false);
+    }, Math.max(0, duree));
+    return () => window.clearTimeout(timer);
+  }, [tableauDelegation?.statut, tableauDelegation?.invitation_expire_at]);
+
+  useEffect(() => {
+    if (!tableauInvitation?.expire_at) return undefined;
+    const duree = new Date(tableauInvitation.expire_at).getTime() - Date.now();
+    const timer = window.setTimeout(() => setTableauInvitation(null), Math.max(0, duree));
+    return () => window.clearTimeout(timer);
+  }, [tableauInvitation?.expire_at]);
 
   async function demanderMicro() {
     if (!microAutoriseParProf) {
@@ -397,21 +475,36 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     onQuitter();
   }
 
+  function planifierCaptureHistorique(type) {
+    const ref = type === "feuille" ? delaiHistoriqueFeuilleRef : delaiHistoriqueTableauRef;
+    clearTimeout(ref.current);
+    ref.current = window.setTimeout(async () => {
+      try {
+        await capturerHistoriqueSalle(sessionToken, demandeId, type);
+      } catch (err) {
+        // L'écriture actuelle reste valide ; l'historique sera capturé à la prochaine pause.
+        window.dispatchEvent(new CustomEvent("grind-toast", { detail: err.message || "Historique temporairement indisponible." }));
+      }
+    }, 7000);
+  }
+
   // ---- Feuille ----
   function gererSaisie(valeur) {
     setMonTexte(valeur);
     clearTimeout(delaiEnvoiRef.current);
     delaiEnvoiRef.current = setTimeout(() => {
       envoyer({ type: "sheet-update", contenu: valeur });
+      planifierCaptureHistorique("feuille");
     }, 220);
   }
 
   function gererTableau(valeur) {
-    if (!estProf) return;
+    if (!peutEcrireTableau) return;
     setTableauTexte(valeur);
     clearTimeout(delaiTableauRef.current);
     delaiTableauRef.current = setTimeout(() => {
       envoyer({ type: "blackboard-update", contenu: valeur });
+      planifierCaptureHistorique("tableau");
     }, 140);
   }
 
@@ -438,7 +531,7 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     envoyer({ type: "demande-voir-feuille", cible: identity });
   }
 
-  // ---- Transfert de prof ----
+  // ---- Transfert permanent du rôle professeur (mécanisme existant, conservé) ----
   function demanderDevenirProf() {
     setDemandeProfEnvoyee(true);
     envoyer({ type: "demande-devenir-prof", cible: profActuel });
@@ -458,6 +551,100 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   function refuserTransfertProf() {
     envoyer({ type: "reponse-devenir-prof", cible: demandeProfRecue, accepte: false });
     setDemandeProfRecue(null);
+  }
+
+  function inviterEleveAuTableau(username) {
+    if (!estProf || !username || !participants.some((p) => p.identity === username) || tableauDelegation) return;
+    setTableauActionEnCours(true);
+    envoyer({ type: "tableau-inviter", cible: username, duree_secondes: 180 });
+  }
+
+  function repondreInvitationTableau(accepte) {
+    if (!tableauInvitation) return;
+    envoyer({ type: "tableau-invitation-reponse", accepte: Boolean(accepte) });
+    setTableauInvitation(null);
+  }
+
+  function reprendreTableau() {
+    if (!estProf) return;
+    setTableauActionEnCours(true);
+    envoyer({ type: "tableau-reprendre" });
+  }
+
+  async function ouvrirHistorique(type) {
+    setHistoriqueType(type);
+    setHistoriqueOuvert(true);
+    setHistoriqueSelection(null);
+    setHistoriqueErreur("");
+    setHistoriqueChargement(true);
+    try {
+      const data = await listerHistoriqueSalle(sessionToken, demandeId, type);
+      setHistoriqueItems(Array.isArray(data.versions) ? data.versions : []);
+    } catch (err) {
+      setHistoriqueErreur(err.message || "Impossible de charger l'historique.");
+    } finally {
+      setHistoriqueChargement(false);
+    }
+  }
+
+  async function choisirVersionHistorique(id) {
+    setHistoriqueChargement(true);
+    setHistoriqueErreur("");
+    try {
+      const data = await obtenirVersionHistoriqueSalle(sessionToken, demandeId, historiqueType, id);
+      setHistoriqueSelection(data);
+    } catch (err) {
+      setHistoriqueErreur(err.message || "Impossible de lire cette version.");
+    } finally {
+      setHistoriqueChargement(false);
+    }
+  }
+
+  async function restaurerHistorique() {
+    if (!historiqueSelection) return;
+    setRestaurationEnCours(true);
+    setHistoriqueErreur("");
+    try {
+      const data = await restaurerVersionHistoriqueSalle(
+        sessionToken, demandeId, historiqueType, historiqueSelection.id
+      );
+      if (historiqueType === "feuille") {
+        setMonTexte(data.contenu || "");
+      } else {
+        setTableauTexte(data.contenu || "");
+      }
+      setHistoriqueOuvert(false);
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Version restaurée. La version précédente reste conservée dans l'historique." }));
+    } catch (err) {
+      setHistoriqueErreur(err.message || "La restauration a échoué.");
+    } finally {
+      setRestaurationEnCours(false);
+    }
+  }
+
+  async function exporterPdf({ type, contenu, auteur }) {
+    if (!String(contenu || "").trim() || exportEnCours) return;
+    setExportEnCours(true);
+    try {
+      const titre = type === "tableau" ? "Tableau de la classe" : `Feuille de ${auteur || monUsername}`;
+      const resultat = await telechargerDocumentSallePdf({
+        titre,
+        sousTitre: `${nomClasse || "Classe GRIND"} · ${new Date().toLocaleString("fr-FR")}`,
+        auteur: auteur || monUsername,
+        classe: nomClasse || "Classe GRIND",
+        contenu,
+        nomFichier: `${type}-${(auteur || monUsername).replace(/[^a-zA-Z0-9_-]/g, "-")}-${demandeId}.pdf`,
+      });
+      window.dispatchEvent(new CustomEvent("grind-toast", {
+        detail: resultat?.local
+          ? `PDF enregistré : ${resultat.fileName} · GRIND DOWNLOAD FILES`
+          : "Le document est prêt. Choisis « Enregistrer au format PDF » dans la fenêtre d'impression.",
+      }));
+    } catch (err) {
+      setErreur(err.message || "Impossible de créer le PDF.");
+    } finally {
+      setExportEnCours(false);
+    }
   }
 
   let iconeMicro = "fa-solid fa-microphone";
@@ -485,8 +672,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     setPanneauOuvert(true);
   }
 
-  // ---- Sièges : le serveur attribue un index persistant à chaque membre. ----
-  // Tous les appareils voient donc exactement la même place ; l'ordre WebSocket n'intervient plus.
   const membresParNom = new Map((etatSalle?.membres || []).map((m) => [m.username, m]));
   const presents = [monUsername, ...participants.map((p) => p.identity)].filter((id) => id !== profActuel);
 
@@ -510,7 +695,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
     if (Number.isInteger(i) && i >= 0 && i < NB_SIEGES) occupants[i] = infosDe(id);
   });
   const profInfos = profActuel ? infosDe(profActuel) : null;
-
   const autresOrdonnes = [...participants].sort(
     (a, b) => (b.identity === participantSelectionne ? 1 : 0) - (a.identity === participantSelectionne ? 1 : 0)
   );
@@ -527,7 +711,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         onSelection={choisirSiege}
       />
 
-      {/* ---- Barre d'état, en haut à gauche ---- */}
       <div className="hud hud-haut-gauche">
         <div className="hud-pastille">
           {connexion === "connexion" && <><i className="fa-solid fa-spinner fa-spin"></i> Préparation...</>}
@@ -536,7 +719,6 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         </div>
       </div>
 
-      {/* ---- Actions, en haut à droite ---- */}
       <div className="hud hud-haut-droite">
         <button type="button" className="hud-bouton" onClick={() => setPanneauOuvert((o) => !o)}>
           <i className="fa-solid fa-file-lines"></i> Feuille
@@ -548,19 +730,14 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
             <i className="fa-solid fa-chalkboard-user"></i> Demander le rôle prof
           </button>
         )}
-        {demandeProfEnvoyee && (
-          <div className="hud-pastille"><i className="fa-solid fa-spinner fa-spin"></i> Demande envoyée...</div>
-        )}
+        {demandeProfEnvoyee && <div className="hud-pastille"><i className="fa-solid fa-spinner fa-spin"></i> Demande envoyée...</div>}
       </div>
 
-      {/* ---- Notifications au centre ---- */}
       <div className="hud-notifs">
         {microMessage && (
           <div className="banniere-demande banniere-micro-info" role="status">
             <i className="fa-solid fa-microphone-slash"></i> {microMessage}
-            <button type="button" className="hud-bouton" onClick={() => setMicroMessage("")} aria-label="Fermer">
-              <i className="fa-solid fa-xmark"></i>
-            </button>
+            <button type="button" className="hud-bouton" onClick={() => setMicroMessage("")} aria-label="Fermer"><i className="fa-solid fa-xmark"></i></button>
           </div>
         )}
         {permission === "refusee" && microAutoriseParProf && (
@@ -576,6 +753,14 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
             <button type="button" className="hud-bouton" onClick={refuserTransfertProf}>Refuser</button>
           </div>
         )}
+        {tableauInvitation && (
+          <div className="banniere-demande tableau-invitation-eleve" role="status">
+            <i className="fa-solid fa-chalkboard"></i>
+            Le professeur t'invite à écrire au tableau pendant 3 minutes.
+            <button type="button" className="hud-bouton" onClick={() => repondreInvitationTableau(true)}>Accepter</button>
+            <button type="button" className="hud-bouton" onClick={() => repondreInvitationTableau(false)}>Refuser</button>
+          </div>
+        )}
         {demandesRecues.map((d) => (
           <div key={d} className="banniere-demande">
             <i className="fa-solid fa-eye"></i> {d} veut voir ta feuille
@@ -585,53 +770,76 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
         ))}
       </div>
 
-      {/* ---- Contrôles d'appel, en bas ---- */}
       <div className="hud hud-controles">
         <div className="controles-appel">
           <button className={classeMicro} onClick={basculerMicro} type="button" disabled={permission === "attente" || !microAutoriseParProf} aria-label={!microAutoriseParProf ? "Micro suspendu par le professeur" : microActif ? "Couper mon micro" : "Activer mon micro"}>
             <i className={iconeMicro}></i>
           </button>
-          <button className="bouton-appel bouton-raccrocher" onClick={raccrocher} type="button">
-            <i className="fa-solid fa-phone-slash"></i>
-          </button>
+          <button className="bouton-appel bouton-raccrocher" onClick={raccrocher} type="button"><i className="fa-solid fa-phone-slash"></i></button>
         </div>
       </div>
 
-      {/* ---- Feuille collaborative : panneau qui glisse sur le côté ---- */}
+      {historiqueOuvert && (
+        <div className="classe-historique-overlay" role="dialog" aria-modal="true" aria-label="Historique de la classe">
+          <section className="classe-historique-panneau">
+            <header>
+              <div><strong><i className="fa-solid fa-clock-rotate-left"></i> Historique</strong><small>{historiqueType === "feuille" ? "Versions de ta feuille personnelle" : "Versions du tableau de la classe"}</small></div>
+              <button type="button" className="hud-bouton hud-bouton-rond" onClick={() => setHistoriqueOuvert(false)} aria-label="Fermer l'historique"><i className="fa-solid fa-xmark"></i></button>
+            </header>
+            {historiqueErreur && <div className="erreur" role="alert">{historiqueErreur}</div>}
+            {historiqueChargement && <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement…</div>}
+            {!historiqueChargement && historiqueItems.length === 0 && <div className="info">Aucune ancienne version pour le moment. Les versions sont enregistrées après une pause dans l'écriture.</div>}
+            <div className="classe-historique-corps">
+              <div className="classe-historique-liste">
+                {historiqueItems.map((item) => (
+                  <button type="button" key={item.id} className={historiqueSelection?.id === item.id ? "classe-historique-item actif" : "classe-historique-item"} onClick={() => choisirVersionHistorique(item.id)}>
+                    <strong>{new Date(item.created_at).toLocaleString("fr-FR")}</strong>
+                    <small>{item.auteur ? `Par ${item.auteur} · ` : ""}{Number(item.caracteres || 0).toLocaleString("fr-FR")} caractères</small>
+                  </button>
+                ))}
+              </div>
+              {historiqueSelection && (
+                <div className="classe-historique-apercu">
+                  <small>Version du {new Date(historiqueSelection.created_at).toLocaleString("fr-FR")}</small>
+                  <pre>{historiqueSelection.contenu || "(contenu vide)"}</pre>
+                  <button type="button" className="hud-bouton" onClick={restaurerHistorique} disabled={restaurationEnCours || (historiqueType === "tableau" && !peutEcrireTableau)}>
+                    {restaurationEnCours ? <i className="fa-solid fa-spinner fa-spin" /> : <i className="fa-solid fa-rotate-left" />} Restaurer cette version
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
       {panneauOuvert && (
         <div className="panneau-feuille">
           <div className="panneau-feuille-entete">
             <span><i className="fa-solid fa-file-lines"></i> Feuilles</span>
-            <button type="button" className="hud-bouton hud-bouton-rond" onClick={() => setPanneauOuvert(false)} aria-label="Fermer">
-              <i className="fa-solid fa-xmark"></i>
-            </button>
+            <button type="button" className="hud-bouton hud-bouton-rond" onClick={() => setPanneauOuvert(false)} aria-label="Fermer"><i className="fa-solid fa-xmark"></i></button>
           </div>
 
           <div className="bloc-feuille">
             <div className="onglets-feuille">
-              <button className={ongletFeuille === "moi" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("moi")} type="button">
-                <i className="fa-solid fa-file-lines"></i> Ma feuille
-              </button>
-              <button className={ongletFeuille === "autres" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autres")} type="button">
-                <i className="fa-solid fa-eye"></i> Feuilles
-              </button>
-              {estProf && (
-                <button className={ongletFeuille === "tableau" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("tableau")} type="button">
-                  <i className="fa-solid fa-chalkboard"></i> Tableau
-                </button>
-              )}
+              <button className={ongletFeuille === "moi" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("moi")} type="button"><i className="fa-solid fa-file-lines"></i> Ma feuille</button>
+              <button className={ongletFeuille === "autres" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("autres")} type="button"><i className="fa-solid fa-eye"></i> Feuilles</button>
+              <button className={ongletFeuille === "tableau" ? "onglet-feuille onglet-feuille-actif" : "onglet-feuille"} onClick={() => setOngletFeuille("tableau")} type="button"><i className="fa-solid fa-chalkboard"></i> Tableau</button>
             </div>
 
             {ongletFeuille === "moi" && (
               <>
-                <FeuillePapier value={monTexte} onChange={gererSaisie} placeholder="Écris tes notes ici…" label="Ma feuille personnelle" />
+                <FeuillePapier
+                  value={monTexte}
+                  onChange={gererSaisie}
+                  placeholder="Écris tes notes ici…"
+                  label="Ma feuille personnelle"
+                  onDownload={() => exporterPdf({ type: "feuille", contenu: monTexte, auteur: monUsername })}
+                  onHistory={() => ouvrirHistorique("feuille")}
+                  exportDisabled={!String(monTexte || "").trim() || exportEnCours}
+                />
                 {mesViewers.size > 0 ? (
                   <div className="choix-categorie" style={{ flexWrap: "wrap" }}>
-                    {[...mesViewers].map((v) => (
-                      <span key={v} className="chip">
-                        {v} <button type="button" className="lien" onClick={() => retirerAcces(v)} style={{ marginLeft: 6 }}>×</button>
-                      </span>
-                    ))}
+                    {[...mesViewers].map((v) => <span key={v} className="chip">{v} <button type="button" className="lien" onClick={() => retirerAcces(v)} style={{ marginLeft: 6 }}>×</button></span>)}
                   </div>
                 ) : (
                   <div className="info"><i className="fa-solid fa-lock"></i> Privée, personne ne la voit</div>
@@ -639,23 +847,49 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
               </>
             )}
 
-            {ongletFeuille === "tableau" && estProf && (
+            {ongletFeuille === "tableau" && (
               <div className="editeur-tableau-classe">
                 <div className="editeur-tableau-entete">
                   <i className="fa-solid fa-chalkboard"></i>
                   <strong>Tableau de la classe</strong>
                   <span className="tableau-etat-direct"><i className="fa-solid fa-circle"></i> En direct</span>
+                  <div className="tableau-actions-document">
+                    <button type="button" title="Télécharger le tableau en PDF" aria-label="Télécharger le tableau en PDF" disabled={!String(tableauTexte || "").trim() || exportEnCours} onClick={() => exporterPdf({ type: "tableau", contenu: tableauTexte, auteur: estProf ? monUsername : profActuel })}><i className="fa-solid fa-download"></i></button>
+                    <button type="button" title="Historique du tableau" aria-label="Historique du tableau" onClick={() => ouvrirHistorique("tableau")}><i className="fa-solid fa-clock-rotate-left"></i></button>
+                  </div>
                 </div>
                 <div className="tableau-apercu-panneau">{tableauTexte || "Le tableau est prêt pour le cours."}</div>
-                <textarea
-                  className="tableau-saisie-prof"
-                  value={tableauTexte}
-                  onChange={(event) => gererTableau(event.target.value)}
-                  maxLength={3000}
-                  rows={5}
-                  placeholder="Écris le cours ici… Les élèves verront le texte apparaître sur le tableau noir."
-                />
-                <div className="info"><i className="fa-solid fa-eye"></i> Seul le professeur actuel peut écrire. Tous les élèves voient le tableau en temps réel.</div>
+                {peutEcrireTableau ? (
+                  <textarea
+                    className="tableau-saisie-prof"
+                    value={tableauTexte}
+                    onChange={(event) => gererTableau(event.target.value)}
+                    maxLength={3000}
+                    rows={5}
+                    placeholder="Écris le cours ici… Les élèves verront le texte apparaître sur le tableau noir."
+                  />
+                ) : <div className="info"><i className="fa-solid fa-eye"></i> Lecture seule : seul le professeur ou l'élève temporairement invité peut écrire.</div>}
+
+                {estProf && (
+                  <div className="tableau-delegation-zone">
+                    <strong><i className="fa-solid fa-user-graduate"></i> Inviter un élève au tableau</strong>
+                    {participants.length === 0 && <div className="info">Aucun élève n'est présent dans la salle. L'invitation est indisponible.</div>}
+                    {tableauDelegation && (
+                      <div className="tableau-delegation-active">
+                        <span>{tableauDelegation.statut === "invite" ? `Invitation envoyée à ${tableauDelegation.eleve_username}` : `${tableauDelegation.eleve_username} a la main au tableau`}</span>
+                        <button type="button" className="hud-bouton" disabled={tableauActionEnCours} onClick={reprendreTableau}>Reprendre la main</button>
+                      </div>
+                    )}
+                    {!tableauDelegation && participants.length > 0 && autresOrdonnes.map((p) => (
+                      <div key={p.identity} className="tableau-delegation-candidat">
+                        <span>{p.identity}</span>
+                        <button type="button" className="hud-bouton" disabled={tableauActionEnCours} onClick={() => inviterEleveAuTableau(p.identity)}><i className="fa-solid fa-chalkboard-user"></i> Inviter</button>
+                      </div>
+                    ))}
+                    <small>Une seule personne à la fois, pendant 3 minutes maximum. Le professeur garde toujours le contrôle.</small>
+                  </div>
+                )}
+                {eleveAuTableau && <div className="info"><i className="fa-solid fa-clock"></i> Tu as reçu la main temporairement. Le professeur peut la reprendre à tout moment.</div>}
               </div>
             )}
 
@@ -666,32 +900,31 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
                   <div key={p.identity} className="carte-post carte-participant-salle" style={{ marginBottom: 10 }}>
                     <div className="auteur-post">{p.identity}</div>
                     {feuillesAutorisees[p.identity] !== undefined ? (
-                      <FeuillePapier value={feuillesAutorisees[p.identity]} readOnly label={`Feuille de ${p.identity}`} />
+                      <FeuillePapier
+                        value={feuillesAutorisees[p.identity]}
+                        readOnly
+                        label={`Feuille de ${p.identity}`}
+                        onDownload={() => exporterPdf({ type: "feuille", contenu: feuillesAutorisees[p.identity], auteur: p.identity })}
+                        exportDisabled={!String(feuillesAutorisees[p.identity] || "").trim() || exportEnCours}
+                      />
                     ) : demandesEnvoyees.has(p.identity) ? (
                       <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> En attente...</div>
                     ) : (
-                      <button type="button" onClick={() => demanderAVoir(p.identity)}>
-                        <i className="fa-solid fa-eye"></i> Demander à voir sa feuille
-                      </button>
+                      <button type="button" onClick={() => demanderAVoir(p.identity)}><i className="fa-solid fa-eye"></i> Demander à voir sa feuille</button>
                     )}
                     {estProf && p.identity !== monUsername && (
-                      <button
-                        type="button"
-                        className="bouton-moderation-micro"
-                        disabled={!!moderationEnCours[p.identity]}
-                        onClick={async () => {
-                          const couper = p.microAutorise !== false;
-                          setModerationEnCours((prev) => ({ ...prev, [p.identity]: true }));
-                          try {
-                            await modererMicroClasse(sessionToken, demandeId, p.identity, couper);
-                            setParticipants((prev) => prev.map((participant) => participant.identity === p.identity ? { ...participant, microAutorise: !couper, ...(couper ? { micActif: false } : {}) } : participant));
-                          } catch (err) {
-                            setErreur(err.message || "Modération micro impossible");
-                          } finally {
-                            setModerationEnCours((prev) => ({ ...prev, [p.identity]: false }));
-                          }
-                        }}
-                      >
+                      <button type="button" className="bouton-moderation-micro" disabled={!!moderationEnCours[p.identity]} onClick={async () => {
+                        const couper = p.microAutorise !== false;
+                        setModerationEnCours((prev) => ({ ...prev, [p.identity]: true }));
+                        try {
+                          await modererMicroClasse(sessionToken, demandeId, p.identity, couper);
+                          setParticipants((prev) => prev.map((participant) => participant.identity === p.identity ? { ...participant, microAutorise: !couper, ...(couper ? { micActif: false } : {}) } : participant));
+                        } catch (err) {
+                          setErreur(err.message || "Modération micro impossible");
+                        } finally {
+                          setModerationEnCours((prev) => ({ ...prev, [p.identity]: false }));
+                        }
+                      }}>
                         <i className={`fa-solid ${moderationEnCours[p.identity] ? "fa-spinner fa-spin" : p.microAutorise === false ? "fa-microphone" : "fa-microphone-slash"}`}></i>
                         {moderationEnCours[p.identity] ? "Application…" : p.microAutorise === false ? "Rétablir le droit de parole" : "Suspendre le droit de parole"}
                       </button>

@@ -1,6 +1,14 @@
 package __APP_PACKAGE__;
 
 import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.PdfDocument;
+import android.graphics.Typeface;
+import android.text.Layout;
+import android.text.StaticLayout;
+import android.text.TextPaint;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -357,4 +365,142 @@ public class GrindMediaPlugin extends Plugin {
             call.reject("Aucune application ne peut ouvrir ce type de fichier, ou le fichier est indisponible.", error);
         }
     }
+
+    /**
+     * Génère et enregistre localement un PDF de feuille/tableau, sans réseau
+     * ni Cloudinary. Les pages sont calculées sur le texte complet avec
+     * StaticLayout, ce qui conserve les accents, les retours à la ligne et
+     * les longs paragraphes sur plusieurs pages A4.
+     */
+    @PluginMethod
+    public void generateTextPdf(PluginCall call) {
+        final String rawContent = call.getString("content", "");
+        if (rawContent == null || rawContent.trim().isEmpty()) {
+            call.reject("Le document est vide.");
+            return;
+        }
+        if (rawContent.length() > 50000) {
+            call.reject("Le document dépasse la limite de 50 000 caractères.");
+            return;
+        }
+
+        String requestedName = safeName(call.getString("fileName", "document-grind.pdf"));
+        final String fileName = requestedName.toLowerCase().endsWith(".pdf")
+            ? requestedName : requestedName + ".pdf";
+        final String title = call.getString("title", "Document de classe GRIND");
+        final String subtitle = call.getString("subtitle", "");
+        final String className = call.getString("className", "Classe GRIND");
+        final String author = call.getString("author", "");
+
+        EXECUTOR.execute(() -> {
+            File partial = null;
+            PdfDocument document = null;
+            try {
+                File directory = savedDirectory();
+                ensureDirectory(directory, false);
+                String baseName = fileName.substring(0, fileName.length() - 4);
+                // Chaque export conserve son propre fichier, même si le cours
+                // est téléchargé plusieurs fois ou depuis deux vues simultanées.
+                String outputName = baseName + "-" + UUID.randomUUID().toString() + ".pdf";
+                File target = new File(directory, outputName);
+                partial = new File(directory, outputName + ".part");
+
+                final int pageWidth = 595;
+                final int pageHeight = 842;
+                final int margin = 46;
+                final int contentWidth = pageWidth - (margin * 2);
+                final int bodyTop = 126;
+                final int footerTop = pageHeight - 62;
+                final int bodyHeight = footerTop - bodyTop;
+
+                TextPaint bodyPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+                bodyPaint.setColor(Color.rgb(35, 38, 43));
+                bodyPaint.setTextSize(11.5f);
+                bodyPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+
+                StaticLayout layout = StaticLayout.Builder
+                    .obtain(rawContent, 0, rawContent.length(), bodyPaint, contentWidth)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setIncludePad(false)
+                    .setLineSpacing(2.5f, 1.12f)
+                    .build();
+
+                int pageCount = Math.max(1, (int) Math.ceil(layout.getHeight() / (double) bodyHeight));
+                document = new PdfDocument();
+
+                Paint titlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                titlePaint.setColor(Color.rgb(35, 38, 43));
+                titlePaint.setTextSize(19f);
+                titlePaint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+
+                Paint metaPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                metaPaint.setColor(Color.rgb(95, 101, 111));
+                metaPaint.setTextSize(8.5f);
+                metaPaint.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+
+                Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                linePaint.setColor(Color.rgb(214, 218, 224));
+                linePaint.setStrokeWidth(1f);
+
+                Paint footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                footerPaint.setColor(Color.rgb(112, 119, 129));
+                footerPaint.setTextSize(8f);
+
+                for (int pageNumber = 0; pageNumber < pageCount; pageNumber++) {
+                    PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
+                        pageWidth, pageHeight, pageNumber + 1
+                    ).create();
+                    PdfDocument.Page page = document.startPage(pageInfo);
+                    Canvas canvas = page.getCanvas();
+                    canvas.drawColor(Color.WHITE);
+                    canvas.drawText(title, margin, 53f, titlePaint);
+                    String metadata = className + " · " + author;
+                    canvas.drawText(metadata.length() > 92 ? metadata.substring(0, 89) + "…" : metadata,
+                        margin, 75f, metaPaint);
+                    canvas.drawText(subtitle.length() > 105 ? subtitle.substring(0, 102) + "…" : subtitle,
+                        margin, 91f, metaPaint);
+                    canvas.drawLine(margin, 105f, pageWidth - margin, 105f, linePaint);
+
+                    int verticalOffset = pageNumber * bodyHeight;
+                    canvas.save();
+                    canvas.translate(margin, bodyTop - verticalOffset);
+                    canvas.clipRect(0, verticalOffset, contentWidth, verticalOffset + bodyHeight);
+                    layout.draw(canvas);
+                    canvas.restore();
+
+                    canvas.drawLine(margin, footerTop + 15f, pageWidth - margin, footerTop + 15f, linePaint);
+                    canvas.drawText("GRIND · Document de classe", margin, pageHeight - 27f, footerPaint);
+                    String pageLabel = "Page " + (pageNumber + 1) + " / " + pageCount;
+                    canvas.drawText(pageLabel, pageWidth - margin - footerPaint.measureText(pageLabel), pageHeight - 27f, footerPaint);
+                    document.finishPage(page);
+                }
+
+                try (OutputStream output = new BufferedOutputStream(new FileOutputStream(partial, false))) {
+                    document.writeTo(output);
+                }
+                document.close();
+                document = null;
+
+                if (target.exists()) {
+                    throw new Exception("Un fichier portant déjà ce nom existe ; relance le téléchargement.");
+                }
+                if (!partial.renameTo(target)) {
+                    throw new Exception("Le PDF n'a pas pu être finalisé dans GRIND DOWNLOAD FILES.");
+                }
+                JSObject result = fileResult(target, "application/pdf", false);
+                result.put("success", true);
+                result.put("directory", directory.getAbsolutePath());
+                call.resolve(result);
+            } catch (Exception error) {
+                if (document != null) {
+                    try { document.close(); } catch (Exception ignored) { }
+                }
+                try { if (partial != null && partial.exists()) partial.delete(); } catch (Exception ignored) { }
+                call.reject(error.getMessage() == null
+                    ? "Le PDF n'a pas pu être enregistré sur cet appareil."
+                    : error.getMessage(), error);
+            }
+        });
+    }
+
 }
