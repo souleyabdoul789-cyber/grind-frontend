@@ -4628,3 +4628,15 @@ button:disabled {
 .discussion-video-placeholder>i{font-size:30px;padding:16px;border-radius:50%;background:rgba(10,10,15,.75);color:var(--brown);box-shadow:0 5px 22px rgba(0,0,0,.35)}
 .discussion-video-placeholder small{max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-size:10px}
 .discussion-video-error{padding:9px;color:var(--text-dim);font-size:11px}
+
+
+/* GRIND 2.10.7 — lecteurs vidéo plein cadre, image de couverture au repos */
+.cadre-video { cursor: default; width: 100%; overflow: hidden; background: #08090b; }
+.cadre-video video { display: block; width: 100%; height: auto; max-height: min(72vh, 620px); aspect-ratio: 16 / 9; object-fit: contain; background: #08090b; }
+.apercu-media-form video { display: block; width: 100%; max-height: min(65vh, 540px); aspect-ratio: 16 / 9; object-fit: contain; background: #08090b; border-radius: 0; }
+.video-editeur { display: block; width: 100%; max-height: min(65vh, 560px); aspect-ratio: 16 / 9; object-fit: contain; background: #08090b; }
+.discussion-video-shell { width: 100%; min-width: 0; min-height: 0; overflow: hidden; border-radius: 10px; background: #08090b; }
+.discussion-video-shell .discussion-video { display: block; width: 100%; height: auto; max-height: min(68vh, 560px); aspect-ratio: 16 / 9; object-fit: contain; border: 0; border-radius: 0; background: #08090b; }
+.discussion-video-placeholder { width: 100%; min-height: 190px; border: 0; border-radius: 0; }
+/* Les navigateurs respectant l'option de réduction des animations gardent un fond fixe. */
+@media (prefers-reduced-motion: reduce) { .discussion-video-skeleton, .discussion-media-skeleton { animation: none !important; } }

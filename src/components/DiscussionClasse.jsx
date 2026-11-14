@@ -161,27 +161,18 @@ function BoutonTelechargement({ progression = null, enCours = false, onClick, la
   );
 }
 
-function VideoDiscussion({ src, nom }) {
-  const [active, setActive] = useState(false);
+function VideoDiscussion({ src, poster, nom }) {
   const [erreur, setErreur] = useState(false);
-  useEffect(() => { setActive(false); setErreur(false); }, [src]);
+  useEffect(() => setErreur(false), [src, poster]);
   return (
     <div className="discussion-video-shell">
       {!src ? (
-        <div className="discussion-video-placeholder"><span className="discussion-media-skeleton" /><small>Vidéo non disponible hors ligne</small></div>
-      ) : !active ? (
-        <button type="button" className="discussion-video-placeholder" onClick={() => setActive(true)} aria-label={`Lire ${nom || "la vidéo"}`}>
-          <span className="discussion-media-skeleton" />
-          <i className="fa-solid fa-play" aria-hidden="true" />
-          <small>{nom || "Lire la vidéo"}</small>
-        </button>
+        <div className="discussion-video-placeholder"><span className="discussion-media-skeleton" /><small>Vidéo non disponible hors ligne. Télécharge-la pour la conserver sur cet appareil.</small></div>
       ) : (
-        <>
-          <video className="discussion-video" src={src} controls playsInline preload="metadata"
-            onError={() => setErreur(true)} />
-          {erreur && <div className="discussion-video-error">Cette vidéo ne peut pas être lue sur cet appareil.</div>}
-        </>
+        <video className="discussion-video" src={src} poster={poster || undefined} controls playsInline preload="metadata"
+          aria-label={nom || "Vidéo partagée dans la discussion"} onError={() => setErreur(true)} />
       )}
+      {erreur && <div className="discussion-video-error">Cette vidéo ne peut pas être lue sur cet appareil.</div>}
     </div>
   );
 }
@@ -1427,7 +1418,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     <ImageDiscussion src={mediaPriveUrl} alt={message.piece.nom || "Image partagée"} onOpen={() => mediaPriveUrl && setLightbox(mediaPriveUrl)} />
                   )}
                   {message.piece && message.piece.type === "video" && <>
-                    <VideoDiscussion src={mediaPriveUrl} nom={message.piece.nom} />
+                    <VideoDiscussion
+                      src={mediaPriveUrl}
+                      poster={mediaPriveUrl && /^https:\/\//.test(mediaPriveUrl) ? urlPieceDiscussion(sessionToken, classe.classe_id, message.id, false, true) : null}
+                      nom={message.piece.nom}
+                    />
                     <div className="discussion-media-actions">
                       <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => telechargerVideoMessage(message)} label="Télécharger la vidéo" />
                       <small>{message.piece.nom || "Vidéo"}</small>

@@ -423,7 +423,8 @@ export default function App() {
         const ageValide = Number.isFinite(elapsed) && elapsed < 48 * 60 * 60;
         const secondesRestantes = Math.max(0, Number(cache?.status?.remaining_seconds || 0) - elapsed);
         const pinEncoreValide = cache?.status?.configured === true && cache.status.required === false && secondesRestantes > 0;
-        if (!estGrindEnLigne() && ageValide && pinEncoreValide) {
+        const reseauInjoignable = !estGrindEnLigne() || !erreur?.status;
+        if (reseauInjoignable && ageValide && pinEncoreValide) {
           setPinStatus({ ...cache.status, required: false, remaining_seconds: Math.floor(secondesRestantes), loading: false, offline: true });
           return;
         }
@@ -453,6 +454,21 @@ export default function App() {
           invaliderSessionConfirmee(sessionToken);
           return;
         }
+        // Si la connexion vient réellement de tomber, réutilise uniquement le
+        // dernier PIN serveur confirmé, encore dans sa fenêtre de validité de 48 h.
+        // Aucun cache absent/expiré ne permet de contourner le verrou PIN.
+        const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
+        let cache = null;
+        try { cache = JSON.parse(localStorage.getItem(pinCacheKey) || "null"); } catch {}
+        const elapsed = cache?.checkedAt ? Math.max(0, (Date.now() - cache.checkedAt) / 1000) : Infinity;
+        const ageValide = Number.isFinite(elapsed) && elapsed < 48 * 60 * 60;
+        const secondesRestantes = Math.max(0, Number(cache?.status?.remaining_seconds || 0) - elapsed);
+        const pinEncoreValide = cache?.status?.configured === true && cache.status.required === false && secondesRestantes > 0;
+        const reseauInjoignable = !estGrindEnLigne() || !erreur?.status;
+        if (reseauInjoignable && ageValide && pinEncoreValide) {
+          setPinStatus({ ...cache.status, required: false, remaining_seconds: Math.floor(secondesRestantes), loading: false, offline: true });
+          return;
+        }
         // Réessai borné en fréquence : pas de boucle rapide ni de déconnexion.
         timer = window.setTimeout(retenter, 10000);
       }
@@ -464,6 +480,32 @@ export default function App() {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, [sessionToken, pinStatus?.verification_pending]);
+
+  useEffect(() => {
+    if (!sessionToken || !pinStatus?.offline) return undefined;
+    let actif = true;
+    const revalider = async () => {
+      if (!estGrindEnLigne()) return;
+      try {
+        const status = await statutPin(sessionToken);
+        if (!actif) return;
+        const key = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
+        try { localStorage.setItem(key, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
+        setPinStatus({ ...status, loading: false, offline: false });
+      } catch (erreur) {
+        if (!actif) return;
+        if (erreur?.status === 401) invaliderSessionConfirmee(sessionToken);
+      }
+    };
+    const statutApi = (event) => { if (event.detail?.online) revalider(); };
+    window.addEventListener("online", revalider);
+    window.addEventListener("grind-api-status", statutApi);
+    return () => {
+      actif = false;
+      window.removeEventListener("online", revalider);
+      window.removeEventListener("grind-api-status", statutApi);
+    };
+  }, [sessionToken, pinStatus?.offline, username]);
 
   useEffect(() => {
     if (!sessionToken || !pinStatus || pinStatus.loading || pinStatus.required || profilPret) return;

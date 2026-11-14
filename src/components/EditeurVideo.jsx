@@ -45,7 +45,7 @@ export default function EditeurVideo({ fichier, onValider, onAnnuler }) {
 
   return (
     <div className="editeur-media">
-      <video ref={videoRef} onLoadedMetadata={metadonneesChargees} controls className="video-editeur" />
+      <video ref={videoRef} onLoadedMetadata={metadonneesChargees} controls playsInline preload="auto" className="video-editeur" aria-label="Aperçu de la vidéo à publier" />
 
       {duree > 0 && (
         <>

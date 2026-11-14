@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
 import { BarcodeScanner, BarcodeFormat } from "@capacitor-mlkit/barcode-scanning";
 import QRCode from "qrcode";
-import { rejoindreClasse, listerMesClasses, renommerClasse, supprimerClasse, extraireCode, estGrindEnLigne } from "../api.js";
+import { rejoindreClasse, rejoindreDiscussion, listerMesClasses, renommerClasse, supprimerClasse, extraireCode, estGrindEnLigne } from "../api.js";
 import SalleClasse from "../components/SalleClasse.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import EtatVide from "../components/EtatVide.jsx";
@@ -22,6 +22,9 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [ouvertureSalleId, setOuvertureSalleId] = useState(null);
 
   const [formulaireOuvert, setFormulaireOuvert] = useState(codeAttente ? "rejoindre" : null);
+  const [codeDiscussion, setCodeDiscussion] = useState("");
+  const [erreurDiscussion, setErreurDiscussion] = useState("");
+  const [adhesionDiscussion, setAdhesionDiscussion] = useState(false);
   const [erreurScanner, setErreurScanner] = useState("");
   const [codeInvitationSaisi, setCodeInvitationSaisi] = useState("");
   const [scannerEnCours, setScannerEnCours] = useState(false);
@@ -148,6 +151,32 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       if (onDiscussionOuverte) onDiscussionOuverte();
     }
   }, [discussionAouvrir, classes, chargement, onDiscussionOuverte]);
+
+  async function gererAdhesionDiscussion(event) {
+    event.preventDefault();
+    if (adhesionDiscussion) return;
+    setErreurDiscussion("");
+    if (!estGrindEnLigne()) {
+      setErreurDiscussion("Une connexion Internet est nécessaire pour rejoindre une discussion.");
+      return;
+    }
+    setAdhesionDiscussion(true);
+    try {
+      const resultat = await rejoindreDiscussion(sessionToken, extraireCode(codeDiscussion));
+      const actualisees = await listerMesClasses(sessionToken);
+      const liste = Array.isArray(actualisees.classes) ? actualisees.classes : [];
+      setClasses(liste);
+      try { localStorage.setItem(cleCacheClasses, JSON.stringify(liste.slice(-100))); } catch {}
+      const cible = liste.find((item) => Number(item.classe_id) === Number(resultat.classe_id));
+      if (!cible) throw new Error("Tu as rejoint le groupe, mais sa discussion n'a pas pu être chargée. Réessaie d'actualiser les classes.");
+      setCodeDiscussion("");
+      setDiscussionActive(cible);
+    } catch (err) {
+      setErreurDiscussion(err.message || "Impossible de rejoindre cette discussion.");
+    } finally {
+      setAdhesionDiscussion(false);
+    }
+  }
 
   async function rejoindreAvecCode(codeBrut) {
     if (!estGrindEnLigne()) {
@@ -377,6 +406,18 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
   return (
     <div className="fil-actu">
+
+      <form className="discussion-rejoindre-form carte-post" onSubmit={gererAdhesionDiscussion}>
+        <div className="discussion-rejoindre-intro">
+          <span className="discussion-rejoindre-icone"><i className="fa-solid fa-comments" /></span>
+          <span><strong>Rejoindre une discussion</strong><small>Entre le code du groupe. Tu peux discuter même si la classe réelle est complète.</small></span>
+        </div>
+        <div className="discussion-rejoindre-ligne">
+          <input value={codeDiscussion} onChange={(event) => setCodeDiscussion(event.target.value)} placeholder="Code ou lien d'invitation du groupe" aria-label="Code ou lien d'invitation du groupe" />
+          <button type="submit" disabled={adhesionDiscussion || !codeDiscussion.trim()}>{adhesionDiscussion ? <i className="fa-solid fa-circle-notch fa-spin" /> : <><i className="fa-solid fa-arrow-right-to-bracket" /> Rejoindre</>}</button>
+        </div>
+        {erreurDiscussion && <div className="erreur" role="alert">{erreurDiscussion}</div>}
+      </form>
 
       <div className="choix-categorie" style={{ marginBottom: 16 }}>
         <button

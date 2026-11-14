@@ -375,7 +375,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
           <div className="compteur-caracteres">{contenu.length} / {LIMITE_LEGENDE}</div>
 
           {apercuMedia && <div className="apercu-media-form">
-            {apercuMedia.estGalerie ? <div className="publication-gallery-preview">{apercuMedia.items.slice(0, 4).map((item, i) => <div key={item.nom}><img src={item.url} alt="" />{i === 3 && apercuMedia.items.length > 4 && <span>+{apercuMedia.items.length - 4}</span>}</div>)}<small>{apercuMedia.items.length} images sélectionnées</small></div> : apercuMedia.estVideo ? <video src={apercuMedia.url} muted playsInline /> : <img src={apercuMedia.url} alt="" />}
+            {apercuMedia.estGalerie ? <div className="publication-gallery-preview">{apercuMedia.items.slice(0, 4).map((item, i) => <div key={item.nom}><img src={item.url} alt="" />{i === 3 && apercuMedia.items.length > 4 && <span>+{apercuMedia.items.length - 4}</span>}</div>)}<small>{apercuMedia.items.length} images sélectionnées</small></div> : apercuMedia.estVideo ? <video src={apercuMedia.url} controls playsInline preload="metadata" aria-label="Aperçu de la vidéo sélectionnée" /> : <img src={apercuMedia.url} alt="" />}
             <button type="button" className="bouton-retirer-media" onClick={retirerMedia} aria-label="Retirer le média"><i className="fa-solid fa-xmark" /></button>
           </div>}
           <div className="publication-attachments-picker">

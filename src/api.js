@@ -419,37 +419,21 @@ export async function uploaderDocument(sessionToken, fichier, onProgress = null)
   if (!typeAttendu) throw new Error("Seuls les documents PDF et DOCX sont acceptés.");
   if (fichier.size <= 0 || fichier.size > 15 * 1024 * 1024) throw new Error("Le document doit être non vide et ne pas dépasser 15 Mo.");
 
-  // Certains fournisseurs Android renvoient un MIME générique ou un nom incomplet.
-  // Le serveur revalide taille/type et inspecte les premiers octets du fichier stocké.
+  // Retour au chemin multipart stable de 2.10.5 : le backend vérifie les octets
+  // et la structure PDF/DOCX avant le stockage, sans relire un raw asset Cloudinary
+  // (qui répond actuellement 401 à l'étape de confirmation directe).
   const nom = /\.(pdf|docx)$/i.test(nomOriginal) ? nomOriginal : `document.${extension}`;
-  const signature = await posterMediaAvecReprise(`${GRIND_URL}/api/media/document/signature`, {
-    session_token: sessionToken,
-    file_name: nom,
-    file_size: fichier.size,
-    content_type: typeAttendu,
-  }, "la préparation de l'envoi du document");
-  if (!verifierUrlUploadCloudinary(signature.upload_url, "raw")) {
-    throw new Error("Le serveur GRIND a renvoyé une destination de transfert invalide.");
-  }
-
   const fichierNormalise = new File([fichier], nom, {
     type: typeAttendu,
     lastModified: Number(fichier.lastModified) || Date.now(),
   });
-  const formulaire = formulaireUploadSigne(fichierNormalise, nom, signature);
-  const asset = await envoyerXHR(signature.upload_url, formulaire, {
-    onProgress: (charge, total) => onProgress?.(total ? Math.min(98, Math.round(charge / total * 98)) : 0),
+  const formulaire = new FormData();
+  formulaire.append("session_token", sessionToken);
+  formulaire.append("file", fichierNormalise, nom);
+  const resultat = await envoyerXHR(`${GRIND_URL}/api/media/document`, formulaire, {
+    onProgress: (charge, total) => onProgress?.(total ? Math.round(charge / total * 100) : 0),
     timeout: 5 * 60 * 1000,
   });
-  if (!asset?.secure_url || !asset?.public_id || !asset?.version || !asset?.signature) {
-    throw new Error("Le stockage n'a pas confirmé la réception complète du document.");
-  }
-  onProgress?.(99);
-  const resultat = await posterMediaAvecReprise(`${GRIND_URL}/api/media/document/confirm`, {
-    session_token: sessionToken,
-    file_name: nom,
-    asset,
-  }, "la validation du document");
   onProgress?.(100);
   return resultat;
 }
@@ -669,10 +653,11 @@ export function urlDiscussion(sessionToken, discussionId) {
   return `${base}/ws/discussion/${discussionId}?session_token=${encodeURIComponent(sessionToken)}`;
 }
 
-export function urlPieceDiscussion(sessionToken, classeId, messageId, download = false) {
+export function urlPieceDiscussion(sessionToken, classeId, messageId, download = false, poster = false) {
   const url = new URL(`${GRIND_URL}/api/classes/${classeId}/discussion/messages/${messageId}/piece`);
   url.searchParams.set("session_token", sessionToken);
   if (download) url.searchParams.set("download", "1");
+  if (poster) url.searchParams.set("poster", "1");
   return url.toString();
 }
 
@@ -1048,16 +1033,35 @@ export async function deconnecterGrind(sessionToken) {
 }
 
 let _catalogue = null;
+const CLE_CACHE_CATALOGUE = "grind_scolaire_catalogue_v1";
+const AGE_MAX_CACHE_CATALOGUE = 180 * 24 * 60 * 60 * 1000;
+function catalogueValide(data) {
+  return Boolean(data && Array.isArray(data.niveaux) && data.matieres_par_niveau && typeof data.matieres_par_niveau === "object");
+}
+function lireCatalogueLocal() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(CLE_CACHE_CATALOGUE) || "null");
+    if (!catalogueValide(cache?.data) || !Number.isFinite(Number(cache?.savedAt))) return null;
+    if (Date.now() - Number(cache.savedAt) > AGE_MAX_CACHE_CATALOGUE) return null;
+    return cache.data;
+  } catch { return null; }
+}
 export async function catalogueScolaire() {
   if (_catalogue) return _catalogue;
-  const res = await fetchApi(`${GRIND_URL}/api/scolaire/catalogue`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Le catalogue scolaire est temporairement indisponible.");
-  if (!Array.isArray(data.niveaux) || !data.matieres_par_niveau) {
-    throw new Error("Le serveur a répondu, mais le catalogue scolaire est incomplet. Vérifie la version du backend déployée.");
+  const local = lireCatalogueLocal();
+  if (!estGrindEnLigne() && local) { _catalogue = local; return _catalogue; }
+  try {
+    const res = await fetchApi(`${GRIND_URL}/api/scolaire/catalogue`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Le catalogue scolaire est temporairement indisponible.");
+    if (!catalogueValide(data)) throw new Error("Le serveur a répondu, mais le catalogue scolaire est incomplet. Vérifie la version du backend déployée.");
+    _catalogue = data;
+    try { localStorage.setItem(CLE_CACHE_CATALOGUE, JSON.stringify({ data, savedAt: Date.now() })); } catch {}
+    return _catalogue;
+  } catch (erreur) {
+    if (local) { _catalogue = local; return _catalogue; }
+    throw erreur;
   }
-  _catalogue = data;
-  return _catalogue;
 }
 
 // ---------- Candidature proviseur / direction ----------
