@@ -606,6 +606,13 @@ export async function envoyerVocalDiscussion(sessionToken, classeId, fichier, re
   });
 }
 
+export function marquerMessagesDiscussionLus(sessionToken, classeId, dernierMessageId) {
+  return poster(`${GRIND_URL}/api/classes/${classeId}/discussion/lecture`, {
+    session_token: sessionToken,
+    dernier_message_id: Number(dernierMessageId),
+  });
+}
+
 export async function envoyerMessageDiscussion(sessionToken, classeId, payload) {
   try {
     return await poster(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, { session_token: sessionToken, ...payload });

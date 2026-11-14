@@ -114,7 +114,7 @@ jobs:
           {
             echo "### GRIND Android debug APK"
             echo "Package Android : com.gsociety.grind"
-            echo "Version : 2.10.9"
+            echo "Version : 2.10.10"
             echo "Le SHA-1 du certificat debug est dans l'artifact android-debug-sha1.txt."
             echo "Pour Google OAuth Android, créer un client OAuth Android avec ce package et ce SHA-1."
             echo "Cette clé est réservée aux builds de test, pas à une publication Play Store."
@@ -123,7 +123,7 @@ jobs:
       - name: Upload APK and OAuth fingerprint
         uses: actions/upload-artifact@v4
         with:
-          name: GRIND-Android-Debug-2.10.9
+          name: GRIND-Android-Debug-2.10.10
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android-debug-sha1.txt

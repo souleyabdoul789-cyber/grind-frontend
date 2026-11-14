@@ -8,7 +8,8 @@ import {
 } from "../mediaStorage.js";
 import {
   obtenirDiscussionClasse, listerMessagesDiscussion, envoyerMessageDiscussion, urlDiscussion,
-  listerMentionsDiscussion, marquerMentionDiscussionLue, rejoindreVraieClasseDepuisDiscussion,
+  listerMentionsDiscussion, marquerMentionDiscussionLue, marquerMessagesDiscussionLus,
+  rejoindreVraieClasseDepuisDiscussion,
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
   restreindreMembreDiscussion, leverRestrictionDiscussion, retirerMembreDiscussion,
   transfererProprietaireDiscussion, renouvelerInvitationDiscussion, uploaderMedia, uploaderDocument,
@@ -399,6 +400,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const pendingVocalIdRef = useRef(null);
   const fileAttenteEnCoursRef = useRef(false);
   const messagesActuels = useRef([]);
+  const dernierMessageLuRef = useRef(0);
+  const lectureEnAttenteRef = useRef(0);
+  const lectureEnCoursRef = useRef(false);
+  const lectureTimerRef = useRef(null);
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
   const socketRef = useRef(null);
@@ -697,6 +702,18 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           return next;
         });
         setMessagesSelectionnes(prev => prev.filter(id => id !== data.message.id));
+      } else if (data.type === "read_receipt" && data.username !== monUsername) {
+        const dernierIdLu = Number(data.last_message_id || 0);
+        if (dernierIdLu > 0) {
+          setMessages(prev => {
+            const next = prev.map(message => message.auteur === monUsername
+              && Number(message.id) <= dernierIdLu
+              && !message.lu_par_au_moins_un
+              ? { ...message, lu_par_au_moins_un: true } : message);
+            messagesActuels.current = next;
+            return next;
+          });
+        }
       } else if (data.type === "typing" && data.username) {
         setTyping(prev => data.typing
           ? (prev.includes(data.username) ? prev : [...prev, data.username])
@@ -1070,6 +1087,92 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     root.querySelectorAll("article[data-has-media='true'][data-message-id]").forEach(el => observer.observe(el));
     return () => { actif = false; observer.disconnect(); };
   }, [messages, mediasLocaux, classe.classe_id, sessionToken]);
+
+  // Les accusés de lecture ne partent que lorsque le message est réellement visible.
+  // Le curseur est monotone et synchronisé avec un léger délai pour éviter un POST par ligne.
+  useEffect(() => {
+    if (!discussion?.id || typeof IntersectionObserver === "undefined") return undefined;
+    const root = scrollRef.current;
+    if (!root) return undefined;
+
+    dernierMessageLuRef.current = 0;
+    lectureEnAttenteRef.current = 0;
+    let actif = true;
+    let observer = null;
+
+    const synchroniserLecture = async () => {
+      const cible = Number(lectureEnAttenteRef.current || 0);
+      if (!actif || lectureEnCoursRef.current || cible <= dernierMessageLuRef.current
+          || !estGrindEnLigne() || document.visibilityState !== "visible") return;
+      lectureEnCoursRef.current = true;
+      let confirme = false;
+      try {
+        const resultat = await marquerMessagesDiscussionLus(sessionToken, classe.classe_id, cible);
+        if (actif) {
+          const idConfirme = Number(resultat?.dernier_message_lu_id || cible);
+          dernierMessageLuRef.current = Math.max(dernierMessageLuRef.current, idConfirme);
+          lectureEnAttenteRef.current = Math.max(lectureEnAttenteRef.current, dernierMessageLuRef.current);
+          confirme = true;
+        }
+      } catch {
+        // La reconnexion ou le prochain passage visible permettra un nouvel essai.
+      } finally {
+        lectureEnCoursRef.current = false;
+        if (actif && confirme && lectureEnAttenteRef.current > dernierMessageLuRef.current) {
+          window.clearTimeout(lectureTimerRef.current);
+          lectureTimerRef.current = window.setTimeout(synchroniserLecture, 250);
+        } else if (!confirme) {
+          lectureEnAttenteRef.current = dernierMessageLuRef.current;
+        }
+      }
+    };
+
+    const programmerLecture = messageId => {
+      const id = Number(messageId || 0);
+      if (!id || id <= dernierMessageLuRef.current) return;
+      lectureEnAttenteRef.current = Math.max(lectureEnAttenteRef.current, id);
+      window.clearTimeout(lectureTimerRef.current);
+      lectureTimerRef.current = window.setTimeout(synchroniserLecture, 450);
+    };
+
+    observer = new IntersectionObserver(entries => {
+      if (!actif || document.visibilityState !== "visible" || !estGrindEnLigne()) return;
+      let dernierVisible = 0;
+      for (const entry of entries) {
+        if (!entry.isIntersecting || entry.intersectionRatio < 0.35) continue;
+        dernierVisible = Math.max(dernierVisible, Number(entry.target.dataset.messageId || 0));
+      }
+      if (dernierVisible > 0) programmerLecture(dernierVisible);
+    }, { root, threshold: [0.35] });
+
+    const observerMessages = () => {
+      root.querySelectorAll("article[data-message-id]").forEach(element => observer.observe(element));
+    };
+    observerMessages();
+
+    const mutations = typeof MutationObserver !== "undefined"
+      ? new MutationObserver(observerMessages) : null;
+    mutations?.observe(root, { childList: true, subtree: true });
+
+    const reobserverMessagesVisibles = () => {
+      if (!actif || document.visibilityState !== "visible" || !estGrindEnLigne()) return;
+      observer.disconnect();
+      observerMessages();
+    };
+    window.addEventListener("online", reobserverMessagesVisibles);
+    window.addEventListener("grind-api-status", reobserverMessagesVisibles);
+    document.addEventListener("visibilitychange", reobserverMessagesVisibles);
+
+    return () => {
+      actif = false;
+      window.clearTimeout(lectureTimerRef.current);
+      observer.disconnect();
+      mutations?.disconnect();
+      window.removeEventListener("online", reobserverMessagesVisibles);
+      window.removeEventListener("grind-api-status", reobserverMessagesVisibles);
+      document.removeEventListener("visibilitychange", reobserverMessagesVisibles);
+    };
+  }, [discussion?.id, sessionToken, classe.classe_id]);
 
   useEffect(() => {
     if (!stockageAndroidDisponible() || !messages.length) return undefined;
@@ -1645,6 +1748,49 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   function annulerPressMessage() { clearTimeout(longPressTimer.current); }
 
+  async function copierSelectionMessages() {
+    const contenus = messages
+      .filter(message => messagesSelectionnes.includes(message.id) && !message.supprime_pour_tous)
+      .map(message => String(message.contenu || "").trim())
+      .filter(Boolean);
+    if (!contenus.length) return;
+    const texteCopie = contenus.join("\n\n");
+    const copierViaWebView = () => {
+      const champTemporaire = document.createElement("textarea");
+      champTemporaire.value = texteCopie;
+      champTemporaire.setAttribute("readonly", "");
+      champTemporaire.style.position = "fixed";
+      champTemporaire.style.opacity = "0";
+      document.body.appendChild(champTemporaire);
+      try {
+        champTemporaire.select();
+        return document.execCommand("copy");
+      } finally {
+        champTemporaire.remove();
+      }
+    };
+    try {
+      let copiee = false;
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(texteCopie);
+          copiee = true;
+        } catch {
+          // Secours pour les WebView Android qui refusent Clipboard API.
+          copiee = copierViaWebView();
+        }
+      } else {
+        copiee = copierViaWebView();
+      }
+      if (!copiee) throw new Error("Copie refusée par le navigateur.");
+      setMessagesSelectionnes([]);
+      setMenuSelectionOuvert(false);
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Texte copié." }));
+    } catch {
+      setMessageErreur("Impossible de copier le texte sur cet appareil.");
+    }
+  }
+
   function cliquerMessageEnModeSelection(event, message) {
     if (longPressDeclenche.current) { longPressDeclenche.current = false; event.preventDefault(); return; }
     if (messagesSelectionnes.length && !event.target?.closest?.("button, input, audio, video, a")) {
@@ -1735,8 +1881,6 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         </div>
       </header>
 
-      <div className="discussion-statut"><span className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{!estGrindEnLigne() || socketEtat === "hors ligne" ? "Hors ligne · lecture seule" : socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"} · {discussion.limite_membres || 200} membres maximum</div>
-
       {mentionsNonLues > 0 && (
         <button
           type="button"
@@ -1767,6 +1911,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           <strong>{messagesSelectionnes.length} sélectionné{messagesSelectionnes.length > 1 ? "s" : ""}</strong>
           <button type="button" onClick={() => setMenuSelectionOuvert(v => !v)} aria-label="Actions des messages sélectionnés"><i className="fa-solid fa-ellipsis-vertical" /></button>
           {menuSelectionOuvert && <div className="discussion-selection-menu">
+            {messagesSelectionnes.some(id => {
+              const cible = messages.find(message => message.id === id);
+              return cible && !cible.supprime_pour_tous && !!String(cible.contenu || "").trim();
+            }) && <button type="button" onClick={copierSelectionMessages}><i className="fa-solid fa-copy" /> Copier</button>}
             {messagesSelectionnes.length === 1 && messageEditable(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" onClick={modifierSelection}><i className="fa-solid fa-pen" /> Modifier</button>}
             {messagesSelectionnes.length === 1 && !messages.find(m => m.id === messagesSelectionnes[0])?.supprime_pour_tous && <button type="button" onClick={() => { const cible = messages.find(m => m.id === messagesSelectionnes[0]); if (cible) commencerReponse(cible); setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }}><i className="fa-solid fa-reply" /> Répondre</button>}
             {messagesSelectionnes.length === 1 && peutSupprimerMessagePourTous(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" className="danger" onClick={demanderSuppressionSelectionPourTous} disabled={suppressionEnCours}><i className="fa-solid fa-trash-can" /> Supprimer pour tout le monde</button>}
@@ -1813,7 +1961,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => ouvrirDocumentMessage(message)} label="Enregistrer et ouvrir le document" />
                   </div>}
                   </>}
-                  <span className="discussion-heure">{heure(message.created_at)}{message.modifie && <small className="discussion-message-modifie"> · modifié</small>}</span>
+                  <span className="discussion-heure">{heure(message.created_at)}{message.modifie && <small className="discussion-message-modifie"> · modifié</small>}{propre && Number(message.id) > 0 && !message.supprime_pour_tous && <span className={`discussion-etat-message ${message.lu_par_au_moins_un ? "lu" : ""}`} title={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"} aria-label={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"}><i className={`fa-solid ${message.lu_par_au_moins_un ? "fa-check-double" : "fa-check"}`} /></span>}</span>
                 </div>
                 {!message.supprime_pour_tous && <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>}
               </div>
@@ -1839,7 +1987,6 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                 <div className="discussion-vocal-ondes en-direct" aria-label="Niveau sonore en direct">
                   {vocalNiveaux.map((niveau, index) => <span key={index} style={{ height: `${niveau}px` }} />)}
                 </div>
-                <small>{vocalVerrouille ? "Enregistrement verrouillé" : "Glisse vers le haut pour verrouiller · vers la gauche pour annuler"}</small>
                 {vocalVerrouille && <div className="discussion-vocal-commandes">
                   <button type="button" className="discussion-vocal-supprimer" onClick={annulerEnregistrementVocal} title="Supprimer le vocal" aria-label="Supprimer le vocal"><i className="fa-solid fa-trash" /></button>
                   <button type="button" className="discussion-vocal-envoyer" onClick={envoyerVocalVerrouille} title="Envoyer le vocal" aria-label="Envoyer le vocal"><i className="fa-solid fa-paper-plane" /></button>
@@ -1859,7 +2006,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   <input ref={documentPieceRef} type="file" hidden accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={event => { pendingMessageIdRef.current = null; pendingMessagePieceRef.current = null; pendingMessagePayloadRef.current = null; setFichier(event.target.files?.[0] || null); setMenuPiecesOuvert(false); }} />
                 </div>
                 <textarea ref={textareaRef} rows={1} value={texte} onChange={event => changerTexte(event.target.value)} enterKeyHint="enter" placeholder={messageEnEdition ? "Modifier ton message…" : "Écrire un message…"} disabled={envoi || !!fichier} />
-                {(texte.trim() || fichier) && <button type="button" className="discussion-envoyer" onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer">{envoi ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className={`fa-solid ${messageEnEdition ? "fa-check" : "fa-paper-plane"}`} />}</button>}
+                {(texte.trim() || fichier) && <button type="button" className={`discussion-envoyer ${envoi ? "envoi-en-cours" : ""}`} onClick={envoyer} disabled={envoi} title="Envoyer" aria-label="Envoyer"><i className={`fa-solid ${messageEnEdition ? "fa-check" : "fa-paper-plane"}`} /></button>}
               </>
             )}
             <button
@@ -1870,12 +2017,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
               onPointerUp={relacherPointeurVocal}
               onPointerCancel={annulerEnregistrementVocal}
               disabled={envoi || !!messageEnEdition || (!vocalEnCours && (!!texte.trim() || !!fichier))}
-              title="Maintenir pour enregistrer un vocal · Toucher pour verrouiller"
+              title="Enregistrer un message vocal"
               aria-label="Enregistrer un message vocal"
             ><i className={`fa-solid ${vocalEnCours || vocalPreparation ? "fa-microphone-lines" : "fa-microphone"}`} /></button>
           </div>
           {suggestions.length > 0 && <div className="discussion-suggestions-mention">{suggestions.map(m => <button type="button" key={m.username} onClick={() => choisirMention(m)}><AvatarIcone username={m.username} taille={30} /><span><strong>{m.nom}</strong><small>@{m.username}</small></span><i className="fa-solid fa-at" /></button>)}</div>}
-          <small className="discussion-aide-composer">Maintiens le micro pour envoyer · Glisse vers le haut pour verrouiller · Glisse un message pour répondre</small>
         </div>
       )}
 
@@ -1909,6 +2055,10 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           </div>)}</div>
           {estAdmin && <div className="discussion-moderation-rapide"><small>Restrictions disponibles : 15 min, 1 h, 6 h, 24 h, 7 jours ou jusqu'à levée manuelle.</small></div>}
           {transfertProprietaire && <div className="discussion-confirmation-transfert" role="dialog" aria-modal="true"><strong>Transférer la propriété du groupe ?</strong><p>{transfertProprietaire.nom} deviendra propriétaire. Tu conserveras le rôle d'administrateur et pourras ensuite quitter le groupe.</p><div><button type="button" onClick={() => setTransfertProprietaire(null)}>Annuler</button><button type="button" disabled={!!actionEnCours} onClick={() => acterMembre("owner", transfertProprietaire)}>{actionEnCours === `owner:${transfertProprietaire.username}` ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Confirmer"}</button></div></div>}
+          <div className="discussion-panneau-statut">
+            <span><i className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{!estGrindEnLigne() || socketEtat === "hors ligne" ? "Hors ligne · lecture seule" : socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"}</span>
+            <small>Capacité : {discussion.limite_membres || 200} membres maximum</small>
+          </div>
           <footer>{estOwner ? <small>Tu es propriétaire de cette discussion. Transfère d'abord la propriété pour pouvoir la quitter.</small> : <button type="button" className="discussion-quitter-groupe" onClick={async () => { try { await import("../api.js").then(api => api.quitterDiscussion(sessionToken, classe.classe_id)); onQuitter(); } catch (e) { setMessageErreur(e.message); } }}><i className="fa-solid fa-right-from-bracket" /> Quitter la discussion</button>}</footer>
         </aside>
       </div>}
