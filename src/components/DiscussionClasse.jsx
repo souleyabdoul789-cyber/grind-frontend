@@ -7,15 +7,50 @@ import {
   telechargerDansNavigateur,
 } from "../mediaStorage.js";
 import {
-  GRIND_URL, obtenirDiscussionClasse, listerMessagesDiscussion, envoyerMessageDiscussion, urlDiscussion,
+  GRIND_URL, obtenirDiscussionClasse, listerMessagesDiscussion, urlDiscussion,
   listerMentionsDiscussion, marquerMentionDiscussionLue, marquerMessagesDiscussionLus,
   rejoindreVraieClasseDepuisDiscussion,
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
   restreindreMembreDiscussion, leverRestrictionDiscussion, retirerMembreDiscussion,
-  transfererProprietaireDiscussion, renouvelerInvitationDiscussion, uploaderMedia, uploaderDocument,
-  envoyerVocalDiscussion, obtenirTicketsMediaDiscussion, obtenirTicketPieceDiscussion, modifierMessageDiscussion,
-  supprimerMessageDiscussionPourMoi, supprimerMessageDiscussionPourTous, estGrindEnLigne,
+  transfererProprietaireDiscussion, renouvelerInvitationDiscussion,
+  obtenirTicketsMediaDiscussion, obtenirTicketPieceDiscussion, modifierMessageDiscussion,
+  supprimerMessageDiscussionPourMoi, supprimerMessageDiscussionPourTous,
 } from "../api.js";
+
+async function posterDiscussionAvecReprise(url, payload, etape) {
+  const delais = [500, 1200, 2400];
+  let derniereErreur = null;
+  for (let tentative = 0; tentative <= delais.length; tentative += 1) {
+    let controleur = null;
+    let timer = null;
+    try {
+      controleur = new AbortController();
+      timer = window.setTimeout(() => controleur.abort(), 12000);
+      const response = await fetch(url, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload), signal: controleur.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const erreur = new Error(typeof data.detail === "string"
+          ? data.detail : data.detail?.message || `Échec de ${etape} (HTTP ${response.status}).`);
+        erreur.status = response.status;
+        throw erreur;
+      }
+      return data;
+    } catch (erreur) {
+      derniereErreur = erreur;
+      const statut = Number(erreur?.status || (erreur?.name === "AbortError" ? 408 : 0));
+      derniereErreur.status = statut;
+      const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+      if (!temporaire || tentative === delais.length) break;
+      await new Promise(resolve => window.setTimeout(resolve, delais[tentative]));
+    } finally {
+      if (timer !== null) window.clearTimeout(timer);
+    }
+  }
+  throw derniereErreur || new Error(`Échec de ${etape}.`);
+}
 
 async function uploaderVocalDiscussionMedia(sessionToken, fichier, onProgress = null) {
   if (!fichier || !String(fichier.type || "").toLowerCase().startsWith("audio/")) {
@@ -32,42 +67,16 @@ async function uploaderVocalDiscussionMedia(sessionToken, fichier, onProgress = 
     throw new Error("Le format vocal doit être WEBM, OGG, M4A ou MP3.");
   }
 
-  const demanderJson = async (url, payload, etape) => {
-    const delais = [900, 1800];
-    let derniereErreur = null;
-    for (let tentative = 0; tentative <= delais.length; tentative += 1) {
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          const erreur = new Error(typeof data.detail === "string" ? data.detail : `Échec de ${etape} (HTTP ${response.status}).`);
-          erreur.status = response.status;
-          throw erreur;
-        }
-        return data;
-      } catch (erreur) {
-        derniereErreur = erreur;
-        const statut = Number(erreur?.status || 0);
-        const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
-        if (!temporaire || tentative === delais.length) break;
-        await new Promise(resolve => window.setTimeout(resolve, delais[tentative]));
-      }
-    }
-    throw derniereErreur || new Error(`Échec de ${etape}.`);
-  };
-
-  const signature = await demanderJson(`${GRIND_URL}/api/media/upload/signature`, {
+  const signature = await posterDiscussionAvecReprise(`${GRIND_URL}/api/media/upload/signature`, {
     session_token: sessionToken, file_name: nom, file_size: fichier.size, content_type: mime,
+    usage: "discussion",
   }, "la signature du vocal");
   let uploadUrl;
   try { uploadUrl = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
   if (uploadUrl.protocol !== "https:" || uploadUrl.hostname !== "api.cloudinary.com"
       || !/\/video\/upload$/.test(uploadUrl.pathname) || signature.resource_type !== "video"
-      || signature.media_type !== "audio" || !signature.api_key || !signature.signature) {
+      || signature.media_type !== "audio" || signature.usage !== "discussion"
+      || !signature.api_key || !signature.signature) {
     throw new Error("Le serveur GRIND a renvoyé une destination vocale invalide.");
   }
 
@@ -105,16 +114,101 @@ async function uploaderVocalDiscussionMedia(sessionToken, fichier, onProgress = 
   });
 
   onProgress?.(99);
-  const confirmation = await demanderJson(`${GRIND_URL}/api/media/upload/confirm`, {
+  const confirmation = await posterDiscussionAvecReprise(`${GRIND_URL}/api/media/upload/confirm`, {
     session_token: sessionToken, asset,
   }, "la confirmation du vocal");
-  if (!confirmation?.media_url || confirmation.media_type !== "audio") {
+  if (!confirmation?.media_url || confirmation.media_type !== "audio" || confirmation.usage !== "discussion") {
     throw new Error("Le serveur GRIND n'a pas confirmé ce message vocal.");
   }
   onProgress?.(100);
   return {
     url: confirmation.media_url, type: "audio", nom, mime,
     taille: Number(asset.bytes) || fichier.size,
+  };
+}
+
+async function uploaderDocumentPriveDiscussion(sessionToken, fichier, onProgress = null) {
+  if (!sessionToken || !fichier) throw new Error("Session ou document manquant.");
+  const nomOriginal = String(fichier.name || "document").replace(/\\/g, "/").split("/").pop().slice(0, 160);
+  const mimeDeclare = String(fichier.type || "").split(";", 1)[0].trim().toLowerCase();
+  const extensionNom = nomOriginal.includes(".") ? nomOriginal.split(".").pop().toLowerCase() : "";
+  const extensionMime = mimeDeclare === "application/pdf" ? "pdf"
+    : mimeDeclare === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx" : "";
+  const extension = ["pdf", "docx"].includes(extensionNom) ? extensionNom : extensionMime;
+  const mimeParExtension = {
+    pdf: "application/pdf",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+  const mime = mimeParExtension[extension];
+  if (!mime || (mimeDeclare && mimeDeclare !== mime && mimeDeclare !== "application/octet-stream")) {
+    throw new Error("Seuls les documents PDF et DOCX valides sont acceptés.");
+  }
+  if (fichier.size <= 0 || fichier.size > 15 * 1024 * 1024) {
+    throw new Error("Le document doit être non vide et ne pas dépasser 15 Mo.");
+  }
+  const nom = /\.(pdf|docx)$/i.test(nomOriginal) ? nomOriginal : `${nomOriginal}.${extension}`;
+  const fichierNormalise = new File([fichier], nom, {
+    type: mime, lastModified: Number(fichier.lastModified) || Date.now(),
+  });
+
+  const signature = await posterDiscussionAvecReprise(`${GRIND_URL}/api/media/upload/signature`, {
+    session_token: sessionToken, file_name: nom, file_size: fichierNormalise.size,
+    content_type: mime, usage: "discussion",
+  }, "la signature du document privé");
+  let destination;
+  try { destination = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
+  if (destination.protocol !== "https:" || destination.hostname !== "api.cloudinary.com"
+      || !destination.pathname.endsWith("/raw/upload") || signature.resource_type !== "raw"
+      || signature.media_type !== "document" || signature.usage !== "discussion"
+      || !signature.api_key || !signature.signature || !signature.timestamp) {
+    throw new Error("Le serveur GRIND a renvoyé une destination de document invalide.");
+  }
+
+  const asset = await new Promise((resolve, reject) => {
+    const formulaire = new FormData();
+    formulaire.append("file", fichierNormalise, nom);
+    formulaire.append("api_key", signature.api_key);
+    formulaire.append("timestamp", String(signature.timestamp));
+    formulaire.append("signature", signature.signature);
+    Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", signature.upload_url, true);
+    xhr.timeout = 120000;
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress?.(Math.min(98, Math.round(event.loaded / event.total * 98)));
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const erreur = new Error(data.error?.message || `Cloudinary a refusé le document (HTTP ${xhr.status}).`);
+        erreur.status = xhr.status;
+        reject(erreur);
+        return;
+      }
+      if (!data.secure_url || !data.public_id || !data.version || !data.signature || data.resource_type !== "raw") {
+        reject(new Error("Cloudinary n'a pas confirmé un document exploitable."));
+        return;
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => { const erreur = new Error("Connexion interrompue pendant le transfert du document."); erreur.status = 0; reject(erreur); };
+    xhr.ontimeout = () => { const erreur = new Error("Le transfert du document a dépassé le délai autorisé."); erreur.status = 408; reject(erreur); };
+    xhr.onabort = () => { const erreur = new Error("Transfert du document annulé."); erreur.status = 0; reject(erreur); };
+    xhr.send(formulaire);
+  });
+
+  onProgress?.(99);
+  const confirmation = await posterDiscussionAvecReprise(`${GRIND_URL}/api/media/upload/confirm`, {
+    session_token: sessionToken, asset, usage: "discussion",
+  }, "la confirmation du document privé");
+  if (!confirmation?.media_url || confirmation.media_type !== "document" || confirmation.usage !== "discussion") {
+    throw new Error("Le serveur GRIND n'a pas confirmé ce document privé.");
+  }
+  onProgress?.(100);
+  return {
+    document_url: confirmation.media_url, document_name: nom, document_type: mime,
+    document_size: Number(asset.bytes) || fichierNormalise.size,
   };
 }
 
@@ -162,6 +256,176 @@ function dureeLisible(secondes) {
 
 const NOMBRE_BARRES_VOCAL = 30;
 let lecteurVocalActif = null;
+
+// Le contrôle /api/health peut échouer pendant le réveil du serveur alors que
+// le téléphone a Internet. Dans la messagerie, on tente donc les requêtes tant
+// que le navigateur n'a pas signalé une vraie coupure réseau.
+function reseauInternetDisponible() {
+  return typeof navigator === "undefined" || navigator.onLine !== false;
+}
+
+// Publications texte ordonnées par discussion : l'UI est optimiste, mais le
+// serveur reçoit les POST dans le même ordre que la saisie de l'utilisateur.
+const chainPublicationDiscussion = new Map();
+function publierDiscussionDansOrdre(cle, operation) {
+  const precedent = chainPublicationDiscussion.get(cle) || Promise.resolve();
+  const courant = precedent.catch(() => {}).then(operation);
+  chainPublicationDiscussion.set(cle, courant);
+  courant.finally(() => {
+    if (chainPublicationDiscussion.get(cle) === courant) chainPublicationDiscussion.delete(cle);
+  }).catch(() => {});
+  return courant;
+}
+
+// Limite les transferts Cloudinary simultanés à trois, sans bloquer le compositeur.
+let uploadsDiscussionActifs = 0;
+const attenteUploadsDiscussion = [];
+async function avecSlotUploadDiscussion(operation) {
+  if (uploadsDiscussionActifs >= 3) {
+    await new Promise(resolve => attenteUploadsDiscussion.push(resolve));
+  }
+  uploadsDiscussionActifs += 1;
+  try { return await operation(); }
+  finally {
+    uploadsDiscussionActifs = Math.max(0, uploadsDiscussionActifs - 1);
+    const reveiller = attenteUploadsDiscussion.shift();
+    if (reveiller) reveiller();
+  }
+}
+
+async function uploaderMediaPriveDiscussion(sessionToken, fichier, decoupeVideo = null, onProgress = null) {
+  if (!sessionToken || !fichier) throw new Error("Session ou fichier manquant.");
+  const nomOriginal = String(fichier.name || "media").replace(/\\/g, "/").split("/").pop().slice(0, 160);
+  const extensionOriginale = nomOriginal.includes(".") ? nomOriginal.split(".").pop().toLowerCase() : "";
+  const mimeDeclare = String(fichier.type || "").split(";", 1)[0].trim().toLowerCase();
+  const extensionsParMime = {
+    "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp",
+    "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm",
+  };
+  const extensionsAutorisees = new Set(["jpg", "jpeg", "png", "webp", "mp4", "mov", "webm"]);
+  const extension = extensionsAutorisees.has(extensionOriginale)
+    ? extensionOriginale : extensionsParMime[mimeDeclare] || "";
+  if (!extension) throw new Error("Format d'image ou de vidéo non pris en charge.");
+  const baseNom = nomOriginal.replace(/\.[^.]+$/, "") || "media";
+  const nom = extensionsAutorisees.has(extensionOriginale) ? nomOriginal : `${baseNom}.${extension}`;
+  const estVideo = ["mp4", "mov", "webm"].includes(extension);
+  const limite = estVideo ? 300 : 25;
+  if (fichier.size <= 0 || fichier.size > limite * 1024 * 1024) {
+    throw new Error(`Le fichier doit être non vide et ne pas dépasser ${limite} Mo.`);
+  }
+  const typeAttendu = ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+    mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm" })[extension];
+  const mime = !mimeDeclare || mimeDeclare === "application/octet-stream" || mimeDeclare === "image/jpg"
+    ? typeAttendu : mimeDeclare;
+  if (mime !== typeAttendu) throw new Error("Le type du fichier ne correspond pas à son extension.");
+  if (estVideo && (!decoupeVideo || !Number.isFinite(Number(decoupeVideo.debut)) || !Number.isFinite(Number(decoupeVideo.fin)))) {
+    throw new Error("Les informations de durée de la vidéo sont invalides.");
+  }
+
+  const signature = await posterDiscussionAvecReprise(`${GRIND_URL}/api/media/upload/signature`, {
+    session_token: sessionToken, file_name: nom, file_size: fichier.size, content_type: mime,
+    debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin, usage: "discussion",
+  }, "la signature du média privé");
+  let destination;
+  try { destination = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
+  const resourceType = estVideo ? "video" : "image";
+  if (destination.protocol !== "https:" || destination.hostname !== "api.cloudinary.com"
+      || !destination.pathname.endsWith(`/${resourceType}/upload`)
+      || signature.resource_type !== resourceType || signature.usage !== "discussion"
+      || !signature.api_key || !signature.signature || !signature.timestamp) {
+    throw new Error("Le serveur GRIND a renvoyé une destination de transfert invalide.");
+  }
+
+  const transmettre = (blob, debut = null, fin = null) => new Promise((resolve, reject) => {
+    const formulaire = new FormData();
+    formulaire.append("file", blob, nom);
+    formulaire.append("api_key", signature.api_key);
+    formulaire.append("timestamp", String(signature.timestamp));
+    formulaire.append("signature", signature.signature);
+    Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", signature.upload_url, true);
+    xhr.timeout = 15 * 60 * 1000;
+    if (debut !== null && fin !== null) {
+      xhr.setRequestHeader("Content-Range", `bytes ${debut}-${fin}/${fichier.size}`);
+    }
+    xhr.upload.onprogress = event => {
+      if (!event.lengthComputable) return;
+      const charge = debut === null ? event.loaded : debut + Math.min(event.loaded, event.total);
+      const pourcentage = charge / fichier.size * 98;
+      onProgress?.(Math.max(0, Math.min(98, Math.round(pourcentage))));
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const erreur = new Error(data.error?.message || `Cloudinary a refusé le fichier (HTTP ${xhr.status}).`);
+        erreur.status = xhr.status;
+        reject(erreur);
+      } else resolve(data);
+    };
+    xhr.onerror = () => { const e = new Error("Connexion interrompue pendant le transfert du média."); e.status = 0; reject(e); };
+    xhr.ontimeout = () => { const e = new Error("Le transfert du média a dépassé le délai autorisé."); e.status = 408; reject(e); };
+    xhr.onabort = () => { const e = new Error("Transfert du média annulé."); e.status = 0; reject(e); };
+    xhr.send(formulaire);
+  });
+
+  let asset;
+  if (estVideo && fichier.size > 90 * 1024 * 1024) {
+    const chunkSize = Number(signature.taille_chunk_octets || 20 * 1024 * 1024);
+    if (chunkSize < 5 * 1024 * 1024) throw new Error("Taille de segment Cloudinary invalide.");
+    const uploadId = globalThis.crypto?.randomUUID?.() || `grind-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    for (let debut = 0; debut < fichier.size; debut += chunkSize) {
+      const finExclusive = Math.min(debut + chunkSize, fichier.size);
+      const resultat = await new Promise((resolve, reject) => {
+        const formulaire = new FormData();
+        const morceau = fichier.slice(debut, finExclusive);
+        formulaire.append("file", morceau, nom);
+        formulaire.append("api_key", signature.api_key);
+        formulaire.append("timestamp", String(signature.timestamp));
+        formulaire.append("signature", signature.signature);
+        Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", signature.upload_url, true);
+        xhr.timeout = 15 * 60 * 1000;
+        xhr.setRequestHeader("Content-Range", `bytes ${debut}-${finExclusive - 1}/${fichier.size}`);
+        xhr.setRequestHeader("X-Unique-Upload-Id", uploadId);
+        xhr.upload.onprogress = event => {
+          if (event.lengthComputable) onProgress?.(Math.min(98, Math.round((debut + event.loaded) / fichier.size * 98)));
+        };
+        xhr.onload = () => {
+          let d = {}; try { d = JSON.parse(xhr.responseText || "{}"); } catch {}
+          if (xhr.status < 200 || xhr.status >= 300) reject(new Error(d.error?.message || `Cloudinary a refusé le segment (HTTP ${xhr.status}).`));
+          else resolve(d);
+        };
+        xhr.onerror = () => reject(new Error("Connexion interrompue pendant le transfert vidéo."));
+        xhr.ontimeout = () => reject(new Error("Le transfert vidéo a dépassé le délai autorisé."));
+        xhr.send(formulaire);
+      });
+      const dernier = finExclusive === fichier.size;
+      if (!dernier && resultat.done !== false) throw new Error("Cloudinary n'a pas confirmé le segment vidéo.");
+      if (dernier) {
+        if (resultat.done !== true) throw new Error("Cloudinary n'a pas confirmé la fin de la vidéo.");
+        asset = resultat;
+      }
+    }
+  } else {
+    asset = await transmettre(fichier);
+  }
+  if (!asset?.secure_url || !asset?.public_id || !asset?.version || !asset?.signature) {
+    throw new Error("Le stockage n'a pas confirmé la réception complète du média.");
+  }
+  onProgress?.(99);
+  const confirmation = await posterDiscussionAvecReprise(`${GRIND_URL}/api/media/upload/confirm`, {
+    session_token: sessionToken, asset,
+    debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin,
+  }, "la confirmation du média privé");
+  if (!confirmation?.media_url || confirmation.usage !== "discussion") {
+    throw new Error("Le serveur GRIND n'a pas confirmé le média privé.");
+  }
+  onProgress?.(100);
+  return confirmation;
+}
 
 function extensionPiece(message) {
   const piece = message?.piece || {};
@@ -316,12 +580,12 @@ function VideoDiscussion({ src, poster, nom, messageId }) {
   );
 }
 
-function LecteurVocal({ src, id }) {
+function LecteurVocal({ src, id, dureeInitiale = 0 }) {
   const audioRef = useRef(null);
   const pisteRef = useRef(null);
   const [lecture, setLecture] = useState(false);
   const [courant, setCourant] = useState(0);
-  const [duree, setDuree] = useState(0);
+  const [duree, setDuree] = useState(() => Number.isFinite(Number(dureeInitiale)) ? Math.max(0, Number(dureeInitiale)) : 0);
   const [erreur, setErreur] = useState(false);
   const progression = duree > 0 ? Math.min(100, Math.max(0, (courant / duree) * 100)) : 0;
   const hauteurs = Array.from({ length: NOMBRE_BARRES_VOCAL }, (_, index) => {
@@ -331,13 +595,15 @@ function LecteurVocal({ src, id }) {
 
   useEffect(() => {
     const audio = audioRef.current;
-    setLecture(false); setCourant(0); setDuree(0); setErreur(false);
+    setLecture(false); setCourant(0);
+    setDuree(Number.isFinite(Number(dureeInitiale)) ? Math.max(0, Number(dureeInitiale)) : 0);
+    setErreur(false);
     if (audio) { audio.pause(); audio.currentTime = 0; audio.loop = false; }
     return () => {
       if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load(); }
       if (lecteurVocalActif === audio) lecteurVocalActif = null;
     };
-  }, [src]);
+  }, [src, dureeInitiale]);
 
   // timeupdate est trop peu fréquent et irrégulier dans certains WebView Android.
   // Le RAF suit currentTime pendant la lecture et s'arrête dès la pause.
@@ -375,8 +641,16 @@ function LecteurVocal({ src, id }) {
   }
 
   function actualiserDuree(audio) {
-    const value = Number(audio?.duration);
-    if (Number.isFinite(value) && value > 0) setDuree(value);
+    let value = Number(audio?.duration);
+    if (!Number.isFinite(value) || value <= 0) {
+      // Certains WebView Android exposent duration=Infinity pour les WebM
+      // produits par MediaRecorder ; la dernière plage seekable reste exploitable.
+      try {
+        const plages = audio?.seekable;
+        if (plages?.length) value = Number(plages.end(plages.length - 1));
+      } catch { value = 0; }
+    }
+    if (Number.isFinite(value) && value > 0) setDuree(precedente => Math.max(precedente, value));
   }
 
   function chercherPourcentage(pourcentage) {
@@ -423,7 +697,11 @@ function LecteurVocal({ src, id }) {
       <audio ref={audioRef} src={src || undefined} preload="metadata" loop={false}
         onLoadedMetadata={event => actualiserDuree(event.currentTarget)}
         onDurationChange={event => actualiserDuree(event.currentTarget)}
-        onTimeUpdate={event => { const value = Number(event.currentTarget.currentTime); if (Number.isFinite(value)) setCourant(value); }}
+        onTimeUpdate={event => {
+          actualiserDuree(event.currentTarget);
+          const value = Number(event.currentTarget.currentTime);
+          if (Number.isFinite(value)) setCourant(value);
+        }}
         onEnded={terminerLecture}
         onPause={event => { setLecture(false); if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null; }}
         onPlay={() => { setLecture(true); setErreur(false); }}
@@ -471,6 +749,58 @@ function lireFileAttenteDiscussion(classeId, username) {
   } catch { return []; }
 }
 
+function persisterMessageDansOutbox(classeId, username, element) {
+  try {
+    const cle = cleFileAttenteDiscussion(classeId, username);
+    const precedente = lireFileAttenteDiscussion(classeId, username);
+    const fusionnee = [
+      ...precedente.filter(item => item.client_message_id !== element.client_message_id),
+      { ...element, failed: false },
+    ].slice(-20);
+    localStorage.setItem(cle, JSON.stringify(fusionnee));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function envoyerMessageDiscussionAvecReprise(sessionToken, classeId, payload) {
+  const delais = [500, 1200, 2400];
+  let derniereErreur = null;
+  for (let tentative = 0; tentative <= delais.length; tentative += 1) {
+    let controleur = null;
+    let timer = null;
+    try {
+      controleur = new AbortController();
+      timer = window.setTimeout(() => controleur.abort(), 12000);
+      const response = await fetch(`${GRIND_URL}/api/classes/${classeId}/discussion/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_token: sessionToken, ...payload }),
+        signal: controleur.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const detail = data.detail;
+        const erreur = new Error(typeof detail === "string" ? detail : detail?.message || "Le message n'a pas pu être publié.");
+        erreur.status = response.status;
+        throw erreur;
+      }
+      return data;
+    } catch (erreur) {
+      derniereErreur = erreur;
+      const statut = Number(erreur?.status || (erreur?.name === "AbortError" ? 408 : 0));
+      derniereErreur.status = statut;
+      const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+      if (!temporaire || tentative === delais.length) break;
+      await new Promise(resolve => window.setTimeout(resolve, delais[tentative]));
+    } finally {
+      if (timer !== null) window.clearTimeout(timer);
+    }
+  }
+  throw derniereErreur || new Error("Le message n'a pas pu être confirmé par GRIND.");
+}
+
 function nouveauClientMessageId() {
   return globalThis.crypto?.randomUUID?.()
     || `grind-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
@@ -489,9 +819,23 @@ function ordonnerMessagesDiscussion(messages) {
 }
 
 function fusionnerMessageDiscussion(messages, entrant) {
+  const precedent = (messages || []).find(message => entrant.client_message_id
+    && message.client_message_id === entrant.client_message_id);
   const suivant = (messages || []).filter(message => message.id !== entrant.id
     && !(entrant.client_message_id && message.client_message_id === entrant.client_message_id));
-  suivant.push(entrant);
+  const fusion = precedent ? {
+    ...precedent,
+    ...entrant,
+    // Garde la source locale jusqu'au démontage : le ticket privé peut arriver
+    // après le POST et ne doit pas faire clignoter l'image ni réinitialiser l'audio.
+    preview_url: precedent.preview_url || entrant.preview_url || null,
+    piece: precedent.piece && entrant.piece
+      ? { ...entrant.piece, duree: Number(entrant.piece.duree) > 0 ? entrant.piece.duree : precedent.piece.duree }
+      : entrant.piece || precedent.piece,
+    media_envoi: Number(entrant.id) > 0 ? false : Boolean(precedent.media_envoi || entrant.media_envoi),
+    optimistic: Number(entrant.id) > 0 ? false : Boolean(precedent.optimistic || entrant.optimistic),
+  } : entrant;
+  suivant.push(fusion);
   return ordonnerMessagesDiscussion(suivant);
 }
 
@@ -547,6 +891,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const pendingMessagePieceRef = useRef(null);
   const pendingMessagePayloadRef = useRef(null);
   const pendingVocalIdRef = useRef(null);
+  const vocalPublicationEnCoursRef = useRef(false);
   const fileAttenteEnCoursRef = useRef(false);
   const tentativesFileAttenteRef = useRef(new Map());
   const prochaineTentativeFileAttenteRef = useRef(0);
@@ -598,12 +943,13 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     mediasLocauxRef.current = mediasLocaux;
   }, [mediasLocaux]);
 
-  // Libère l'aperçu dès que le serveur confirme le message (HTTP ou WebSocket).
   useEffect(() => {
-    const confirmes = new Set(messages.filter(message => Number(message.id) > 0 && message.client_message_id)
-      .map(message => message.client_message_id));
+    const parClientId = new Map(messages
+      .filter(message => message?.client_message_id)
+      .map(message => [message.client_message_id, message]));
     for (const [clientId, url] of apercusMediaRef.current.entries()) {
-      if (confirmes.has(clientId)) {
+      const message = parClientId.get(clientId);
+      if (!message || message.supprime_pour_tous) {
         URL.revokeObjectURL(url);
         apercusMediaRef.current.delete(clientId);
       }
@@ -613,7 +959,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   // Les médias HTML reçoivent des tickets limités au fichier et à une durée courte.
   // Le jeton de session principal reste dans les requêtes POST authentifiées.
   useEffect(() => {
-    if (!discussion?.id || !sessionToken || !messages.length || !estGrindEnLigne()) return undefined;
+    if (!discussion?.id || !sessionToken || !messages.length || !reseauInternetDisponible()) return undefined;
     let actif = true;
     const obtenirIdsManquants = () => messages
       .filter(m => m?.piece && !m.supprime_pour_tous)
@@ -701,7 +1047,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const restreint = discussion?.restreint === true;
 
   const charger = useCallback(async () => {
-    if (!estGrindEnLigne()) {
+    if (!reseauInternetDisponible()) {
       const cache = lireCacheDiscussion(classe.classe_id, monUsername);
       setSocketEtat("hors ligne");
       if (!cache?.discussion) {
@@ -709,7 +1055,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         erreur.code = "CACHE_ABSENT";
         throw erreur;
       }
-      setDiscussion(cache.discussion);
+      // Les tickets photo sont des liens porteurs temporaires : ne jamais
+      // réutiliser ni persister un ticket d'une ancienne session hors ligne.
+      setDiscussion({ ...cache.discussion, photo_url: null });
       setMembres(cache.membres || []);
       setMessages(cache.messages || []);
       messagesActuels.current = cache.messages || [];
@@ -717,11 +1065,34 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       return cache;
     }
     const data = await obtenirDiscussionClasse(sessionToken, classe.classe_id);
+    const cacheLocal = lireCacheDiscussion(classe.classe_id, monUsername);
+    const dureesLocales = new Map((cacheLocal?.messages || [])
+      .filter(message => message.client_message_id && Number(message.piece?.duree) > 0)
+      .map(message => [message.client_message_id, Number(message.piece.duree)]));
+    const messagesServeur = (data.messages || []).map(message => {
+      const dureeLocale = message.client_message_id ? dureesLocales.get(message.client_message_id) : null;
+      return dureeLocale && message.piece?.type === "audio"
+        ? { ...message, piece: { ...message.piece, duree: dureeLocale } } : message;
+    });
+    const idsServeur = new Set(messagesServeur.map(message => message.client_message_id).filter(Boolean));
+    // Une actualisation réseau ne doit jamais effacer un transfert local encore
+    // en cours. Le message sera rapproché par client_message_id après le commit.
+    const messagesOptimistes = messagesActuels.current.filter(message =>
+      (message.optimistic || message.media_envoi)
+      && message.client_message_id && !idsServeur.has(message.client_message_id)
+    );
+    const messagesCharges = ordonnerMessagesDiscussion([...messagesServeur, ...messagesOptimistes]);
     setDiscussion(data.discussion);
     setMembres(data.membres || []);
-    setMessages(data.messages || []);
-    messagesActuels.current = data.messages || [];
-    try { localStorage.setItem(cacheDiscussionKey, JSON.stringify({ discussion: data.discussion, membres: data.membres || [], messages: data.messages || [] })); } catch {}
+    setMessages(messagesCharges);
+    messagesActuels.current = messagesCharges;
+    try {
+      const discussionCacheable = { ...data.discussion, photo_url: null };
+      localStorage.setItem(cacheDiscussionKey, JSON.stringify({
+        discussion: discussionCacheable, membres: data.membres || [],
+        messages: messagesServeur.filter(message => !message.preview_url && !message.media_envoi).slice(-100),
+      }));
+    } catch {}
     setPlusAnciens((data.messages || []).length >= 50);
     setMentionsNonLues(data.discussion?.mentions_non_lues || 0);
     initialScroll.current = false;
@@ -756,10 +1127,15 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     if (!discussion && !membres.length && !messages.length) return;
     try {
       const messagesPersistables = messages
-        .filter(message => !message.preview_url && !message.media_envoi)
-        .slice(-100);
+        .filter(message => Number(message.id) > 0 && !message.media_envoi)
+        .slice(-100)
+        .map(message => {
+          const { preview_url, ...messageSansApercu } = message;
+          return messageSansApercu;
+        });
+      const discussionCacheable = discussion ? { ...discussion, photo_url: null } : discussion;
       localStorage.setItem(cacheDiscussionKey, JSON.stringify({
-        discussion, membres, messages: messagesPersistables,
+        discussion: discussionCacheable, membres, messages: messagesPersistables,
       }));
     } catch {}
   }, [discussion, membres, messages, cacheDiscussionKey]);
@@ -831,7 +1207,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   // Chaque élément conserve son client_message_id : un retry après réponse perdue
   // retrouve le message côté serveur au lieu d'en créer un second.
   useEffect(() => {
-    if (!discussion?.id || !sessionToken || !messagesEnAttente.length || !estGrindEnLigne()) return undefined;
+    if (!discussion?.id || !sessionToken || !messagesEnAttente.length || !reseauInternetDisponible()) return undefined;
     const attenteRestante = prochaineTentativeFileAttenteRef.current - Date.now();
     if (attenteRestante > 0) {
       const timer = window.setTimeout(() => {
@@ -850,7 +1226,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         for (const element of messagesEnAttente) {
           if (!actif || element.failed) continue;
           try {
-            const resultat = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+            const resultat = await envoyerMessageDiscussionAvecReprise(sessionToken, classe.classe_id, {
               contenu: element.contenu,
               reply_to_id: element.reply_to_id || null,
               style_texte: element.style_texte || "normal",
@@ -978,7 +1354,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         clearTimeout(presenceTimeouts.current[data.username]);
         if (data.typing) presenceTimeouts.current[data.username] = setTimeout(() => setTyping(prev => prev.filter(x => x !== data.username)), 2600);
       } else if (data.type === "group_update") {
-        setDiscussion(prev => prev ? { ...prev, photo_url: data.photo_url } : prev);
+        obtenirDiscussionClasse(sessionToken, classe.classe_id).then(resultat => {
+          if (actif) setDiscussion(resultat.discussion);
+        }).catch(() => {});
       } else if (data.type === "group_name_update") {
         setDiscussion(prev => prev ? { ...prev, nom: data.nom } : prev);
       } else if (data.type === "invitation_changed") {
@@ -1003,7 +1381,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     const connecter = () => {
       if (!actif) return;
       if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
-      if (!estGrindEnLigne()) { setSocketEtat("hors ligne"); retryTimer = window.setTimeout(connecter, 5000); return; }
+      if (!reseauInternetDisponible()) { setSocketEtat("hors ligne"); retryTimer = window.setTimeout(connecter, 5000); return; }
       try {
         socket = new WebSocket(urlDiscussion(sessionToken, discussion.id));
         socketRef.current = socket;
@@ -1025,12 +1403,12 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
             window.setTimeout(() => { if (actif) onQuitter?.(); }, 800);
             return;
           }
-          if (!estGrindEnLigne()) { setSocketEtat("hors ligne"); retryTimer = window.setTimeout(connecter, 5000); }
+          if (!reseauInternetDisponible()) { setSocketEtat("hors ligne"); retryTimer = window.setTimeout(connecter, 5000); }
           else { setSocketEtat("reconnexion"); retryTimer = window.setTimeout(connecter, 2500); }
         };
       } catch {
-        setSocketEtat(!estGrindEnLigne() ? "hors ligne" : "reconnexion");
-        retryTimer = window.setTimeout(connecter, !estGrindEnLigne() ? 5000 : 3500);
+        setSocketEtat(!reseauInternetDisponible() ? "hors ligne" : "reconnexion");
+        retryTimer = window.setTimeout(connecter, !reseauInternetDisponible() ? 5000 : 3500);
       }
     };
     const repriseReseau = () => {
@@ -1059,7 +1437,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     // La synchronisation REST continue à faible fréquence : elle couvre la reprise
     // après veille mobile et les déploiements exécutés avec plusieurs processus.
     const actualiserMessages = async () => {
-      if (!actif || !estGrindEnLigne()) return;
+      if (!actif || !reseauInternetDisponible()) return;
       const dernierId = messagesActuels.current.filter(message => Number(message.id) > 0).at(-1)?.id || 0;
       try {
         const [data, mentions] = await Promise.all([
@@ -1095,10 +1473,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   useEffect(() => {
     messagesActuels.current = messages;
-    if (discussion) {
-      try { localStorage.setItem(cacheDiscussionKey, JSON.stringify({ discussion, membres, messages: messages.slice(-100) })); } catch {}
-    }
-  }, [messages, discussion, membres, cacheDiscussionKey]);
+  }, [messages]);
 
   function enregistrerMediaLocal(messageId, resultat) {
     if (!resultat?.path) return;
@@ -1142,14 +1517,14 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     if (message?.preview_url) return message.preview_url;
     const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
     if (locale?.path) return sourceLocaleMedia(locale.path);
-    return estGrindEnLigne() ? ticketsMedia[message.id]?.url || null : null;
+    return reseauInternetDisponible() ? ticketsMedia[message.id]?.url || null : null;
   }
 
   function sourcePosterMessage(message) {
     const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
     if (locale?.posterPath) return sourceLocaleMedia(locale.posterPath);
     const ticket = ticketsMedia[message.id];
-    if (!estGrindEnLigne()) return null;
+    if (!reseauInternetDisponible()) return null;
     return ticket?.poster_url || (ticket?.url ? `${ticket.url}${ticket.url.includes("?") ? "&" : "?"}poster=1` : null);
   }
 
@@ -1162,7 +1537,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     try {
       const cache = await chercherMediaTemporaire(fileName, "image/jpeg");
       if (cache?.path) { enregistrerPosterLocal(messageId, cache); return cache; }
-      if (!estGrindEnLigne()) return null;
+      if (!reseauInternetDisponible()) return null;
       const resultat = await mettreEnCacheMedia({
         url: ticketsMedia[messageId]?.poster_url || await obtenirUrlPiece(message).then(url => `${url}${url.includes("?") ? "&" : "?"}poster=1`),
         fileName,
@@ -1205,7 +1580,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           }
           return cache;
         }
-        if (!estGrindEnLigne()) return null;
+        if (!reseauInternetDisponible()) return null;
         if (typePiece === "video") await assurerPosterTemporaire(message);
         const requestId = `cache-${classe.classe_id}-${messageId}`;
         requetesMediaRef.current.set(requestId, messageId);
@@ -1252,7 +1627,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         if (!saved?.path) {
           const cache = await chercherMediaTemporaire(fileName, mimeType);
           if (cache?.path) saved = await enregistrerMediaCacheAndroid(fileName, savedName, mimeType);
-          else if (estGrindEnLigne()) {
+          else if (reseauInternetDisponible()) {
             saved = await enregistrerMediaAndroid({
               url: await obtenirUrlPiece(message, true),
               fileName: savedName, mimeType, requestId, maxBytes: 15 * 1024 * 1024,
@@ -1264,7 +1639,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         enregistrerMediaLocal(messageId, saved);
         await ouvrirFichierAndroid(saved.path, mimeType);
       } else {
-        if (!estGrindEnLigne()) throw new Error("Ce document n'est pas disponible hors ligne.");
+        if (!reseauInternetDisponible()) throw new Error("Ce document n'est pas disponible hors ligne.");
         await telechargerDansNavigateur(await obtenirUrlPiece(message, true), message.piece.nom || savedName,
           pct => definirProgressionMedia(messageId, pct), { size: Number(message.piece.taille || 0), maxBlobBytes: 32 * 1024 * 1024 });
       }
@@ -1292,7 +1667,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           const cache = await chercherMediaTemporaire(nomFichierTemporaire(monUsername, classe.classe_id, message), mimeType);
           if (cache?.path) {
             saved = await enregistrerMediaCacheAndroid(cache.fileName || nomFichierTemporaire(monUsername, classe.classe_id, message), savedName, mimeType);
-          } else if (estGrindEnLigne()) {
+          } else if (reseauInternetDisponible()) {
             saved = await enregistrerMediaAndroid({
               url: await obtenirUrlPiece(message, true),
               fileName: savedName, mimeType, requestId, maxBytes: 300 * 1024 * 1024,
@@ -1304,7 +1679,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         enregistrerMediaLocal(messageId, saved);
         await ouvrirFichierAndroid(saved.path, mimeType);
       } else {
-        if (!estGrindEnLigne()) throw new Error("Cette vidéo n'est pas disponible hors ligne.");
+        if (!reseauInternetDisponible()) throw new Error("Cette vidéo n'est pas disponible hors ligne.");
         await telechargerDansNavigateur(await obtenirUrlPiece(message, true), message.piece.nom || savedName,
           pct => definirProgressionMedia(messageId, pct), { size: Number(message.piece.taille || 0), maxBlobBytes: 32 * 1024 * 1024 });
       }
@@ -1361,7 +1736,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     const synchroniserLecture = async () => {
       const cible = Number(lectureEnAttenteRef.current || 0);
       if (!actif || lectureEnCoursRef.current || cible <= dernierMessageLuRef.current
-          || !estGrindEnLigne() || document.visibilityState !== "visible") return;
+          || !reseauInternetDisponible() || document.visibilityState !== "visible") return;
       lectureEnCoursRef.current = true;
       let confirme = false;
       try {
@@ -1394,7 +1769,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     };
 
     observer = new IntersectionObserver(entries => {
-      if (!actif || document.visibilityState !== "visible" || !estGrindEnLigne()) return;
+      if (!actif || document.visibilityState !== "visible" || !reseauInternetDisponible()) return;
       let dernierVisible = 0;
       for (const entry of entries) {
         if (!entry.isIntersecting || entry.intersectionRatio < 0.35) continue;
@@ -1413,7 +1788,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     mutations?.observe(root, { childList: true, subtree: true });
 
     const reobserverMessagesVisibles = () => {
-      if (!actif || document.visibilityState !== "visible" || !estGrindEnLigne()) return;
+      if (!actif || document.visibilityState !== "visible" || !reseauInternetDisponible()) return;
       observer.disconnect();
       observerMessages();
     };
@@ -1564,7 +1939,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function chargerPlusAnciens() {
-    if (!estGrindEnLigne()) {
+    if (!reseauInternetDisponible()) {
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Les anciens messages non enregistrés sur cet appareil nécessitent Internet." }));
       return;
     }
@@ -1626,8 +2001,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         style_texte: "normal", created_at: createdAt, optimistic: true,
         supprime_pour_tous: false, lu_par_au_moins_un: false,
       };
+      messageOptimiste.media_envoi = true;
       setMessages(prev => fusionnerMessageDiscussion(prev, messageOptimiste));
-      setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), nouvelElement].slice(0, 20));
       pendingMessageIdRef.current = null;
       pendingMessagePayloadRef.current = null;
       setTexte("");
@@ -1637,13 +2012,54 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       if (textareaRef.current) textareaRef.current.style.height = "auto";
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "typing", typing: false }));
+
+      if (!reseauInternetDisponible()) {
+        persisterMessageDansOutbox(classe.classe_id, monUsername, nouvelElement);
+        setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), nouvelElement].slice(0, 20));
+      } else {
+        const cleOrdre = `${classe.classe_id}:${monUsername}`;
+        publierDiscussionDansOrdre(cleOrdre, async () => {
+          // Si un message antérieur a échoué temporairement, les suivants
+          // rejoignent la même outbox au lieu de dépasser son ordre SQL.
+          const attenteAnterieure = lireFileAttenteDiscussion(classe.classe_id, monUsername);
+          if (attenteAnterieure.length) {
+            persisterMessageDansOutbox(classe.classe_id, monUsername, nouvelElement);
+            if (composantActifRef.current) {
+              setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), nouvelElement].slice(0, 20));
+            }
+            return;
+          }
+          try {
+            const resultat = await envoyerMessageDiscussionAvecReprise(sessionToken, classe.classe_id, {
+              contenu, reply_to_id: replyToId, style_texte: "normal", piece: null,
+              client_message_id: clientMessageId,
+            });
+            if (composantActifRef.current) {
+              setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
+            }
+          } catch (erreur) {
+            const statut = Number(erreur?.status || 0);
+            const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+            if (temporaire) {
+              persisterMessageDansOutbox(classe.classe_id, monUsername, nouvelElement);
+              if (composantActifRef.current) {
+                setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), nouvelElement].slice(0, 20));
+              }
+            } else if (composantActifRef.current) {
+              setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
+                ? { ...message, media_envoi: false, send_error: erreur.message || "Envoi refusé" } : message));
+              setMessageErreur(erreur.message || "Le serveur a refusé le message.");
+            }
+          }
+        });
+      }
       return;
     }
 
     // Les pièces apparaissent immédiatement dans le fil. Le transfert réseau
     // démarre ensuite sans bloquer le compositeur ni les messages suivants.
     if (fichier && !messageEnEdition) {
-      if (!estGrindEnLigne()) {
+      if (!reseauInternetDisponible()) {
         window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer ce fichier. Il reste sélectionné." }));
         return;
       }
@@ -1651,8 +2067,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       const contenuLocal = texte.trim();
       const replyToId = reponse?.id || null;
       const ext = String(fichierLocal.name || "").split(".").pop().toLowerCase();
-      const estDocument = ["pdf", "docx"].includes(ext);
-      const estVideo = fichierLocal.type.startsWith("video/") || ["mp4", "mov", "webm"].includes(ext);
+      const mimeFichier = String(fichierLocal.type || "").split(";", 1)[0].trim().toLowerCase();
+      const estDocument = ["pdf", "docx"].includes(ext)
+        || mimeFichier === "application/pdf"
+        || mimeFichier === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const estVideo = mimeFichier.startsWith("video/") || ["mp4", "mov", "webm"].includes(ext);
       const typePiece = estDocument ? "document" : estVideo ? "video" : "image";
       const clientMessageId = nouveauClientMessageId();
       const previewUrl = typePiece === "image" || typePiece === "video" ? URL.createObjectURL(fichierLocal) : null;
@@ -1680,52 +2099,64 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         let piece = null;
         try {
           if (estDocument) {
-            const doc = await uploaderDocument(sessionToken, fichierLocal);
+            const doc = await avecSlotUploadDiscussion(() => uploaderDocumentPriveDiscussion(sessionToken, fichierLocal, valeur => {
+              if (composantActifRef.current) setProgressionsMedia(prev => ({ ...prev, [messageOptimiste.id]: valeur }));
+            }));
+            if (composantActifRef.current) setProgressionsMedia(prev => { const next = { ...prev }; delete next[messageOptimiste.id]; return next; });
             piece = { url: doc.document_url, type: "document", nom: doc.document_name || fichierLocal.name,
               mime: doc.document_type || fichierLocal.type, taille: fichierLocal.size };
           } else {
             const decoupe = estVideo ? await extraireDureeVideo(fichierLocal) : null;
-            const media = await uploaderMedia(sessionToken, fichierLocal, decoupe);
+            const media = await avecSlotUploadDiscussion(() => uploaderMediaPriveDiscussion(
+              sessionToken, fichierLocal, decoupe, valeur => {
+                if (composantActifRef.current) setProgressionsMedia(prev => ({ ...prev, [messageOptimiste.id]: valeur }));
+              }
+            ));
+            if (composantActifRef.current) setProgressionsMedia(prev => { const next = { ...prev }; delete next[messageOptimiste.id]; return next; });
             piece = { url: media.media_url, type: media.media_type || typePiece,
               nom: fichierLocal.name, mime: fichierLocal.type, taille: fichierLocal.size };
           }
-          const resultat = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+          const resultat = await envoyerMessageDiscussionAvecReprise(sessionToken, classe.classe_id, {
             contenu: contenuLocal, reply_to_id: replyToId, style_texte: "normal", piece,
             client_message_id: clientMessageId,
           });
-          const apercu = apercusMediaRef.current.get(clientMessageId);
-          if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
-          setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
+          if (composantActifRef.current) setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
         } catch (error) {
+          if (composantActifRef.current) setProgressionsMedia(prev => { const next = { ...prev }; delete next[messageOptimiste.id]; return next; });
           const statut = Number(error?.status || 0);
           const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
           if (piece && temporaire) {
             const element = { client_message_id: clientMessageId, contenu: contenuLocal,
               reply_to_id: replyToId, style_texte: "normal", piece,
               created_at: messageOptimiste.created_at, failed: false };
-            setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), element].slice(0, 20));
-            setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
-              ? { ...message, media_envoi: false } : message));
+            persisterMessageDansOutbox(classe.classe_id, monUsername, element);
+            if (composantActifRef.current) {
+              setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), element].slice(0, 20));
+              setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
+                ? { ...message, media_envoi: false } : message));
+            }
           } else {
             const apercu = apercusMediaRef.current.get(clientMessageId);
             if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
-            setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
-            if (piece) {
-              // Le fichier est déjà stocké : conserver sa référence pour ne pas le renvoyer.
-              pendingMessagePieceRef.current = piece;
-              setFichier(null);
-            } else {
-              setFichier(fichierLocal);
+            if (composantActifRef.current) {
+              setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
+              if (piece) {
+                // Le fichier est déjà stocké : conserver sa référence pour ne pas le renvoyer.
+                pendingMessagePieceRef.current = piece;
+                setFichier(null);
+              } else {
+                setFichier(fichierLocal);
+              }
+              setTexte(contenuLocal);
+              setMessageErreur(error.message || "Le fichier n'a pas pu être publié. Tu peux réessayer.");
             }
-            setTexte(contenuLocal);
-            setMessageErreur(error.message || "Le fichier n'a pas pu être publié. Tu peux réessayer.");
           }
         }
       })();
       return;
     }
 
-    if (!estGrindEnLigne()) {
+    if (!reseauInternetDisponible()) {
       const pieceDejaChargee = pendingMessagePieceRef.current;
       if (fichier && !pieceDejaChargee) {
         window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Le fichier sera envoyé dès le retour de la connexion. Garde-le sélectionné." }));
@@ -1765,14 +2196,18 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     try {
       let piece = pendingMessagePieceRef.current;
       if (fichier && !piece) {
-        const ext = fichier.name.split(".").pop().toLowerCase();
-        if (["pdf", "docx"].includes(ext)) {
-          const doc = await uploaderDocument(sessionToken, fichier, setProgression);
+        const ext = String(fichier.name || "").split(".").pop().toLowerCase();
+        const mimeFichier = String(fichier.type || "").split(";", 1)[0].trim().toLowerCase();
+        if (["pdf", "docx"].includes(ext) || mimeFichier === "application/pdf"
+            || mimeFichier === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+          const doc = await avecSlotUploadDiscussion(() => uploaderDocumentPriveDiscussion(sessionToken, fichier, setProgression));
           piece = { url: doc.document_url, type: "document", nom: doc.document_name || fichier.name, mime: doc.document_type || fichier.type, taille: fichier.size };
         } else {
           const estVideo = fichier.type.startsWith("video/") || ["mp4", "mov", "webm"].includes(ext);
           const decoupe = estVideo ? await extraireDureeVideo(fichier) : null;
-          const media = await uploaderMedia(sessionToken, fichier, decoupe, setProgression);
+          const media = await avecSlotUploadDiscussion(() => uploaderMediaPriveDiscussion(
+            sessionToken, fichier, decoupe, setProgression
+          ));
           piece = { url: media.media_url, type: media.media_type || (estVideo ? "video" : "image"), nom: fichier.name, mime: fichier.type, taille: fichier.size };
         }
         pendingMessagePieceRef.current = piece;
@@ -1790,7 +2225,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           pendingMessageIdRef.current = globalThis.crypto?.randomUUID?.() || `grind-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
           pendingMessagePayloadRef.current = payloadIdempotence;
         }
-        const res = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+        const res = await envoyerMessageDiscussionAvecReprise(sessionToken, classe.classe_id, {
           contenu: texte.trim(), reply_to_id: reponse?.id || null, style_texte: "normal", piece,
           client_message_id: pendingMessageIdRef.current,
         });
@@ -1847,8 +2282,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     mediaRecorderVocalRef.current = null;
   }
 
-  async function publierVocal(fichierVocal) {
-    if (!estGrindEnLigne()) {
+  async function publierVocal(fichierVocal, dureeEnregistree = 0) {
+    if (!reseauInternetDisponible()) {
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un vocal." }));
       return;
     }
@@ -1856,6 +2291,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       setMessageErreur("La file d'envoi contient déjà 20 messages. Attends la synchronisation avant d'enregistrer un nouveau vocal.");
       return;
     }
+    if (vocalPublicationEnCoursRef.current) return;
+    vocalPublicationEnCoursRef.current = true;
     const clientMessageId = pendingVocalIdRef.current || nouveauClientMessageId();
     pendingVocalIdRef.current = clientMessageId;
     const previewUrl = URL.createObjectURL(fichierVocal);
@@ -1867,29 +2304,32 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     const vocalOptimiste = {
       id: -(Date.now() * 1000 + sequence), client_message_id: clientMessageId,
       auteur: monUsername, auteur_nom: membreAuteur?.nom || monUsername, contenu: "",
-      piece: { type: "audio", nom: fichierVocal.name || "Message vocal", mime: fichierVocal.type || "audio/webm", taille: fichierVocal.size || 0 },
+      piece: { type: "audio", nom: fichierVocal.name || "Message vocal", mime: fichierVocal.type || "audio/webm",
+        taille: fichierVocal.size || 0, duree: Math.max(0, Number(dureeEnregistree) || 0) },
       preview_url: previewUrl, media_envoi: true, reply_to_id: replyToId,
       style_texte: "normal", created_at: createdAt, optimistic: true,
       supprime_pour_tous: false, lu_par_au_moins_un: false,
     };
     setMessages(prev => fusionnerMessageDiscussion(prev, vocalOptimiste));
     setReponse(null);
-    setEnvoi(true);
     setProgression(0);
     setMessageErreur("");
     try {
       let piece = pendingVocalPieceRef.current;
       if (!piece) {
-        piece = await uploaderVocalDiscussionMedia(sessionToken, fichierVocal, setProgression);
+        piece = await avecSlotUploadDiscussion(() => uploaderVocalDiscussionMedia(
+          sessionToken, fichierVocal, valeur => { if (composantActifRef.current) setProgression(valeur); }
+        ));
+        piece = { ...piece, duree: Math.max(0, Number(dureeEnregistree) || 0) };
         pendingVocalPieceRef.current = piece;
       }
-      const resultat = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+      const resultat = await envoyerMessageDiscussionAvecReprise(sessionToken, classe.classe_id, {
         contenu: "", reply_to_id: replyToId, style_texte: "normal", piece,
         client_message_id: clientMessageId,
       });
       pendingVocalIdRef.current = null;
       pendingVocalPieceRef.current = null;
-      setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
+      if (composantActifRef.current) setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
     } catch (error) {
       const pieceDejaChargee = pendingVocalPieceRef.current;
       const statut = Number(error?.status || 0);
@@ -1899,28 +2339,33 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           client_message_id: clientMessageId, contenu: "", reply_to_id: replyToId,
           style_texte: "normal", piece: pieceDejaChargee, created_at: createdAt, failed: false,
         };
-        setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), element].slice(0, 20));
-        setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
-          ? { ...message, media_envoi: false } : message));
-        setMessageErreur("Le vocal est stocké. Sa publication sera reprise automatiquement sans doublon.");
+        persisterMessageDansOutbox(classe.classe_id, monUsername, element);
+        if (composantActifRef.current) {
+          setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), element].slice(0, 20));
+          setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
+            ? { ...message, media_envoi: false } : message));
+          setMessageErreur("Le vocal est stocké. Sa publication sera reprise automatiquement sans doublon.");
+        }
       } else {
         const apercu = apercusMediaRef.current.get(clientMessageId);
         if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
-        setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
+        if (composantActifRef.current) {
+          setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
+          setMessageErreur(error.message || "Impossible d'envoyer le message vocal. Réessaie.");
+        }
         pendingVocalIdRef.current = null;
         pendingVocalPieceRef.current = null;
-        setMessageErreur(error.message || "Impossible d'envoyer le message vocal. Réessaie.");
       }
     } finally {
-      setEnvoi(false);
-      setProgression(0);
+      vocalPublicationEnCoursRef.current = false;
+      if (composantActifRef.current) setProgression(0);
     }
   }
 
   async function demarrerVocal(event) {
     event.preventDefault();
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour enregistrer et envoyer un vocal." })); return; }
-    if (vocalPreparation || vocalEnCours || envoi || texte.trim() || fichier) return;
+    if (!reseauInternetDisponible()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour enregistrer et envoyer un vocal." })); return; }
+    if (vocalPreparation || vocalEnCours || vocalPublicationEnCoursRef.current || envoi || texte.trim() || fichier) return;
     // Chaque nouvel enregistrement est un nouveau message ; seul le réessai
     // d'une requête précédente conserve sa clé d'idempotence.
     pendingVocalIdRef.current = null;
@@ -1959,7 +2404,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
         setVocalSecondes(duree); pointeurVocalRef.current = null;
         if (envoyer && blob.size > 512) {
           const fichierVocal = new File([blob], `vocal-grind-${Date.now()}.${extension}`, { type });
-          await publierVocal(fichierVocal);
+          await publierVocal(fichierVocal, duree);
         } else if (!annule && blob.size <= 512) {
           setMessageErreur("Le message vocal est trop court ou vide. Réessaie.");
         }
@@ -2099,7 +2544,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function rejoindreVraieClasse() {
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre la classe réelle." })); return; }
+    if (!reseauInternetDisponible()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre la classe réelle." })); return; }
     setActionEnCours("classe"); setMessageErreur("");
     try {
       await rejoindreVraieClasseDepuisDiscussion(sessionToken, classe.classe_id);
@@ -2110,12 +2555,12 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function changerPhoto(event) {
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour modifier la photo du groupe." })); return; }
+    if (!reseauInternetDisponible()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour modifier la photo du groupe." })); return; }
     const image = event.target.files?.[0];
     if (!image) return;
     setProfilPhotoEnvoi(true); setMessageErreur("");
     try {
-      const media = await uploaderMedia(sessionToken, image, null);
+      const media = await avecSlotUploadDiscussion(() => uploaderMediaPriveDiscussion(sessionToken, image, null));
       const res = await modifierPhotoDiscussion(sessionToken, classe.classe_id, media.media_url);
       setDiscussion(prev => ({ ...prev, photo_url: res.photo_url }));
     } catch (error) { setMessageErreur(error.message); }
@@ -2123,7 +2568,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function acterMembre(action, membre) {
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour gérer les membres." })); return; }
+    if (!reseauInternetDisponible()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour gérer les membres." })); return; }
     setActionEnCours(`${action}:${membre.username}`); setMessageErreur("");
     try {
       if (action === "owner") await transfererProprietaireDiscussion(sessionToken, classe.classe_id, membre.username);
@@ -2283,7 +2728,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   async function supprimerSelectionPourMoi() {
     if (!messagesSelectionnes.length || suppressionEnCours) return;
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ces messages de ton historique." })); return; }
+    if (!reseauInternetDisponible()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ces messages de ton historique." })); return; }
     setSuppressionEnCours(true); setMessageErreur("");
     const resultats = await Promise.allSettled(messagesSelectionnes.map(id => supprimerMessageDiscussionPourMoi(sessionToken, classe.classe_id, id)));
     const supprimes = messagesSelectionnes.filter((id, index) => resultats[index].status === "fulfilled");
@@ -2298,7 +2743,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     if (messagesSelectionnes.length !== 1 || suppressionEnCours) return;
     const cible = messages.find(message => message.id === messagesSelectionnes[0]);
     if (!peutSupprimerMessagePourTous(cible)) return;
-    if (!estGrindEnLigne()) {
+    if (!reseauInternetDisponible()) {
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ce message pour tout le monde." }));
       return;
     }
@@ -2405,7 +2850,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
             ? messagesEnAttente.find(item => item.client_message_id === message.client_message_id)
             : null;
           return (
-            <article key={message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
+            <article key={message.client_message_id || message.id} ref={node => { if (node) messageRefs.current.set(message.id, node); else messageRefs.current.delete(message.id); }}
               className={`discussion-ligne ${propre ? "moi" : "autre"} ${messagesSelectionnes.includes(message.id) ? "selectionnee" : ""}`} data-message-id={message.id} data-has-media={message.piece && !message.supprime_pour_tous ? "true" : "false"} onPointerDown={event => commencerPressMessage(event, message)} onPointerMove={deplacerPressMessage} onPointerUp={event => terminerPressMessage(event, message)} onPointerCancel={annulerPressMessage} onClick={event => cliquerMessageEnModeSelection(event, message)}>
               {!propre && <AvatarIcone username={message.auteur} taille={34} onClic={ouvrirProfil} />}
               <div className={`discussion-bulle-wrap ${message.piece?.type === "video" ? "discussion-bulle-wrap-video" : ""}`}>
@@ -2431,7 +2876,9 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                       <small>{message.piece.nom || "Vidéo"}</small>
                     </div>
                   </>}
-                  {message.piece && message.piece.type === "audio" && <LecteurVocal src={mediaPriveUrl} id={message.id} />}
+                  {message.piece && message.piece.type === "audio" && <LecteurVocal
+                    src={mediaPriveUrl} id={message.id} dureeInitiale={message.piece.duree || 0}
+                  />}
                   {message.piece && message.piece.type === "document" && <div className="discussion-fichier">
                     <span className="discussion-fichier-icone"><i className={`fa-solid ${extensionPiece(message) === "pdf" ? "fa-file-pdf" : "fa-file-word"}`} /></span>
                     <span className="discussion-fichier-details"><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}{mediasLocaux[message.id] ? " · disponible hors ligne" : ""}</small></span>
@@ -2441,28 +2888,12 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   <span className="discussion-heure">
                     {heure(message.created_at)}
                     {message.modifie && <small className="discussion-message-modifie"> · modifié</small>}
-                    {(elementEnAttente || message.media_envoi) && <small className={`discussion-message-envoi ${elementEnAttente?.failed ? "echec" : ""}`} title={elementEnAttente?.failed ? "Échec de l'envoi" : message.media_envoi && progression > 0 ? `Envoi : ${progression}%` : "Envoi en cours"} aria-label={elementEnAttente?.failed ? "Échec de l'envoi" : message.media_envoi && progression > 0 ? `Envoi : ${progression}%` : "Envoi en cours"}>
+                    {(elementEnAttente || message.media_envoi) && <small className={`discussion-message-envoi ${elementEnAttente?.failed ? "echec" : ""}`} title={elementEnAttente?.failed ? "Échec de l'envoi" : message.media_envoi && Number(progressionMedia) > 0 ? `Envoi : ${Math.max(0, Math.min(100, Number(progressionMedia) || 0))}%` : "Envoi en cours"} aria-label={elementEnAttente?.failed ? "Échec de l'envoi" : message.media_envoi && Number(progressionMedia) > 0 ? `Envoi : ${Math.max(0, Math.min(100, Number(progressionMedia) || 0))}%` : "Envoi en cours"}>
                       <i className={`fa-solid ${elementEnAttente?.failed ? "fa-circle-exclamation" : "fa-clock"}`} />
                     </small>}
                     {propre && Number(message.id) > 0 && !message.supprime_pour_tous && <span className={`discussion-etat-message ${message.lu_par_au_moins_un ? "lu" : ""}`} title={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"} aria-label={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"}><i className={`fa-solid ${message.lu_par_au_moins_un ? "fa-check-double" : "fa-check"}`} /></span>}
                   </span>
                 </div>
-                {message.piece && !message.supprime_pour_tous && !message.optimistic && Number(message.id) > 0 && (
-                  <button
-                    type="button"
-                    className={`discussion-selection-media ${messagesSelectionnes.includes(message.id) ? "actif" : ""}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      basculerSelectionMessage(message.id);
-                    }}
-                    aria-pressed={messagesSelectionnes.includes(message.id)}
-                    aria-label={messagesSelectionnes.includes(message.id) ? "Désélectionner le média" : "Sélectionner le média pour le copier ou le supprimer"}
-                    title="Sélectionner le média pour le copier ou le supprimer"
-                  >
-                    <i className={messagesSelectionnes.includes(message.id) ? "fa-solid fa-square-check" : "fa-regular fa-square"} />
-                    {messagesSelectionnes.includes(message.id) ? "Sélectionné" : "Sélectionner"}
-                  </button>
-                )}
                 {!message.supprime_pour_tous && !message.optimistic && <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>}
               </div>
               {propre && <AvatarIcone username={message.auteur} taille={30} />}
@@ -2473,7 +2904,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       </div>
 
       {messageErreur && <div className="discussion-erreur-message" role="alert">{messageErreur}<button type="button" onClick={() => setMessageErreur("")} aria-label="Fermer"><i className="fa-solid fa-xmark" /></button></div>}
-      {!estGrindEnLigne() ? <div className="discussion-hors-ligne-note"><i className="fa-solid fa-wifi-slash" /> Lecture hors ligne · les envois reprendront avec Internet.</div> : restreint ? <div className="discussion-restreint"><i className="fa-solid fa-comment-slash" /> Tu ne peux pas envoyer de message{discussion.restriction_jusqua ? ` jusqu'au ${new Date(discussion.restriction_jusqua).toLocaleString()}` : " pour le moment"}.</div> : (
+      {!reseauInternetDisponible() ? <div className="discussion-hors-ligne-note"><i className="fa-solid fa-wifi-slash" /> Lecture hors ligne · les envois reprendront avec Internet.</div> : restreint ? <div className="discussion-restreint"><i className="fa-solid fa-comment-slash" /> Tu ne peux pas envoyer de message{discussion.restriction_jusqua ? ` jusqu'au ${new Date(discussion.restriction_jusqua).toLocaleString()}` : " pour le moment"}.</div> : (
         <div className="discussion-compositeur-zone">
           {messageEnEdition && <div className="discussion-reponse-active discussion-edition-active"><span><strong>Modification du message</strong><small>Tu peux modifier ton texte pendant les 15 premières minutes.</small></span><button type="button" onClick={() => { setMessageEnEdition(null); setTexte(""); }} aria-label="Annuler la modification"><i className="fa-solid fa-xmark" /></button></div>}
           {reponse && <div className="discussion-reponse-active"><span><strong>Réponse à {reponse.auteur_nom}</strong><small>{reponse.contenu}</small></span><button type="button" onClick={() => setReponse(null)} aria-label="Annuler la réponse"><i className="fa-solid fa-xmark" /></button></div>}
@@ -2555,7 +2986,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           {estAdmin && <div className="discussion-moderation-rapide"><small>Restrictions disponibles : 15 min, 1 h, 6 h, 24 h, 7 jours ou jusqu'à levée manuelle.</small></div>}
           {transfertProprietaire && <div className="discussion-confirmation-transfert" role="dialog" aria-modal="true"><strong>Transférer la propriété du groupe ?</strong><p>{transfertProprietaire.nom} deviendra propriétaire. Tu conserveras le rôle d'administrateur et pourras ensuite quitter le groupe.</p><div><button type="button" onClick={() => setTransfertProprietaire(null)}>Annuler</button><button type="button" disabled={!!actionEnCours} onClick={() => acterMembre("owner", transfertProprietaire)}>{actionEnCours === `owner:${transfertProprietaire.username}` ? <i className="fa-solid fa-circle-notch fa-spin" /> : "Confirmer"}</button></div></div>}
           <div className="discussion-panneau-statut">
-            <span><i className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{!estGrindEnLigne() || socketEtat === "hors ligne" ? "Hors ligne · lecture seule" : socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"}</span>
+            <span><i className={`discussion-online-dot ${socketEtat === "connecte" ? "actif" : ""}`} />{!reseauInternetDisponible() || socketEtat === "hors ligne" ? "Hors ligne · lecture seule" : socketEtat === "connecte" ? "Connecté" : "Reconnexion automatique"}</span>
             <small>Capacité : {discussion.limite_membres || 200} membres maximum</small>
           </div>
           <footer>{estOwner ? <small>Tu es propriétaire de cette discussion. Transfère d'abord la propriété pour pouvoir la quitter.</small> : <button type="button" className="discussion-quitter-groupe" onClick={async () => { try { await import("../api.js").then(api => api.quitterDiscussion(sessionToken, classe.classe_id)); onQuitter(); } catch (e) { setMessageErreur(e.message); } }}><i className="fa-solid fa-right-from-bracket" /> Quitter la discussion</button>}</footer>
