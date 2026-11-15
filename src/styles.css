@@ -5026,3 +5026,9 @@ button:disabled {
 .discussion-message-envoi { color: var(--text-dim); font-size: 10px; font-weight: 600; }
 .discussion-message-envoi.echec { color: #d58a7e; }
 .discussion-ligne.moi .discussion-message-envoi { opacity: .9; }
+
+
+/* La forme d'onde sert elle-même de contrôle de recherche accessible. */
+.discussion-vocal-ondes-seek { cursor: pointer; touch-action: pan-y; border-radius: 6px; outline-offset: 3px; }
+.discussion-vocal-ondes-seek:focus-visible { outline: 2px solid var(--brown); }
+.discussion-vocal-ondes-seek[aria-disabled="true"] { cursor: default; }

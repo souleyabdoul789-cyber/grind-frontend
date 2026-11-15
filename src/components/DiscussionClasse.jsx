@@ -7,7 +7,7 @@ import {
   telechargerDansNavigateur,
 } from "../mediaStorage.js";
 import {
-  obtenirDiscussionClasse, listerMessagesDiscussion, envoyerMessageDiscussion, urlDiscussion,
+  GRIND_URL, obtenirDiscussionClasse, listerMessagesDiscussion, envoyerMessageDiscussion, urlDiscussion,
   listerMentionsDiscussion, marquerMentionDiscussionLue, marquerMessagesDiscussionLus,
   rejoindreVraieClasseDepuisDiscussion,
   modifierPhotoDiscussion, ajouterAdminDiscussion, retirerAdminDiscussion,
@@ -16,6 +16,107 @@ import {
   envoyerVocalDiscussion, obtenirTicketsMediaDiscussion, obtenirTicketPieceDiscussion, modifierMessageDiscussion,
   supprimerMessageDiscussionPourMoi, supprimerMessageDiscussionPourTous, estGrindEnLigne,
 } from "../api.js";
+
+async function uploaderVocalDiscussionMedia(sessionToken, fichier, onProgress = null) {
+  if (!fichier || !String(fichier.type || "").toLowerCase().startsWith("audio/")) {
+    throw new Error("L'enregistrement vocal n'est pas valide.");
+  }
+  if (fichier.size <= 0 || fichier.size > 8 * 1024 * 1024) {
+    throw new Error("Le vocal doit être non vide et ne pas dépasser 8 Mo.");
+  }
+  const nom = String(fichier.name || "message-vocal.webm").replace(/\\/g, "/").split("/").pop().slice(0, 180);
+  const extension = nom.split(".").pop().toLowerCase();
+  const mime = String(fichier.type || "audio/webm").split(";", 1)[0].trim().toLowerCase();
+  const mimeAutorises = { webm: "audio/webm", ogg: "audio/ogg", m4a: "audio/mp4", mp3: "audio/mpeg" };
+  if (!mimeAutorises[extension] || mime !== mimeAutorises[extension]) {
+    throw new Error("Le format vocal doit être WEBM, OGG, M4A ou MP3.");
+  }
+
+  const demanderJson = async (url, payload, etape) => {
+    const delais = [900, 1800];
+    let derniereErreur = null;
+    for (let tentative = 0; tentative <= delais.length; tentative += 1) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const erreur = new Error(typeof data.detail === "string" ? data.detail : `Échec de ${etape} (HTTP ${response.status}).`);
+          erreur.status = response.status;
+          throw erreur;
+        }
+        return data;
+      } catch (erreur) {
+        derniereErreur = erreur;
+        const statut = Number(erreur?.status || 0);
+        const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+        if (!temporaire || tentative === delais.length) break;
+        await new Promise(resolve => window.setTimeout(resolve, delais[tentative]));
+      }
+    }
+    throw derniereErreur || new Error(`Échec de ${etape}.`);
+  };
+
+  const signature = await demanderJson(`${GRIND_URL}/api/media/upload/signature`, {
+    session_token: sessionToken, file_name: nom, file_size: fichier.size, content_type: mime,
+  }, "la signature du vocal");
+  let uploadUrl;
+  try { uploadUrl = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
+  if (uploadUrl.protocol !== "https:" || uploadUrl.hostname !== "api.cloudinary.com"
+      || !/\/video\/upload$/.test(uploadUrl.pathname) || signature.resource_type !== "video"
+      || signature.media_type !== "audio" || !signature.api_key || !signature.signature) {
+    throw new Error("Le serveur GRIND a renvoyé une destination vocale invalide.");
+  }
+
+  const asset = await new Promise((resolve, reject) => {
+    const formulaire = new FormData();
+    formulaire.append("file", fichier, nom);
+    formulaire.append("api_key", signature.api_key);
+    formulaire.append("timestamp", String(signature.timestamp));
+    formulaire.append("signature", signature.signature);
+    Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", signature.upload_url, true);
+    xhr.timeout = 120000;
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress?.(Math.min(98, Math.round(event.loaded / event.total * 98)));
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(data.error?.message || `Cloudinary a refusé le vocal (HTTP ${xhr.status}).`));
+        return;
+      }
+      if (!data.secure_url || !data.public_id || !data.version || !data.signature
+          || data.resource_type !== "video") {
+        reject(new Error("Cloudinary n'a pas confirmé un fichier vocal exploitable."));
+        return;
+      }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error("Connexion interrompue pendant l'envoi du vocal."));
+    xhr.ontimeout = () => reject(new Error("Le transfert vocal a dépassé le délai autorisé."));
+    xhr.onabort = () => reject(new Error("Transfert vocal annulé."));
+    xhr.send(formulaire);
+  });
+
+  onProgress?.(99);
+  const confirmation = await demanderJson(`${GRIND_URL}/api/media/upload/confirm`, {
+    session_token: sessionToken, asset,
+  }, "la confirmation du vocal");
+  if (!confirmation?.media_url || confirmation.media_type !== "audio") {
+    throw new Error("Le serveur GRIND n'a pas confirmé ce message vocal.");
+  }
+  onProgress?.(100);
+  return {
+    url: confirmation.media_url, type: "audio", nom, mime,
+    taille: Number(asset.bytes) || fichier.size,
+  };
+}
 
 function heure(date) {
   if (!date) return "";
@@ -147,7 +248,7 @@ function ImageDiscussion({ src, alt, onOpen }) {
   );
 }
 
-function BoutonTelechargement({ progression = null, enCours = false, onClick, label }) {
+function BoutonTelechargement({ progression = null, enCours = false, disabled = false, onClick, label }) {
   const valeur = Number.isFinite(progression) ? Math.max(0, Math.min(100, progression)) : 0;
   return (
     <button
@@ -155,7 +256,7 @@ function BoutonTelechargement({ progression = null, enCours = false, onClick, la
       className={`discussion-download-button ${enCours ? "en-cours" : ""}`}
       style={{ "--download-progress": `${valeur}%` }}
       onClick={onClick}
-      disabled={enCours}
+      disabled={enCours || disabled}
       title={label}
       aria-label={enCours ? `Téléchargement ${progression == null || progression < 0 ? "en cours" : `${valeur}%`}` : label}
     >
@@ -217,6 +318,7 @@ function VideoDiscussion({ src, poster, nom, messageId }) {
 
 function LecteurVocal({ src, id }) {
   const audioRef = useRef(null);
+  const pisteRef = useRef(null);
   const [lecture, setLecture] = useState(false);
   const [courant, setCourant] = useState(0);
   const [duree, setDuree] = useState(0);
@@ -236,6 +338,26 @@ function LecteurVocal({ src, id }) {
       if (lecteurVocalActif === audio) lecteurVocalActif = null;
     };
   }, [src]);
+
+  // timeupdate est trop peu fréquent et irrégulier dans certains WebView Android.
+  // Le RAF suit currentTime pendant la lecture et s'arrête dès la pause.
+  useEffect(() => {
+    if (!lecture) return undefined;
+    let frame = 0;
+    let dernier = 0;
+    const suivre = (horodatage) => {
+      const audio = audioRef.current;
+      if (!audio || audio.paused || audio.ended) return;
+      if (horodatage - dernier >= 70) {
+        const value = Number(audio.currentTime);
+        if (Number.isFinite(value)) setCourant(value);
+        dernier = horodatage;
+      }
+      frame = window.requestAnimationFrame(suivre);
+    };
+    frame = window.requestAnimationFrame(suivre);
+    return () => window.cancelAnimationFrame(frame);
+  }, [lecture, src]);
 
   async function basculerLecture() {
     const audio = audioRef.current;
@@ -257,55 +379,70 @@ function LecteurVocal({ src, id }) {
     if (Number.isFinite(value) && value > 0) setDuree(value);
   }
 
-  function chercher(event) {
+  function chercherPourcentage(pourcentage) {
     const audio = audioRef.current;
-    if (audio && duree > 0 && Number.isFinite(duree)) {
-      audio.currentTime = duree * (Number(event.target.value) / 100);
-      setCourant(audio.currentTime);
+    if (!audio || !Number.isFinite(duree) || duree <= 0) return;
+    const cible = Math.max(0, Math.min(1, pourcentage)) * duree;
+    audio.currentTime = cible;
+    setCourant(cible);
+  }
+
+  function chercherDepuisPointeur(event) {
+    const piste = pisteRef.current;
+    if (!piste || duree <= 0) return;
+    const rect = piste.getBoundingClientRect();
+    if (!rect.width) return;
+    chercherPourcentage((event.clientX - rect.left) / rect.width);
+  }
+
+  function gererClavier(event) {
+    if (duree <= 0) return;
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const audio = audioRef.current;
+      const delta = event.key === "ArrowRight" ? 5 : -5;
+      const cible = Math.max(0, Math.min(duree, (audio?.currentTime || 0) + delta));
+      if (audio) audio.currentTime = cible;
+      setCourant(cible);
+    } else if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      chercherPourcentage(event.key === "Home" ? 0 : 1);
     }
   }
 
   function terminerLecture() {
     const audio = audioRef.current;
     setLecture(false);
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-    }
+    if (audio) { audio.pause(); audio.currentTime = 0; }
     setCourant(0);
     if (lecteurVocalActif === audio) lecteurVocalActif = null;
   }
 
   return (
-    <div className={`discussion-vocal-player ${!src ? "sans-source" : ""}`} onPointerDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()}>
+    <div className={`discussion-vocal-player ${!src ? "sans-source" : ""}`}>
       <audio ref={audioRef} src={src || undefined} preload="metadata" loop={false}
         onLoadedMetadata={event => actualiserDuree(event.currentTarget)}
         onDurationChange={event => actualiserDuree(event.currentTarget)}
         onTimeUpdate={event => { const value = Number(event.currentTarget.currentTime); if (Number.isFinite(value)) setCourant(value); }}
         onEnded={terminerLecture}
-        onPause={event => {
-          setLecture(false);
-          if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null;
-        }}
+        onPause={event => { setLecture(false); if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null; }}
         onPlay={() => { setLecture(true); setErreur(false); }}
-        onError={event => {
-          setLecture(false); setErreur(true);
-          if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null;
-        }} />
+        onError={event => { setLecture(false); setErreur(true); if (lecteurVocalActif === event.currentTarget) lecteurVocalActif = null; }} />
       <button type="button" className="discussion-vocal-play" onClick={basculerLecture} disabled={!src} aria-label={lecture ? "Mettre en pause le vocal" : "Lire le message vocal"}>
         <i className={`fa-solid ${lecture ? "fa-pause" : "fa-play"}`} />
       </button>
       <div className="discussion-vocal-piste">
-        <div className="discussion-vocal-ondes" aria-hidden="true">
+        <div ref={pisteRef} className="discussion-vocal-ondes discussion-vocal-ondes-seek" role="slider"
+          aria-label="Position du message vocal" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progression)}
+          aria-valuetext={`${dureeLisible(courant)} sur ${dureeLisible(duree)}`} tabIndex={src && duree > 0 ? 0 : -1}
+          onClick={chercherDepuisPointeur} onKeyDown={gererClavier} aria-disabled={!src || duree <= 0}>
           {hauteurs.map((h, index) => <span key={index} className={index / hauteurs.length * 100 <= progression ? "jouee" : ""} style={{ height: `${h}px` }} />)}
         </div>
-        <input aria-label="Position du message vocal" type="range" min="0" max="100" step="0.5" value={progression} onChange={chercher} disabled={!src || duree <= 0} />
         <small>{erreur ? "Audio indisponible" : !src ? "Non disponible hors ligne" : `${dureeLisible(courant)} / ${dureeLisible(duree)}`}</small>
       </div>
     </div>
   );
 }
-
 
 function TexteMessage({ texte, onProfil }) {
   const fragments = String(texte || "").split(/(@[A-Za-z_]{3,24})/g);
@@ -414,6 +551,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   const tentativesFileAttenteRef = useRef(new Map());
   const prochaineTentativeFileAttenteRef = useRef(0);
   const prochaineIdOptimisteRef = useRef(0);
+  const apercusMediaRef = useRef(new Map());
+  const pendingVocalPieceRef = useRef(null);
   const messagesEnAttenteRef = useRef(messagesEnAttente);
   messagesEnAttenteRef.current = messagesEnAttente;
   const messagesActuels = useRef([]);
@@ -458,6 +597,18 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   useEffect(() => {
     mediasLocauxRef.current = mediasLocaux;
   }, [mediasLocaux]);
+
+  // Libère l'aperçu dès que le serveur confirme le message (HTTP ou WebSocket).
+  useEffect(() => {
+    const confirmes = new Set(messages.filter(message => Number(message.id) > 0 && message.client_message_id)
+      .map(message => message.client_message_id));
+    for (const [clientId, url] of apercusMediaRef.current.entries()) {
+      if (confirmes.has(clientId)) {
+        URL.revokeObjectURL(url);
+        apercusMediaRef.current.delete(clientId);
+      }
+    }
+  }, [messages]);
 
   // Les médias HTML reçoivent des tickets limités au fichier et à une durée courte.
   // Le jeton de session principal reste dans les requêtes POST authentifiées.
@@ -504,6 +655,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     }).then(resultat => { abonnement = resultat; }).catch(() => {});
     return () => {
       composantActifRef.current = false;
+      for (const url of apercusMediaRef.current.values()) URL.revokeObjectURL(url);
+      apercusMediaRef.current.clear();
       abonnement?.remove?.().catch(() => {});
     };
   }, []);
@@ -602,8 +755,11 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   useEffect(() => {
     if (!discussion && !membres.length && !messages.length) return;
     try {
+      const messagesPersistables = messages
+        .filter(message => !message.preview_url && !message.media_envoi)
+        .slice(-100);
       localStorage.setItem(cacheDiscussionKey, JSON.stringify({
-        discussion, membres, messages: messages.slice(-100),
+        discussion, membres, messages: messagesPersistables,
       }));
     } catch {}
   }, [discussion, membres, messages, cacheDiscussionKey]);
@@ -753,6 +909,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
 
   function annulerMessageEnAttente(clientMessageId) {
     tentativesFileAttenteRef.current.delete(clientMessageId);
+    const apercu = apercusMediaRef.current.get(clientMessageId);
+    if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
     setMessagesEnAttente(prev => prev.filter(item => item.client_message_id !== clientMessageId));
     setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
   }
@@ -981,6 +1139,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   function sourcePieceMessage(message) {
+    if (message?.preview_url) return message.preview_url;
     const locale = mediasLocaux[message.id] || mediasLocauxRef.current[message.id];
     if (locale?.path) return sourceLocaleMedia(locale.path);
     return estGrindEnLigne() ? ticketsMedia[message.id]?.url || null : null;
@@ -1481,6 +1640,91 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
       return;
     }
 
+    // Les pièces apparaissent immédiatement dans le fil. Le transfert réseau
+    // démarre ensuite sans bloquer le compositeur ni les messages suivants.
+    if (fichier && !messageEnEdition) {
+      if (!estGrindEnLigne()) {
+        window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer ce fichier. Il reste sélectionné." }));
+        return;
+      }
+      const fichierLocal = fichier;
+      const contenuLocal = texte.trim();
+      const replyToId = reponse?.id || null;
+      const ext = String(fichierLocal.name || "").split(".").pop().toLowerCase();
+      const estDocument = ["pdf", "docx"].includes(ext);
+      const estVideo = fichierLocal.type.startsWith("video/") || ["mp4", "mov", "webm"].includes(ext);
+      const typePiece = estDocument ? "document" : estVideo ? "video" : "image";
+      const clientMessageId = nouveauClientMessageId();
+      const previewUrl = typePiece === "image" || typePiece === "video" ? URL.createObjectURL(fichierLocal) : null;
+      if (previewUrl) apercusMediaRef.current.set(clientMessageId, previewUrl);
+      const sequence = prochaineIdOptimisteRef.current++ % 1000;
+      const membreAuteur = membres.find(membre => membre.username === monUsername);
+      const reponseCible = replyToId ? messages.find(message => Number(message.id) === Number(replyToId)) : null;
+      const messageOptimiste = {
+        id: -(Date.now() * 1000 + sequence), client_message_id: clientMessageId,
+        auteur: monUsername, auteur_nom: membreAuteur?.nom || monUsername,
+        contenu: contenuLocal, piece: { type: typePiece, nom: fichierLocal.name, mime: fichierLocal.type, taille: fichierLocal.size },
+        preview_url: previewUrl, media_envoi: true, reply_to_id: replyToId,
+        reply: reponseCible ? { id: reponseCible.id, auteur: reponseCible.auteur,
+          auteur_nom: reponseCible.auteur_nom || reponseCible.auteur, contenu: reponseCible.contenu || "" } : null,
+        style_texte: "normal", created_at: new Date().toISOString(), optimistic: true,
+        supprime_pour_tous: false, lu_par_au_moins_un: false,
+      };
+      setMessages(prev => fusionnerMessageDiscussion(prev, messageOptimiste));
+      setTexte(""); setFichier(null); setReponse(null); setMessageErreur("");
+      setMenuPiecesOuvert(false);
+      [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; });
+      if (textareaRef.current) textareaRef.current.style.height = "auto";
+
+      void (async () => {
+        let piece = null;
+        try {
+          if (estDocument) {
+            const doc = await uploaderDocument(sessionToken, fichierLocal);
+            piece = { url: doc.document_url, type: "document", nom: doc.document_name || fichierLocal.name,
+              mime: doc.document_type || fichierLocal.type, taille: fichierLocal.size };
+          } else {
+            const decoupe = estVideo ? await extraireDureeVideo(fichierLocal) : null;
+            const media = await uploaderMedia(sessionToken, fichierLocal, decoupe);
+            piece = { url: media.media_url, type: media.media_type || typePiece,
+              nom: fichierLocal.name, mime: fichierLocal.type, taille: fichierLocal.size };
+          }
+          const resultat = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+            contenu: contenuLocal, reply_to_id: replyToId, style_texte: "normal", piece,
+            client_message_id: clientMessageId,
+          });
+          const apercu = apercusMediaRef.current.get(clientMessageId);
+          if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
+          setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
+        } catch (error) {
+          const statut = Number(error?.status || 0);
+          const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+          if (piece && temporaire) {
+            const element = { client_message_id: clientMessageId, contenu: contenuLocal,
+              reply_to_id: replyToId, style_texte: "normal", piece,
+              created_at: messageOptimiste.created_at, failed: false };
+            setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), element].slice(0, 20));
+            setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
+              ? { ...message, media_envoi: false } : message));
+          } else {
+            const apercu = apercusMediaRef.current.get(clientMessageId);
+            if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
+            setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
+            if (piece) {
+              // Le fichier est déjà stocké : conserver sa référence pour ne pas le renvoyer.
+              pendingMessagePieceRef.current = piece;
+              setFichier(null);
+            } else {
+              setFichier(fichierLocal);
+            }
+            setTexte(contenuLocal);
+            setMessageErreur(error.message || "Le fichier n'a pas pu être publié. Tu peux réessayer.");
+          }
+        }
+      })();
+      return;
+    }
+
     if (!estGrindEnLigne()) {
       const pieceDejaChargee = pendingMessagePieceRef.current;
       if (fichier && !pieceDejaChargee) {
@@ -1604,23 +1848,72 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   }
 
   async function publierVocal(fichierVocal) {
-    if (!estGrindEnLigne()) { window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un vocal." })); return; }
-    setEnvoi(true); setProgression(0); setMessageErreur("");
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour envoyer un vocal." }));
+      return;
+    }
+    if (messagesEnAttente.length >= 20 && !pendingVocalIdRef.current) {
+      setMessageErreur("La file d'envoi contient déjà 20 messages. Attends la synchronisation avant d'enregistrer un nouveau vocal.");
+      return;
+    }
+    const clientMessageId = pendingVocalIdRef.current || nouveauClientMessageId();
+    pendingVocalIdRef.current = clientMessageId;
+    const previewUrl = URL.createObjectURL(fichierVocal);
+    apercusMediaRef.current.set(clientMessageId, previewUrl);
+    const replyToId = reponse?.id || null;
+    const sequence = prochaineIdOptimisteRef.current++ % 1000;
+    const membreAuteur = membres.find(membre => membre.username === monUsername);
+    const createdAt = new Date().toISOString();
+    const vocalOptimiste = {
+      id: -(Date.now() * 1000 + sequence), client_message_id: clientMessageId,
+      auteur: monUsername, auteur_nom: membreAuteur?.nom || monUsername, contenu: "",
+      piece: { type: "audio", nom: fichierVocal.name || "Message vocal", mime: fichierVocal.type || "audio/webm", taille: fichierVocal.size || 0 },
+      preview_url: previewUrl, media_envoi: true, reply_to_id: replyToId,
+      style_texte: "normal", created_at: createdAt, optimistic: true,
+      supprime_pour_tous: false, lu_par_au_moins_un: false,
+    };
+    setMessages(prev => fusionnerMessageDiscussion(prev, vocalOptimiste));
+    setReponse(null);
+    setEnvoi(true);
+    setProgression(0);
+    setMessageErreur("");
     try {
-      if (!pendingVocalIdRef.current) {
-        pendingVocalIdRef.current = globalThis.crypto?.randomUUID?.() || `grind-audio-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+      let piece = pendingVocalPieceRef.current;
+      if (!piece) {
+        piece = await uploaderVocalDiscussionMedia(sessionToken, fichierVocal, setProgression);
+        pendingVocalPieceRef.current = piece;
       }
-      const resultat = await envoyerVocalDiscussion(
-        sessionToken, classe.classe_id, fichierVocal, reponse?.id || null,
-        value => setProgression(value), pendingVocalIdRef.current,
-      );
+      const resultat = await envoyerMessageDiscussion(sessionToken, classe.classe_id, {
+        contenu: "", reply_to_id: replyToId, style_texte: "normal", piece,
+        client_message_id: clientMessageId,
+      });
       pendingVocalIdRef.current = null;
-      setMessages(prev => prev.some(m => m.id === resultat.message.id) ? prev : ordonnerMessagesDiscussion([...prev, resultat.message]));
-      setReponse(null);
+      pendingVocalPieceRef.current = null;
+      setMessages(prev => fusionnerMessageDiscussion(prev, resultat.message));
     } catch (error) {
-      setMessageErreur(error.message || "Impossible d'envoyer le message vocal.");
+      const pieceDejaChargee = pendingVocalPieceRef.current;
+      const statut = Number(error?.status || 0);
+      const temporaire = !statut || [408, 425, 429, 500, 502, 503, 504].includes(statut);
+      if (pieceDejaChargee && temporaire && messagesEnAttente.length < 20) {
+        const element = {
+          client_message_id: clientMessageId, contenu: "", reply_to_id: replyToId,
+          style_texte: "normal", piece: pieceDejaChargee, created_at: createdAt, failed: false,
+        };
+        setMessagesEnAttente(prev => [...prev.filter(item => item.client_message_id !== clientMessageId), element].slice(0, 20));
+        setMessages(prev => prev.map(message => message.client_message_id === clientMessageId
+          ? { ...message, media_envoi: false } : message));
+        setMessageErreur("Le vocal est stocké. Sa publication sera reprise automatiquement sans doublon.");
+      } else {
+        const apercu = apercusMediaRef.current.get(clientMessageId);
+        if (apercu) { URL.revokeObjectURL(apercu); apercusMediaRef.current.delete(clientMessageId); }
+        setMessages(prev => prev.filter(message => message.client_message_id !== clientMessageId));
+        pendingVocalIdRef.current = null;
+        pendingVocalPieceRef.current = null;
+        setMessageErreur(error.message || "Impossible d'envoyer le message vocal. Réessaie.");
+      }
     } finally {
-      setEnvoi(false); setProgression(0);
+      setEnvoi(false);
+      setProgression(0);
     }
   }
 
@@ -1631,6 +1924,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
     // Chaque nouvel enregistrement est un nouveau message ; seul le réessai
     // d'une requête précédente conserve sa clé d'idempotence.
     pendingVocalIdRef.current = null;
+    pendingVocalPieceRef.current = null;
     try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* certains WebView ne prennent pas la capture */ }
     pointeurVocalRef.current = { x: event.clientX, y: event.clientY, startedAt: Date.now(), released: false, locked: false };
     annulerVocalRef.current = false;
@@ -2133,7 +2427,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                       messageId={message.id}
                     />
                     <div className="discussion-media-actions">
-                      <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => telechargerVideoMessage(message)} label="Télécharger la vidéo" />
+                      <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} disabled={!!message.optimistic} onClick={() => telechargerVideoMessage(message)} label="Télécharger la vidéo" />
                       <small>{message.piece.nom || "Vidéo"}</small>
                     </div>
                   </>}
@@ -2141,14 +2435,14 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                   {message.piece && message.piece.type === "document" && <div className="discussion-fichier">
                     <span className="discussion-fichier-icone"><i className={`fa-solid ${extensionPiece(message) === "pdf" ? "fa-file-pdf" : "fa-file-word"}`} /></span>
                     <span className="discussion-fichier-details"><strong>{message.piece.nom}</strong><small>{tailleLisible(message.piece.taille)}{mediasLocaux[message.id] ? " · disponible hors ligne" : ""}</small></span>
-                    <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} onClick={() => ouvrirDocumentMessage(message)} label="Enregistrer et ouvrir le document" />
+                    <BoutonTelechargement progression={progressionMedia} enCours={telechargementActif} disabled={!!message.optimistic} onClick={() => ouvrirDocumentMessage(message)} label="Enregistrer et ouvrir le document" />
                   </div>}
                   </>}
                   <span className="discussion-heure">
                     {heure(message.created_at)}
                     {message.modifie && <small className="discussion-message-modifie"> · modifié</small>}
-                    {elementEnAttente && <small className={`discussion-message-envoi ${elementEnAttente.failed ? "echec" : ""}`}>
-                      · {elementEnAttente.failed ? "Non envoyé" : (estGrindEnLigne() ? "Envoi…" : "En attente")}
+                    {(elementEnAttente || message.media_envoi) && <small className={`discussion-message-envoi ${elementEnAttente?.failed ? "echec" : ""}`} title={elementEnAttente?.failed ? "Échec de l'envoi" : message.media_envoi && progression > 0 ? `Envoi : ${progression}%` : "Envoi en cours"} aria-label={elementEnAttente?.failed ? "Échec de l'envoi" : message.media_envoi && progression > 0 ? `Envoi : ${progression}%` : "Envoi en cours"}>
+                      <i className={`fa-solid ${elementEnAttente?.failed ? "fa-circle-exclamation" : "fa-clock"}`} />
                     </small>}
                     {propre && Number(message.id) > 0 && !message.supprime_pour_tous && <span className={`discussion-etat-message ${message.lu_par_au_moins_un ? "lu" : ""}`} title={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"} aria-label={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"}><i className={`fa-solid ${message.lu_par_au_moins_un ? "fa-check-double" : "fa-check"}`} /></span>}
                   </span>
@@ -2184,7 +2478,6 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           {messageEnEdition && <div className="discussion-reponse-active discussion-edition-active"><span><strong>Modification du message</strong><small>Tu peux modifier ton texte pendant les 15 premières minutes.</small></span><button type="button" onClick={() => { setMessageEnEdition(null); setTexte(""); }} aria-label="Annuler la modification"><i className="fa-solid fa-xmark" /></button></div>}
           {reponse && <div className="discussion-reponse-active"><span><strong>Réponse à {reponse.auteur_nom}</strong><small>{reponse.contenu}</small></span><button type="button" onClick={() => setReponse(null)} aria-label="Annuler la réponse"><i className="fa-solid fa-xmark" /></button></div>}
           {fichier && <div className="discussion-piece-selectionnee"><i className={`fa-solid ${iconePieceSelectionnee(fichier)}`} /><span>{fichier.name}</span><small>{tailleLisible(fichier.size)}</small><button type="button" onClick={() => { pendingMessageIdRef.current = null; pendingMessagePieceRef.current = null; pendingMessagePayloadRef.current = null; setFichier(null); [imagePieceRef, videoPieceRef, documentPieceRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }}><i className="fa-solid fa-xmark" /></button></div>}
-          {envoi && <div className="discussion-progression"><span style={{ width: `${progression}%` }} /></div>}
           <div className={`discussion-compositeur ${vocalEnCours || vocalPreparation ? "vocal-actif" : ""}`}>
             {(vocalEnCours || vocalPreparation) ? (
               <div className="discussion-vocal-enregistrement" role="status" aria-live="polite">
