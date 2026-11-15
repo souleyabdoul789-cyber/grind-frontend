@@ -71,14 +71,7 @@ async function uploaderVocalDiscussionMedia(sessionToken, fichier, onProgress = 
     session_token: sessionToken, file_name: nom, file_size: fichier.size, content_type: mime,
     usage: "discussion",
   }, "la signature du vocal");
-  let uploadUrl;
-  try { uploadUrl = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
-  if (uploadUrl.protocol !== "https:" || uploadUrl.hostname !== "api.cloudinary.com"
-      || !/\/video\/upload$/.test(uploadUrl.pathname) || signature.resource_type !== "video"
-      || signature.media_type !== "audio" || signature.usage !== "discussion"
-      || !signature.api_key || !signature.signature) {
-    throw new Error("Le serveur GRIND a renvoyé une destination vocale invalide.");
-  }
+  const uploadUrl = verifierDestinationCloudinaryDiscussion(signature, "video", "audio");
 
   const asset = await new Promise((resolve, reject) => {
     const formulaire = new FormData();
@@ -88,7 +81,7 @@ async function uploaderVocalDiscussionMedia(sessionToken, fichier, onProgress = 
     formulaire.append("signature", signature.signature);
     Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", signature.upload_url, true);
+    xhr.open("POST", uploadUrl.href, true);
     xhr.timeout = 120000;
     xhr.upload.onprogress = event => {
       if (event.lengthComputable) onProgress?.(Math.min(98, Math.round(event.loaded / event.total * 98)));
@@ -155,14 +148,7 @@ async function uploaderDocumentPriveDiscussion(sessionToken, fichier, onProgress
     session_token: sessionToken, file_name: nom, file_size: fichierNormalise.size,
     content_type: mime, usage: "discussion",
   }, "la signature du document privé");
-  let destination;
-  try { destination = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
-  if (destination.protocol !== "https:" || destination.hostname !== "api.cloudinary.com"
-      || !destination.pathname.endsWith("/raw/upload") || signature.resource_type !== "raw"
-      || signature.media_type !== "document" || signature.usage !== "discussion"
-      || !signature.api_key || !signature.signature || !signature.timestamp) {
-    throw new Error("Le serveur GRIND a renvoyé une destination de document invalide.");
-  }
+  const destination = verifierDestinationCloudinaryDiscussion(signature, "raw", "document");
 
   const asset = await new Promise((resolve, reject) => {
     const formulaire = new FormData();
@@ -172,7 +158,7 @@ async function uploaderDocumentPriveDiscussion(sessionToken, fichier, onProgress
     formulaire.append("signature", signature.signature);
     Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", signature.upload_url, true);
+    xhr.open("POST", destination.href, true);
     xhr.timeout = 120000;
     xhr.upload.onprogress = event => {
       if (event.lengthComputable) onProgress?.(Math.min(98, Math.round(event.loaded / event.total * 98)));
@@ -293,6 +279,31 @@ async function avecSlotUploadDiscussion(operation) {
   }
 }
 
+function verifierDestinationCloudinaryDiscussion(signature, ressourceAttendue, typeMediaAttendu = null) {
+  let destination = null;
+  try { destination = new URL(String(signature?.upload_url || "")); } catch { /* URL invalide */ }
+  const segments = destination?.pathname.split("/").filter(Boolean) || [];
+  const nomCloud = segments[1] || "";
+  const destinationValide = Boolean(destination)
+    && destination.protocol === "https:"
+    && destination.hostname === "api.cloudinary.com"
+    && !destination.port && !destination.username && !destination.password
+    && !destination.search && !destination.hash
+    && segments.length === 4 && segments[0] === "v1_1"
+    && /^[A-Za-z][A-Za-z0-9-]{1,127}$/.test(nomCloud)
+    && segments[2] === ressourceAttendue && segments[3] === "upload";
+  const signatureValide = signature?.resource_type === ressourceAttendue
+    && signature?.usage === "discussion"
+    && (!typeMediaAttendu || signature?.media_type === typeMediaAttendu)
+    && Boolean(signature?.api_key && signature?.signature && signature?.timestamp);
+  if (!destinationValide || !signatureValide) {
+    throw new Error(
+      "Configuration de transfert Cloudinary invalide côté serveur. Vérifie CLOUDINARY_URL ou les trois variables Cloudinary dans la configuration Render de GRIND, puis redémarre le service."
+    );
+  }
+  return destination;
+}
+
 async function uploaderMediaPriveDiscussion(sessionToken, fichier, decoupeVideo = null, onProgress = null) {
   if (!sessionToken || !fichier) throw new Error("Session ou fichier manquant.");
   const nomOriginal = String(fichier.name || "media").replace(/\\/g, "/").split("/").pop().slice(0, 160);
@@ -326,15 +337,8 @@ async function uploaderMediaPriveDiscussion(sessionToken, fichier, decoupeVideo 
     session_token: sessionToken, file_name: nom, file_size: fichier.size, content_type: mime,
     debut_video: decoupeVideo?.debut, fin_video: decoupeVideo?.fin, usage: "discussion",
   }, "la signature du média privé");
-  let destination;
-  try { destination = new URL(signature.upload_url); } catch { throw new Error("Destination Cloudinary invalide."); }
   const resourceType = estVideo ? "video" : "image";
-  if (destination.protocol !== "https:" || destination.hostname !== "api.cloudinary.com"
-      || !destination.pathname.endsWith(`/${resourceType}/upload`)
-      || signature.resource_type !== resourceType || signature.usage !== "discussion"
-      || !signature.api_key || !signature.signature || !signature.timestamp) {
-    throw new Error("Le serveur GRIND a renvoyé une destination de transfert invalide.");
-  }
+  const destination = verifierDestinationCloudinaryDiscussion(signature, resourceType, estVideo ? "video" : "image");
 
   const transmettre = (blob, debut = null, fin = null) => new Promise((resolve, reject) => {
     const formulaire = new FormData();
@@ -344,7 +348,7 @@ async function uploaderMediaPriveDiscussion(sessionToken, fichier, decoupeVideo 
     formulaire.append("signature", signature.signature);
     Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", signature.upload_url, true);
+    xhr.open("POST", destination.href, true);
     xhr.timeout = 15 * 60 * 1000;
     if (debut !== null && fin !== null) {
       xhr.setRequestHeader("Content-Range", `bytes ${debut}-${fin}/${fichier.size}`);
@@ -386,7 +390,7 @@ async function uploaderMediaPriveDiscussion(sessionToken, fichier, decoupeVideo 
         formulaire.append("signature", signature.signature);
         Object.entries(signature.params || {}).forEach(([cle, valeur]) => formulaire.append(cle, String(valeur)));
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", signature.upload_url, true);
+        xhr.open("POST", destination.href, true);
         xhr.timeout = 15 * 60 * 1000;
         xhr.setRequestHeader("Content-Range", `bytes ${debut}-${finExclusive - 1}/${fichier.size}`);
         xhr.setRequestHeader("X-Unique-Upload-Id", uploadId);
