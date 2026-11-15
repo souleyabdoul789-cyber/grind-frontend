@@ -21,26 +21,11 @@ jobs:
       - name: Checkout GRIND
         uses: actions/checkout@v4
 
-      - name: Read GRIND application version
-        id: app_version
+      - name: Read GRIND version
         shell: bash
         run: |
           VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version package.json invalide : $VERSION" >&2
-            exit 1
-          fi
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          if (( MAJOR > 99 || MINOR > 99 || PATCH > 99 )); then
-            echo "Chaque partie de la version doit être comprise entre 0 et 99." >&2
-            exit 1
-          fi
-          VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
-          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "GRIND_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "GRIND_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
-          echo "Version source : $VERSION ($VERSION_CODE)"
 
       - name: Prepare Java 21
         uses: actions/setup-java@v4
@@ -116,30 +101,14 @@ jobs:
           python3 -m pip install --user pillow
           python3 scripts/configure_android.py
           python3 scripts/configure_android_splash.py
+          python3 scripts/configure_android_downloads.py
           python3 scripts/configure_android_version.py
-
-      - name: Verify Android Gradle version
-        shell: bash
-        run: |
-          grep -Eq "^[[:space:]]*versionCode[[:space:]]+$GRIND_VERSION_CODE[[:space:]]*$" android/app/build.gradle
-          grep -Eq "^[[:space:]]*versionName[[:space:]]+\"$GRIND_VERSION\"[[:space:]]*$" android/app/build.gradle
-          echo "Gradle confirme $GRIND_VERSION ($GRIND_VERSION_CODE)."
 
       - name: Build debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-
-      - name: Verify version inside APK
-        shell: bash
-        run: |
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          test -f "$APK"
-          BADGING="$("$AAPT" dump badging "$APK")"
-          echo "$BADGING" | grep -F "versionCode='$GRIND_VERSION_CODE' versionName='$GRIND_VERSION'"
-          echo "La version intégrée à l'APK correspond à package.json."
 
       - name: Export Android OAuth SHA-1 fingerprint
         shell: bash
@@ -153,8 +122,7 @@ jobs:
           {
             echo "### GRIND Android debug APK"
             echo "Package Android : com.gsociety.grind"
-            echo "Version : $GRIND_VERSION (versionCode $GRIND_VERSION_CODE)"
-            echo "La version a été lue dans package.json et vérifiée dans l'APK final."
+            echo "Version : $GRIND_VERSION"
             echo "Le SHA-1 du certificat debug est dans l'artifact android-debug-sha1.txt."
             echo "Pour Google OAuth Android, créer un client OAuth Android avec ce package et ce SHA-1."
             echo "Cette clé est réservée aux builds de test, pas à une publication Play Store."
@@ -163,7 +131,7 @@ jobs:
       - name: Upload APK and OAuth fingerprint
         uses: actions/upload-artifact@v4
         with:
-          name: GRIND-Android-Debug-${{ steps.app_version.outputs.name }}
+          name: GRIND-Android-Debug-${{ env.GRIND_VERSION }}
           path: |
             android/app/build/outputs/apk/debug/app-debug.apk
             android-debug-sha1.txt

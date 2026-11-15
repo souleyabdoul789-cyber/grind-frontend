@@ -1,6 +1,6 @@
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
-const GrindMedia = registerPlugin("GrindMedia");
+const GrindDownloads = registerPlugin("GrindDownloads");
 
 function echapperHtml(value) {
   return String(value ?? "")
@@ -14,7 +14,7 @@ function echapperHtml(value) {
 function nomPdfSecurise(value) {
   const clean = String(value || "document-grind")
     .replace(/\\/g, "-")
-    .replace(/[\/:*?"<>|\u0000-\u001f]/g, "-")
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^\.+/, "")
@@ -76,7 +76,7 @@ export async function telechargerDocumentSallePdf({ titre, sousTitre, classe, au
   const filename = nomPdfSecurise(nomFichier);
 
   if (Capacitor.getPlatform() === "android" && Capacitor.isNativePlatform()) {
-    const result = await GrindMedia.generateTextPdf({
+    const result = await GrindDownloads.generateTextPdf({
       fileName: filename,
       title: String(titre || "Document de classe"),
       subtitle: String(sousTitre || ""),
@@ -84,10 +84,18 @@ export async function telechargerDocumentSallePdf({ titre, sousTitre, classe, au
       author: String(auteur || ""),
       content: text,
     });
-    if (!result?.success || !result?.exists) {
-      throw new Error("Le PDF a été créé mais n'a pas pu être enregistré dans le dossier GRIND.");
+    if (!result?.success || !result?.exists || !result?.fileName) {
+      throw new Error("Le PDF n'a pas pu être enregistré dans Téléchargements/GRIND DOWNLOAD FILES.");
     }
-    return { success: true, local: true, fileName: result.fileName, path: result.path, directory: result.directory, size: result.size };
+    return {
+      success: true,
+      local: true,
+      fileName: result.fileName,
+      path: result.path || null,
+      uri: result.uri || null,
+      directory: result.directory || "Download/GRIND DOWNLOAD FILES",
+      size: Number(result.size) || 0,
+    };
   }
 
   return ouvrirImpressionWeb({ titre, sousTitre, classe, auteur, contenu: text, nomFichier: filename });

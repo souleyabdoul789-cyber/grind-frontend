@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Applique la version Android à partir de l'unique source package.json."""
+"""Synchronise la version Android sur le numéro déclaré dans package.json."""
 from __future__ import annotations
 
 import json
@@ -12,70 +12,64 @@ GRADLE = ROOT / "android" / "app" / "build.gradle"
 
 
 def lire_version() -> tuple[str, int]:
+    if not PACKAGE_JSON.is_file():
+        raise SystemExit(f"package.json introuvable : {PACKAGE_JSON}")
     try:
         donnees = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
         version = str(donnees["version"])
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as erreur:
-        raise SystemExit(f"Impossible de lire la version de {PACKAGE_JSON}: {erreur}") from erreur
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as erreur:
+        raise SystemExit(f"Version GRIND illisible dans package.json : {erreur}") from erreur
 
     match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
     if not match:
-        raise SystemExit(f"Version invalide dans package.json: {version!r} (format X.Y.Z requis).")
-
+        raise SystemExit("La version doit respecter le format strict MAJOR.MINOR.PATCH (ex. 2.10.17).")
     majeur, mineur, correctif = (int(partie) for partie in match.groups())
-    if majeur > 99 or mineur > 99 or correctif > 99:
-        raise SystemExit("Chaque partie de la version doit être comprise entre 0 et 99 pour le versionCode Android.")
-
-    # Formule monotone utilisée par GRIND : 2.10.16 -> 21016.
+    if mineur > 99 or correctif > 99:
+        raise SystemExit("Pour le versionCode Android, MINOR et PATCH doivent rester inférieurs ou égaux à 99.")
     version_code = majeur * 10000 + mineur * 100 + correctif
+    if version_code <= 0 or version_code > 2100000000:
+        raise SystemExit("Le versionCode Android calculé est hors limites.")
     return version, version_code
 
 
-def remplacer_bloc_default_config(source: str, version: str, version_code: int) -> str:
+def main() -> int:
+    version, version_code = lire_version()
+    if not GRADLE.is_file():
+        raise SystemExit(f"Fichier Gradle Android introuvable : {GRADLE}")
+    source = GRADLE.read_text(encoding="utf-8")
     match = re.search(r"defaultConfig\s*\{", source)
     if not match:
         raise SystemExit("Bloc defaultConfig introuvable dans app/build.gradle.")
-
-    debut = match.end()
-    profondeur = 1
-    index = debut
-    while index < len(source) and profondeur:
+    start = match.end()
+    depth = 1
+    index = start
+    while index < len(source) and depth:
         if source[index] == "{":
-            profondeur += 1
+            depth += 1
         elif source[index] == "}":
-            profondeur -= 1
+            depth -= 1
         index += 1
-    if profondeur:
+    if depth:
         raise SystemExit("Bloc defaultConfig Gradle incomplet.")
 
-    bloc = source[debut:index - 1]
-    valeurs = (("versionCode", str(version_code)), ("versionName", f'"{version}"'))
-    for cle, valeur in valeurs:
-        motif = rf"(?m)^([ \t]*){cle}\s+[^\n]+$"
-        if re.search(motif, bloc):
-            bloc = re.sub(motif, lambda element: f"{element.group(1)}{cle} {valeur}", bloc, count=1)
+    block = source[start:index - 1]
+    values = (("versionCode", str(version_code)), ("versionName", f'"{version}"'))
+    for key, value in values:
+        pattern = rf"(?m)^([ \t]*){key}\s+[^\n]+$"
+        if re.search(pattern, block):
+            block = re.sub(pattern, lambda item: f"{item.group(1)}{key} {value}", block, count=1)
         else:
-            bloc = bloc.rstrip() + f"\n        {cle} {valeur}\n    "
+            block = block.rstrip() + f"\n        {key} {value}\n    "
+    updated = source[:start] + block + source[index - 1:]
+    GRADLE.write_text(updated, encoding="utf-8")
 
-    return source[:debut] + bloc + source[index - 1:]
+    controle = GRADLE.read_text(encoding="utf-8")
+    if not re.search(rf"(?m)^\s*versionCode\s+{version_code}\s*$", controle):
+        raise SystemExit("La versionCode Android n'a pas été mise à jour correctement.")
+    if not re.search(rf'(?m)^\s*versionName\s+"{re.escape(version)}"\s*$', controle):
+        raise SystemExit("La versionName Android n'a pas été mise à jour correctement.")
 
-
-def main() -> int:
-    if not GRADLE.is_file():
-        raise SystemExit(f"Fichier Gradle Android introuvable : {GRADLE}")
-
-    version, version_code = lire_version()
-    source = GRADLE.read_text(encoding="utf-8")
-    mis_a_jour = remplacer_bloc_default_config(source, version, version_code)
-    GRADLE.write_text(mis_a_jour, encoding="utf-8")
-
-    verifie = GRADLE.read_text(encoding="utf-8")
-    if not re.search(rf"(?m)^\s*versionCode\s+{version_code}\s*$", verifie):
-        raise SystemExit("Le versionCode Android final ne correspond pas à package.json.")
-    if not re.search(rf'(?m)^\s*versionName\s+"{re.escape(version)}"\s*$', verifie):
-        raise SystemExit("Le versionName Android final ne correspond pas à package.json.")
-
-    print(f"Version Android GRIND configurée et vérifiée : {version} ({version_code}).")
+    print(f"Version Android GRIND configurée : {version} ({version_code}).")
     return 0
 
 
