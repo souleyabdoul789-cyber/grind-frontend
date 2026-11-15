@@ -153,18 +153,20 @@ export default function App() {
     return () => { actif = false; };
   }, []);
 
-  // L'état Wi-Fi seul ne garantit pas l'accès à Internet : on vérifie aussi l'API GRIND.
-  // Une panne réseau ou serveur affiche un écran de reconnexion, puis disparaît automatiquement.
+  // Le statut du navigateur et la disponibilité du serveur sont deux signaux différents.
+  // Une seule erreur de /api/health ne doit pas annoncer à tort une coupure Internet.
   useEffect(() => {
     if (Capacitor.getPlatform() !== "android") return undefined;
     let actif = true;
     let verificationEnCours = false;
+    let echecsApiConsecutifs = 0;
     let controleur = null;
     let delaiAnnulation = null;
 
     const verifierConnexion = async () => {
       if (!actif || verificationEnCours) return;
       if (navigator.onLine === false) {
+        echecsApiConsecutifs = 0;
         setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
         return;
       }
@@ -184,15 +186,22 @@ export default function App() {
         if (!reponse.ok) throw new Error(`Serveur GRIND indisponible (${reponse.status})`);
         const donnees = await reponse.json();
         if (donnees?.status !== "ok") throw new Error("Réponse de santé GRIND invalide");
+        echecsApiConsecutifs = 0;
         if (actif) setEtatConnexion({ disponible: true, verifiee: true, verification: false, motif: null });
       } catch {
         if (actif) {
-          setEtatConnexion({
-            disponible: false,
-            verifiee: true,
-            verification: false,
-            motif: navigator.onLine === false ? "internet" : "service",
-          });
+          if (navigator.onLine === false) {
+            echecsApiConsecutifs = 0;
+            setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
+          } else {
+            echecsApiConsecutifs += 1;
+            if (echecsApiConsecutifs >= 2) {
+              setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "service" });
+            } else {
+              // Garde le dernier état fiable pendant une erreur isolée (latence, timeout ou 5xx).
+              setEtatConnexion((precedent) => ({ ...precedent, verification: false }));
+            }
+          }
         }
       } finally {
         if (delaiAnnulation !== null) window.clearTimeout(delaiAnnulation);
@@ -204,6 +213,7 @@ export default function App() {
 
     const horsLigne = () => {
       controleur?.abort();
+      echecsApiConsecutifs = 0;
       setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
     };
     const enLigne = () => { verifierConnexion(); };
@@ -225,8 +235,8 @@ export default function App() {
 
   useEffect(() => {
     // La vérification réseau ne doit pas retarder l'interface : tant qu'elle
-    // tourne, navigator.onLine sert de signal provisoire. Dès qu'un contrôle
-    // GRIND échoue, les actions serveur sont bloquées jusqu'à la reconnexion.
+    // tourne, navigator.onLine sert de signal provisoire. Une indisponibilité
+    // API confirmée est distincte d'une vraie coupure Internet.
     const apiEnLigne = Capacitor.getPlatform() !== "android"
       || (etatConnexion.verifiee ? etatConnexion.disponible : navigator.onLine !== false);
     window.__GRIND_API_ONLINE = apiEnLigne;
@@ -761,11 +771,11 @@ export default function App() {
     <div className={`app-shell ${discussionPleineEcran ? "app-shell-discussion" : ""}`}>
       <FondAnime />
       {Capacitor.getPlatform() === "android" && etatConnexion.verifiee && !etatConnexion.disponible && !bandeauHorsLigneMasque && (
-        <div className="grind-offline-chip" role="status" aria-label="Aucune connexion à Internet">
+        <div className="grind-offline-chip" role="status" aria-label={etatConnexion.motif === "internet" ? "Connexion Internet indisponible" : "Service GRIND temporairement indisponible"}>
           <img src="/icon-192.png" alt="GRIND" />
           <span className="grind-offline-wifi" aria-hidden="true"><i className="fa-solid fa-wifi" /></span>
-          <strong>Aucune connexion à Internet</strong>
-          <button type="button" onClick={() => setBandeauHorsLigneMasque(true)} aria-label="Fermer l'indicateur hors ligne"><i className="fa-solid fa-xmark" /></button>
+          <strong>{etatConnexion.motif === "internet" ? "Connexion Internet indisponible" : "Service GRIND temporairement indisponible"}</strong>
+          <button type="button" onClick={() => setBandeauHorsLigneMasque(true)} aria-label="Fermer l'indicateur de connexion"><i className="fa-solid fa-xmark" /></button>
         </div>
       )}
       {toastGrind && <div className="grind-toast" role="status">{toastGrind}</div>}

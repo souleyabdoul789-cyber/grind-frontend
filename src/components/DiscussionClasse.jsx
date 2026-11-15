@@ -1913,7 +1913,23 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
   async function copierSelectionMessages() {
     const contenus = messages
       .filter(message => messagesSelectionnes.includes(message.id) && !message.supprime_pour_tous)
-      .map(message => String(message.contenu || "").trim())
+      .map(message => {
+        const parties = [];
+        const texte = String(message.contenu || "").trim();
+        if (texte) parties.push(texte);
+        if (message.piece) {
+          const type = String(message.piece.type || "").toLowerCase();
+          const libelles = {
+            image: "Image partagée",
+            video: "Vidéo partagée",
+            audio: "Vocal partagé",
+            document: "Document partagé",
+          };
+          const nom = String(message.piece.nom || libelles[type] || "Pièce jointe").trim();
+          if (nom) parties.push(nom);
+        }
+        return parties.join("\n");
+      })
       .filter(Boolean);
     if (!contenus.length) return;
     const texteCopie = contenus.join("\n\n");
@@ -2076,7 +2092,8 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
           {menuSelectionOuvert && <div className="discussion-selection-menu">
             {messagesSelectionnes.some(id => {
               const cible = messages.find(message => message.id === id);
-              return cible && !cible.supprime_pour_tous && !!String(cible.contenu || "").trim();
+              return cible && !cible.supprime_pour_tous
+                && (!!String(cible.contenu || "").trim() || !!cible.piece);
             }) && <button type="button" onClick={copierSelectionMessages}><i className="fa-solid fa-copy" /> Copier</button>}
             {messagesSelectionnes.length === 1 && messageEditable(messages.find(m => m.id === messagesSelectionnes[0])) && <button type="button" onClick={modifierSelection}><i className="fa-solid fa-pen" /> Modifier</button>}
             {messagesSelectionnes.length === 1 && !messages.find(m => m.id === messagesSelectionnes[0])?.supprime_pour_tous && <button type="button" onClick={() => { const cible = messages.find(m => m.id === messagesSelectionnes[0]); if (cible) commencerReponse(cible); setMessagesSelectionnes([]); setMenuSelectionOuvert(false); }}><i className="fa-solid fa-reply" /> Répondre</button>}
@@ -2136,6 +2153,22 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
                     {propre && Number(message.id) > 0 && !message.supprime_pour_tous && <span className={`discussion-etat-message ${message.lu_par_au_moins_un ? "lu" : ""}`} title={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"} aria-label={message.lu_par_au_moins_un ? "Vu par au moins un membre" : "Envoyé"}><i className={`fa-solid ${message.lu_par_au_moins_un ? "fa-check-double" : "fa-check"}`} /></span>}
                   </span>
                 </div>
+                {message.piece && !message.supprime_pour_tous && !message.optimistic && Number(message.id) > 0 && (
+                  <button
+                    type="button"
+                    className={`discussion-selection-media ${messagesSelectionnes.includes(message.id) ? "actif" : ""}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      basculerSelectionMessage(message.id);
+                    }}
+                    aria-pressed={messagesSelectionnes.includes(message.id)}
+                    aria-label={messagesSelectionnes.includes(message.id) ? "Désélectionner le média" : "Sélectionner le média pour le copier ou le supprimer"}
+                    title="Sélectionner le média pour le copier ou le supprimer"
+                  >
+                    <i className={messagesSelectionnes.includes(message.id) ? "fa-solid fa-square-check" : "fa-regular fa-square"} />
+                    {messagesSelectionnes.includes(message.id) ? "Sélectionné" : "Sélectionner"}
+                  </button>
+                )}
                 {!message.supprime_pour_tous && !message.optimistic && <button type="button" className="discussion-repondre-rapide" onClick={() => commencerReponse(message)} title="Répondre"><i className="fa-solid fa-reply" /></button>}
               </div>
               {propre && <AvatarIcone username={message.auteur} taille={30} />}

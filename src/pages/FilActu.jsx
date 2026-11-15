@@ -105,14 +105,13 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
     try {
       const res = await listerPosts(filtre, sessionToken);
       const entrants = Array.isArray(res.posts) ? res.posts : [];
-      setPosts((anciens) => {
-        const parId = new Map(entrants.map((post) => [post.post_id ?? post.id, post]));
-        const anciensIds = new Set(anciens.map((post) => post.post_id ?? post.id));
-        const fusion = anciens.map((ancien) => ({ ...ancien, ...(parId.get(ancien.post_id ?? ancien.id) || {}) }));
-        entrants.forEach((post) => { const id = post.post_id ?? post.id; if (!anciensIds.has(id)) fusion.push(post); });
-        try { localStorage.setItem(cleCachePosts, JSON.stringify(fusion.slice(-250))); } catch {}
-        return fusion;
-      });
+
+      // /api/posts retourne la liste complète visible pour ce compte et ce filtre.
+      // Ne pas fusionner les anciennes entrées du cache : un post supprimé côté
+      // serveur serait sinon ressuscité à chaque actualisation du fil.
+      postsActuels.current = entrants;
+      setPosts(entrants);
+      try { localStorage.setItem(cleCachePosts, JSON.stringify(entrants.slice(-250))); } catch {}
       setErreur(null);
     } catch (error) {
       if (!postsActuels.current.length) setErreur(error.message || "Impossible de charger les actualités.");
