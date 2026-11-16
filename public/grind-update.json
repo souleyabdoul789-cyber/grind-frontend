@@ -1,0 +1,11 @@
+{
+  "version": "2.10.18",
+  "downloadUrl": "https://www.mediafire.com/file/ynfql3kz04yb5wq/GRIND.apk/file",
+  "platform": "android",
+  "releaseNotes": [
+    "Ajout d'un centre d'aide détaillé dans les paramètres.",
+    "Ajout de la vérification des mises à jour Android depuis les paramètres.",
+    "Amélioration de la reprise hors ligne avec revalidation de session en arrière-plan.",
+    "Amélioration des connaissances et de la disponibilité de l'assistant d'aide GRIND."
+  ]
+}

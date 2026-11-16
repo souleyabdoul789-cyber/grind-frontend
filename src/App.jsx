@@ -28,6 +28,32 @@ function extraireCodeDepuisUrl() {
   return correspondance ? decodeURIComponent(correspondance[1]) : null;
 }
 
+function lireCachePinValide(cle) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(cle) || "null");
+    const verifieA = Number(cache?.checkedAt);
+    const tempsEcoule = Number.isFinite(verifieA) && verifieA > 0
+      ? Math.max(0, (Date.now() - verifieA) / 1000)
+      : Infinity;
+    const ageCacheValide = Number.isFinite(tempsEcoule) && tempsEcoule < 48 * 60 * 60;
+    const secondesRestantes = Math.max(0, Number(cache?.status?.remaining_seconds || 0) - tempsEcoule);
+    const pinValide = cache?.status?.configured === true
+      && cache.status.required === false
+      && secondesRestantes > 0;
+
+    if (!ageCacheValide || !pinValide) return null;
+    return {
+      ...cache.status,
+      required: false,
+      remaining_seconds: Math.floor(secondesRestantes),
+      loading: false,
+      offline: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [sessionToken, setSessionToken] = useState(null);
   const [profilComplet, setProfilComplet] = useState(false);
@@ -320,9 +346,13 @@ export default function App() {
       return;
     }
 
-    // Hors ligne, on conserve uniquement le profil déjà validé sur cet appareil.
-    // Les actions sensibles restent bloquées tant que le serveur est inaccessible.
-    if (!estGrindEnLigne() && localStorage.getItem("grind_profil_complet") === "1") {
+    // Si une confirmation PIN serveur est encore valide en cache sur cet appareil,
+    // le profil local déjà terminé peut être réaffiché sans attendre la détection
+    // réseau. Le PIN reste l'autorisation préalable : sans cache PIN valide,
+    // aucune ouverture hors ligne n'est accordée.
+    const cleCachePinProfil = `grind_pin_status_${nouveauUsername || "compte"}_${String(token || "").slice(-12)}`;
+    const pinLocalValidePourProfil = token ? lireCachePinValide(cleCachePinProfil) : null;
+    if (pinLocalValidePourProfil && localStorage.getItem("grind_profil_complet") === "1") {
       setProfilComplet(true);
       setProfilPret(true);
       return;
@@ -408,17 +438,23 @@ export default function App() {
     }
   }, []);
 
-
+  // Restaure immédiatement un PIN déjà confirmé sur cet appareil (moins de 48 h).
+  // La requête serveur part en parallèle : elle ne bloque plus l'ouverture de GRIND.
+  // En l'absence de preuve locale valide, le verrou PIN reste obligatoire.
   useEffect(() => {
     if (!sessionToken) { setPinStatus(null); return; }
     let actif = true;
-    setPinStatus({ loading: true });
     const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
+    const pinLocalValide = lireCachePinValide(pinCacheKey);
+
+    if (pinLocalValide) setPinStatus(pinLocalValide);
+    else setPinStatus({ loading: true });
+
     statutPin(sessionToken)
       .then((status) => {
         if (!actif) return;
         try { localStorage.setItem(pinCacheKey, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
-        setPinStatus({ ...status, loading: false });
+        setPinStatus({ ...status, loading: false, offline: false });
       })
       .catch((erreur) => {
         if (!actif) return;
@@ -427,22 +463,17 @@ export default function App() {
           return;
         }
 
-        let cache = null;
-        try { cache = JSON.parse(localStorage.getItem(pinCacheKey) || "null"); } catch {}
-        const elapsed = cache?.checkedAt ? Math.max(0, (Date.now() - cache.checkedAt) / 1000) : Infinity;
-        const ageValide = Number.isFinite(elapsed) && elapsed < 48 * 60 * 60;
-        const secondesRestantes = Math.max(0, Number(cache?.status?.remaining_seconds || 0) - elapsed);
-        const pinEncoreValide = cache?.status?.configured === true && cache.status.required === false && secondesRestantes > 0;
-        const reseauInjoignable = !estGrindEnLigne() || !erreur?.status;
-        if (reseauInjoignable && ageValide && pinEncoreValide) {
-          setPinStatus({ ...cache.status, required: false, remaining_seconds: Math.floor(secondesRestantes), loading: false, offline: true });
+        // Un cache PIN encore valable autorise l'accès local pendant la panne.
+        // Il ne valide jamais un PIN absent, expiré ou appartenant à un autre jeton.
+        if (pinLocalValide && (!estGrindEnLigne() || !erreur?.status)) {
+          setPinStatus(pinLocalValide);
           return;
         }
-        // Render peut être en réveil ou une requête peut échouer ponctuellement.
-        // On garde le jeton et on retente le contrôle au lieu de renvoyer au login
-        // ou de deviner à tort si le compte possède déjà un PIN.
+
+        // Pas de preuve locale valide : on garde le verrou et on relance en arrière-plan.
         setPinStatus({ loading: true, verification_pending: true });
       });
+
     return () => { actif = false; };
   }, [sessionToken]);
 
@@ -457,29 +488,19 @@ export default function App() {
         if (!actif) return;
         const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
         try { localStorage.setItem(pinCacheKey, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
-        setPinStatus({ ...status, loading: false });
+        setPinStatus({ ...status, loading: false, offline: false });
       } catch (erreur) {
         if (!actif) return;
         if (erreur?.status === 401) {
           invaliderSessionConfirmee(sessionToken);
           return;
         }
-        // Si la connexion vient réellement de tomber, réutilise uniquement le
-        // dernier PIN serveur confirmé, encore dans sa fenêtre de validité de 48 h.
-        // Aucun cache absent/expiré ne permet de contourner le verrou PIN.
         const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
-        let cache = null;
-        try { cache = JSON.parse(localStorage.getItem(pinCacheKey) || "null"); } catch {}
-        const elapsed = cache?.checkedAt ? Math.max(0, (Date.now() - cache.checkedAt) / 1000) : Infinity;
-        const ageValide = Number.isFinite(elapsed) && elapsed < 48 * 60 * 60;
-        const secondesRestantes = Math.max(0, Number(cache?.status?.remaining_seconds || 0) - elapsed);
-        const pinEncoreValide = cache?.status?.configured === true && cache.status.required === false && secondesRestantes > 0;
-        const reseauInjoignable = !estGrindEnLigne() || !erreur?.status;
-        if (reseauInjoignable && ageValide && pinEncoreValide) {
-          setPinStatus({ ...cache.status, required: false, remaining_seconds: Math.floor(secondesRestantes), loading: false, offline: true });
+        const pinLocalValide = lireCachePinValide(pinCacheKey);
+        if (pinLocalValide && (!estGrindEnLigne() || !erreur?.status)) {
+          setPinStatus(pinLocalValide);
           return;
         }
-        // Réessai borné en fréquence : pas de boucle rapide ni de déconnexion.
         timer = window.setTimeout(retenter, 10000);
       }
     };
@@ -491,11 +512,15 @@ export default function App() {
     };
   }, [sessionToken, pinStatus?.verification_pending]);
 
+  // Si GRIND est ouvert avec un PIN local valide, le serveur est recontacté toutes
+  // les 20 secondes en arrière-plan jusqu'au retour du réseau/API.
   useEffect(() => {
     if (!sessionToken || !pinStatus?.offline) return undefined;
     let actif = true;
+    let verificationEnCours = false;
     const revalider = async () => {
-      if (!estGrindEnLigne()) return;
+      if (!estGrindEnLigne() || verificationEnCours) return;
+      verificationEnCours = true;
       try {
         const status = await statutPin(sessionToken);
         if (!actif) return;
@@ -503,15 +528,18 @@ export default function App() {
         try { localStorage.setItem(key, JSON.stringify({ status, checkedAt: Date.now() })); } catch {}
         setPinStatus({ ...status, loading: false, offline: false });
       } catch (erreur) {
-        if (!actif) return;
-        if (erreur?.status === 401) invaliderSessionConfirmee(sessionToken);
+        if (actif && erreur?.status === 401) invaliderSessionConfirmee(sessionToken);
+      } finally {
+        verificationEnCours = false;
       }
     };
     const statutApi = (event) => { if (event.detail?.online) revalider(); };
     window.addEventListener("online", revalider);
     window.addEventListener("grind-api-status", statutApi);
+    const intervalle = window.setInterval(revalider, 20000);
     return () => {
       actif = false;
+      window.clearInterval(intervalle);
       window.removeEventListener("online", revalider);
       window.removeEventListener("grind-api-status", statutApi);
     };
@@ -558,7 +586,9 @@ export default function App() {
   async function apresValidationPin() {
     try {
       const nouveauStatut = await statutPin(sessionToken);
-      setPinStatus({ ...nouveauStatut, loading: false });
+      const pinCacheKey = `grind_pin_status_${localStorage.getItem("grind_username") || username || "compte"}_${String(sessionToken).slice(-12)}`;
+      try { localStorage.setItem(pinCacheKey, JSON.stringify({ status: nouveauStatut, checkedAt: Date.now() })); } catch {}
+      setPinStatus({ ...nouveauStatut, loading: false, offline: false });
     } catch (erreur) {
       if (erreur?.status === 401) invaliderSessionConfirmee(sessionToken);
       else setPinStatus({ loading: true, verification_pending: true });
@@ -680,7 +710,6 @@ export default function App() {
     setCodeAttente(null);
     window.history.replaceState({}, "", "/");
   }
-
 
   if (paysAccess.blocked && role !== "admin" && (!forcerConnexionAdmin || !!sessionToken)) {
     return <PaysIndisponible
