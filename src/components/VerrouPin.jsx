@@ -34,6 +34,20 @@ export default function VerrouPin({ sessionToken, statut, onValide }) {
   const [info, setInfo] = useState("");
   const configuration = !statut?.configured;
 
+  if (statut?.verification_pending) {
+    return (
+      <main className="ecran-pin">
+        <div className="carte carte-pin">
+          <div className="logo-grind"><i className="fa-solid fa-brain"></i><span>GRIND</span></div>
+          <p>La connexion au serveur GRIND est indisponible pour le moment.</p>
+          <p>GRIND réessaie automatiquement. L'accès hors ligne est autorisé uniquement si le PIN a déjà été confirmé sur cet appareil et si sa période de validité de 48 heures n'est pas terminée.</p>
+          <p>Reconnecte-toi à Internet pour confirmer une session qui n'a pas encore de validation PIN locale valide.</p>
+          <div className="info" role="status"><span className="grind-spinner" aria-hidden="true" /> Nouvelle tentative automatique…</div>
+        </div>
+      </main>
+    );
+  }
+
   if (statut?.loading) {
     return <main className="ecran-pin"><div className="carte carte-pin"><div className="logo-grind"><i className="fa-solid fa-brain"></i><span>GRIND</span></div><p>Vérification de la session…</p></div></main>;
   }

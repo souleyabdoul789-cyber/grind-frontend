@@ -22,11 +22,12 @@ async function fetchApi(url, options) {
   }
 }
 
-async function poster(url, body) {
+async function poster(url, body, options = {}) {
   const res = await fetchApi(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: options.signal,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -149,8 +150,31 @@ export function oublierCompteAppareil(sessionToken, username) {
   return poster(`${GRIND_URL}/api/compte/appareils/oublier`, { session_token: sessionToken, username, device_id: obtenirDeviceId() });
 }
 
-export function statutPin(sessionToken) {
-  return poster(`${GRIND_URL}/api/security/pin/status`, { session_token: sessionToken });
+export async function statutPin(sessionToken) {
+  // Sans délai maximal, un fetch suspendu par la WebView Android garde le verrou
+  // sur "Vérification de la session…" et empêche App.jsx d'utiliser le cache PIN.
+  // Ce contrôle est idempotent : on peut l'interrompre sans risque côté serveur.
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 9000);
+  try {
+    const statut = await poster(`${GRIND_URL}/api/security/pin/status`, { session_token: sessionToken }, {
+      signal: controller.signal,
+    });
+    // Une réponse vide/incomplète ne doit jamais être interprétée comme un PIN validé.
+    if (!statut || typeof statut.configured !== "boolean" || typeof statut.required !== "boolean") {
+      throw new Error("Le serveur a renvoyé un statut PIN incomplet.");
+    }
+    return statut;
+  } catch (erreur) {
+    if (controller.signal.aborted) {
+      const erreurDelai = new Error("La vérification du PIN n'a pas répondu à temps. GRIND vérifie la connexion puis réessaie.");
+      erreurDelai.cause = erreur;
+      throw erreurDelai;
+    }
+    throw erreur;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 export function configurerPin(sessionToken, pin) {
   return poster(`${GRIND_URL}/api/security/pin/configurer`, { session_token: sessionToken, pin });
@@ -431,7 +455,7 @@ export async function uploaderDocument(sessionToken, fichier, onProgress = null)
   formulaire.append("session_token", sessionToken);
   formulaire.append("file", fichierNormalise, nom);
   const resultat = await envoyerXHR(`${GRIND_URL}/api/media/document`, formulaire, {
-    onProgress: (charge, total) => onProgress?.(total ? Math.round(charge / total * 100) : 0),
+    onProgress: (charge, total) => onProgress?.(total ? Math.round(charge * 100 / total) : 0),
     timeout: 5 * 60 * 1000,
   });
   onProgress?.(100);
