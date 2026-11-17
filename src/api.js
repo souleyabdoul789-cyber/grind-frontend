@@ -97,13 +97,58 @@ export function finaliserNomProfilInscription(jetonInscription, username) {
   });
 }
 
-export function connecterGrind(username, password) {
+async function reveillerServeurGrind() {
+  if (navigator.onLine === false) {
+    throw new Error("Aucune connexion à Internet. Vérifie ton réseau puis réessaie.");
+  }
+
+  let derniereErreur = null;
+  // Render peut mettre plusieurs dizaines de secondes à réveiller une instance inactive.
+  // GET /api/health est sans effet de bord : on peut le retenter sans risque de doublon.
+  for (let tentative = 0; tentative < 2; tentative += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), tentative === 0 ? 70000 : 22000);
+    try {
+      const res = await fetchApi(`${GRIND_URL}/api/health`, {
+        method: "GET",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const donnees = await res.json().catch(() => ({}));
+        if (donnees?.status === "ok") return;
+        throw new Error("Le serveur GRIND a renvoyé une réponse de disponibilité invalide.");
+      }
+      const erreur = new Error(`Le serveur GRIND démarre encore (HTTP ${res.status}).`);
+      erreur.status = res.status;
+      derniereErreur = erreur;
+      if (![408, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+        throw Object.assign(erreur, { permanent: true });
+      }
+    } catch (erreur) {
+      if (erreur?.permanent) throw erreur;
+      derniereErreur = controller.signal.aborted
+        ? new Error("Le démarrage du serveur GRIND prend plus de temps que prévu.")
+        : erreur;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    if (tentative === 0) await pauseReessaiMedia(1400);
+  }
+
+  throw new Error(derniereErreur?.message || "Le serveur GRIND ne répond pas encore. Réessaie dans quelques instants.");
+}
+
+export async function connecterGrind(username, password) {
+  await reveillerServeurGrind();
   return poster(`${GRIND_URL}/api/compte/login`, { username, password });
 }
 
 export async function connecterGoogle(credential, username = null, cguAcceptees = false, password = null) {
+  await reveillerServeurGrind();
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 25000);
+  const timeout = window.setTimeout(() => controller.abort(), 35000);
   try {
     const res = await fetchApi(`${GRIND_URL}/api/compte/google`, {
       method: "POST",
@@ -122,7 +167,7 @@ export async function connecterGoogle(credential, username = null, cguAcceptees 
     return data;
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error("La vérification Google a dépassé 25 secondes. Vérifie la connexion au serveur GRIND puis réessaie.");
+      throw new Error("La vérification Google a dépassé 35 secondes. Vérifie la connexion au serveur GRIND puis réessaie.");
     }
     throw error;
   } finally {

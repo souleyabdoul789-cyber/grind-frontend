@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { listerPosts, creerPost, uploaderMedia, uploaderDocument, estGrindEnLigne } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
-import EditeurPhoto from "../components/EditeurPhoto.jsx";
 import EditeurVideo from "../components/EditeurVideo.jsx";
 import EtatVide from "../components/EtatVide.jsx";
 import ProfilPublic from "../components/ProfilPublic.jsx";
@@ -50,8 +49,8 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
 
   const [fichierBrut, setFichierBrut] = useState(null);
   const [fichiersGalerie, setFichiersGalerie] = useState([]);
-  const [editeurOuvert, setEditeurOuvert] = useState(null); // "photo" | "video" | null
-  const [fichierFinal, setFichierFinal] = useState(null); // Blob (photo) ou File original (video)
+  const [editeurOuvert, setEditeurOuvert] = useState(null); // "video" | null
+  const [fichierFinal, setFichierFinal] = useState(null); // Fichier image original ou vidéo originale
   const [documentFinal, setDocumentFinal] = useState(null);
   const [documentTitre, setDocumentTitre] = useState("");
   const [etablissementChoisi, setEtablissementChoisi] = useState("");
@@ -168,7 +167,7 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
         return;
       }
       setFichiersGalerie(selection);
-      setFichierBrut(null); setFichierFinal(null); setDecoupeVideo(null);
+      setFichierBrut(null); setFichierFinal(null); setDecoupeVideo(null); setEditeurOuvert(null);
       setApercuMedia({ estGalerie: true, items: selection.map(f => ({ nom: f.name, url: URL.createObjectURL(f) })) });
       return;
     }
@@ -181,9 +180,18 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
       return;
     }
     setFichierBrut(fichier);
-    if (estVideo(fichier)) setEditeurOuvert("video");
-    else if (estImage(fichier)) setEditeurOuvert("photo");
-    else {
+    if (estVideo(fichier)) {
+      setFichierFinal(null);
+      setDecoupeVideo(null);
+      setEditeurOuvert("video");
+    } else if (estImage(fichier)) {
+      // L'image originale est conservée : aucun recadrage carré ni réencodage.
+      setFichierFinal(fichier);
+      setDecoupeVideo(null);
+      setApercuMedia({ url: URL.createObjectURL(fichier), estVideo: false });
+      setEditeurOuvert(null);
+      setErreur(null);
+    } else {
       setFichierBrut(null);
       setFichierFinal(null);
       setApercuMedia(null);
@@ -208,12 +216,6 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
       setErreur(null); setMenuPiecesOuvert(false);
     }
     e.target.value = "";
-  }
-
-  function validerEditionPhoto(blob) {
-    setFichierFinal(blob);
-    setApercuMedia({ url: URL.createObjectURL(blob), estVideo: false });
-    setEditeurOuvert(null);
   }
 
   function validerEditionVideo({ debut, fin }) {
@@ -328,12 +330,6 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
           <i className="fa-solid fa-star"></i> Démo
         </button>
       </div>
-
-      {editeurOuvert === "photo" && (
-        <div className="carte-post formulaire-post publication-composer">
-          <EditeurPhoto fichier={fichierBrut} onValider={validerEditionPhoto} onAnnuler={annulerEdition} />
-        </div>
-      )}
 
       {editeurOuvert === "video" && (
         <div className="carte-post formulaire-post publication-composer">

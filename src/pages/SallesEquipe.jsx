@@ -14,7 +14,6 @@ import {
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import BadgeCompte from "../components/BadgeCompte.jsx";
 import EditeurVideo from "../components/EditeurVideo.jsx";
-import EditeurPhoto from "../components/EditeurPhoto.jsx";
 import { ROLES_EQUIPE, libelleRole, formaterDate } from "../moderationInfos.js";
 
 /* ------------------------------- Équipe ------------------------------- */
@@ -252,7 +251,6 @@ export function SalleAnnonces({ sessionToken, role = "admin", username = "" }) {
   const [fichier, setFichier] = useState(null);
   const [apercu, setApercu] = useState(null);
   const [editionVideo, setEditionVideo] = useState(null);
-  const [editionPhoto, setEditionPhoto] = useState(null);
   const [decoupeVideo, setDecoupeVideo] = useState(null);
   const [important, setImportant] = useState(false);
   const [epinglee, setEpinglee] = useState(false);
@@ -276,11 +274,14 @@ export function SalleAnnonces({ sessionToken, role = "admin", username = "" }) {
     const f = e.target.files?.[0] || null;
     setFichier(f);
     setEditionVideo(null);
-    setEditionPhoto(null);
     setDecoupeVideo(null);
     if (!f) { setApercu(null); return; }
-    const type = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : "document";
     const extension = String(f.name || "").split(".").pop().toLowerCase();
+    const type = f.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp"].includes(extension)
+      ? "image"
+      : f.type.startsWith("video/") || ["mp4", "mov", "webm"].includes(extension)
+        ? "video"
+        : "document";
     const documentOk = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(f.type) ||
       ((f.type === "" || f.type === "application/octet-stream") && ["pdf", "docx"].includes(extension));
     if (type === "document" && !documentOk) {
@@ -290,7 +291,12 @@ export function SalleAnnonces({ sessionToken, role = "admin", username = "" }) {
       setErreur(`Fichier trop lourd (max ${type === "document" ? 15 : 25} Mo).`); setFichier(null); setApercu(null); return;
     }
     if (type === "video") { setEditionVideo(f); setApercu(null); setErreur(null); return; }
-    if (type === "image") { setEditionPhoto(f); setApercu(null); setErreur(null); return; }
+    if (type === "image") {
+      // Prévisualisation directe : l'original est envoyé sans recadrage ni compression forcée.
+      setApercu({ url: URL.createObjectURL(f), type: "image", nom: f.name });
+      setErreur(null);
+      return;
+    }
     setApercu({ url: null, type, nom: f.name });
     setErreur(null);
   }
@@ -307,7 +313,7 @@ export function SalleAnnonces({ sessionToken, role = "admin", username = "" }) {
         important, epinglee,
       });
       setMessage(estAdministrateur ? "Annonce GRIND publiée. Les utilisateurs connectés sont notifiés." : "Annonce publiée. Les utilisateurs connectés sont notifiés.");
-      setTitre(""); setContenu(""); setFichier(null); setApercu(null); setEditionVideo(null); setEditionPhoto(null); setDecoupeVideo(null); setImportant(false); setEpinglee(false);
+      setTitre(""); setContenu(""); setFichier(null); setApercu(null); setEditionVideo(null); setDecoupeVideo(null); setImportant(false); setEpinglee(false);
       await charger();
     } catch (err) { setErreur(err.message); }
     finally { setEnvoi(false); }
@@ -331,20 +337,19 @@ export function SalleAnnonces({ sessionToken, role = "admin", username = "" }) {
         <input value={titre} onChange={(e) => setTitre(e.target.value)} placeholder="Titre de l'annonce" maxLength={120} style={{ marginBottom: 10 }} />
         <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} placeholder="Légende ou message officiel..." rows={5} maxLength={3000} style={{ resize: "vertical", marginBottom: 12 }} />
         <div className="compteur-caracteres">{contenu.length} / 3 000</div>
-        {editionPhoto && <div className="annonce-editeur-photo"><p className="info">Ajuste la photo officielle avant publication.</p><EditeurPhoto fichier={editionPhoto} onValider={(blob) => { const photo = new File([blob], "annonce-grind.jpg", { type: "image/jpeg" }); setFichier(photo); setApercu({ url: URL.createObjectURL(photo), type: "image", nom: photo.name }); setEditionPhoto(null); }} onAnnuler={() => { setFichier(null); setEditionPhoto(null); }} /></div>}
         {editionVideo && <div className="annonce-editeur-video"><p className="info">Prépare le clip de l'annonce (59 minutes maximum).</p><EditeurVideo fichier={editionVideo} onValider={({ debut, fin }) => { setDecoupeVideo({ debut, fin }); setEditionVideo(null); setApercu({ url: URL.createObjectURL(fichier), type: "video", nom: fichier.name }); }} onAnnuler={() => { setFichier(null); setEditionVideo(null); setDecoupeVideo(null); }} /></div>}
         {apercu && <div className="apercu-media-form annonce-apercu-admin">
           {apercu.type === "image" ? <img src={apercu.url} alt="Aperçu de l'annonce" /> : apercu.type === "video" ? <video src={apercu.url} controls playsInline preload="metadata" /> : <div className="apercu-document"><i className="fa-solid fa-file-lines"></i><span>{apercu.nom}</span></div>}
           <button type="button" className="bouton-retirer-media" onClick={() => { setFichier(null); setApercu(null); setEditionVideo(null); setDecoupeVideo(null); }} aria-label="Retirer la pièce jointe"><i className="fa-solid fa-xmark"></i></button>
         </div>}
-        {!editionPhoto && !editionVideo && <label className="bouton-ajouter-media bouton-document-annonce"><i className="fa-solid fa-paperclip"></i> Ajouter photo, vidéo ou document<input type="file" accept="image/*,video/*,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={choisirFichier} hidden /></label>}
+        {!editionVideo && <label className="bouton-ajouter-media bouton-document-annonce"><i className="fa-solid fa-paperclip"></i> Ajouter photo, vidéo ou document<input type="file" accept="image/*,video/*,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={choisirFichier} hidden /></label>}
         {estAdministrateur && (
           <div className="options-annonce-admin">
             <label><input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} /> <span><strong>Information importante</strong><small>Reste visible dans le centre de notifications et ne peut pas être masquée.</small></span></label>
             <label><input type="checkbox" checked={epinglee} onChange={(e) => setEpinglee(e.target.checked)} /> <span><strong>Épingler l’annonce</strong><small>Place l’annonce en tête des informations publiées.</small></span></label>
           </div>
         )}
-        <button type="button" className="bouton-admin" onClick={publier} disabled={envoi || !!editionVideo || !!editionPhoto || titre.trim().length < 3 || (!contenu.trim() && !fichier)}><i className="fa-solid fa-paper-plane"></i> {envoi ? <><span className="grind-spinner" aria-hidden="true" /> Publication en cours</> : "Publier à tous"}</button>
+        <button type="button" className="bouton-admin" onClick={publier} disabled={envoi || !!editionVideo || titre.trim().length < 3 || (!contenu.trim() && !fichier)}><i className="fa-solid fa-paper-plane"></i> {envoi ? <><span className="grind-spinner" aria-hidden="true" /> Publication en cours</> : "Publier à tous"}</button>
         {message && <div className="info" style={{ color: "var(--succes)", marginTop: 10 }}>{message}</div>}
         {erreur && <div className="erreur" style={{ marginTop: 10 }}>{erreur}</div>}
       </div>

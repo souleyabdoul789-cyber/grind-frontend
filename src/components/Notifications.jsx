@@ -208,6 +208,10 @@ export default function Notifications({ sessionToken }) {
 
     socket.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      if (data.type === "annonce") {
+        // Le bandeau du fil se met à jour dès la réception de l'annonce.
+        window.dispatchEvent(new CustomEvent("grind-annonce-publiee", { detail: { annonce_id: Number(data.id) } }));
+      }
       // L'annonce arrive avec son numéro dans `id` : on le range dans `numero`
       // avant de donner à la notification son identifiant local.
       const base = data.type === "annonce" ? { ...data, numero: data.id } : data;

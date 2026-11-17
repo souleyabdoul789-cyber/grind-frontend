@@ -1,0 +1,270 @@
+/* Identité éditoriale des annonces GRIND — tons brun doux et crème. */
+.grind-annonces-section {
+  min-width: 0;
+  margin: 0 0 18px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(157, 124, 94, .25);
+  border-radius: 18px;
+  background: var(--card, #fffdfa);
+  box-shadow: 0 8px 26px rgba(65, 45, 29, .055);
+}
+.grind-annonces-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  padding: 15px 17px;
+  border-bottom: 1px solid rgba(157, 124, 94, .16);
+  background: linear-gradient(110deg, rgba(205, 174, 144, .16), rgba(255, 255, 255, .8));
+}
+.grind-annonces-identite, .annonce-modal-identite {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.grind-annonce-brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 9px 4px 5px;
+  border: 1px solid rgba(117, 82, 54, .28);
+  border-radius: 999px;
+  background: #f0e2d3;
+  color: #68492f;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .72);
+  line-height: 1;
+}
+.grind-annonce-brand-g {
+  display: grid;
+  place-items: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: #8b6547;
+  color: #fff8f0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+}
+.grind-annonce-brand strong { font-size: 11px; font-weight: 850; letter-spacing: .11em; }
+.grind-annonce-brand > i {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+  border-radius: 50%;
+  background: #8b6547;
+  color: #fffaf4;
+  font-size: 8px;
+}
+.grind-annonces-heading-copy, .annonce-modal-header-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.grind-annonces-heading-copy strong, .annonce-modal-header-copy strong {
+  color: var(--text, #342a22);
+  font-size: 13px;
+  font-weight: 780;
+}
+.grind-annonces-heading-copy small, .annonce-modal-header-copy small {
+  color: var(--text-dim, #82766b);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.grind-annonces-heading-tag {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid rgba(139, 101, 71, .18);
+  border-radius: 999px;
+  background: rgba(139, 101, 71, .07);
+  color: #806044;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .1em;
+}
+.grind-annonces-liste { display: grid; gap: 0; }
+.grind-annonce-card {
+  min-width: 0;
+  margin: 0;
+  padding: 15px 17px 13px;
+  border: 0;
+  border-bottom: 1px solid rgba(157, 124, 94, .15);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.grind-annonce-card:last-child { border-bottom: 0; }
+.grind-annonce-card.annonce-fil-importante {
+  background: linear-gradient(100deg, rgba(206, 173, 140, .10), transparent 70%);
+  box-shadow: inset 3px 0 #9a7554;
+}
+.grind-annonce-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+.grind-annonce-author { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.grind-annonce-author-icon {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  flex: 0 0 31px;
+  border: 1px solid rgba(139, 101, 71, .19);
+  border-radius: 10px;
+  background: #f4e9de;
+  color: #896447;
+  font-size: 12px;
+}
+.grind-annonce-author-text { display: grid; gap: 2px; min-width: 0; }
+.grind-annonce-author-text strong { color: var(--text, #352b23); font-size: 12px; overflow-wrap: anywhere; }
+.grind-annonce-author-text small { color: var(--text-dim, #887a6f); font-size: 10px; }
+.grind-annonce-card-head time { flex: 0 0 auto; color: var(--text-dim, #887a6f); font-size: 10px; white-space: nowrap; }
+.grind-annonce-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
+.grind-annonce-tags > span { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; font-size: 9px; font-weight: 750; }
+.grind-annonce-tags .tag-annonce-important { background: #f7e8dc; color: #965a3c; }
+.grind-annonce-pin { border: 1px solid rgba(139, 101, 71, .18); background: #f5eee7; color: #7c6045; }
+.grind-annonce-open {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.grind-annonce-title { color: var(--text, #32271f); font-size: 15px; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; }
+.grind-annonce-extrait { display: -webkit-box; overflow: hidden; color: var(--text-dim, #786d63); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.grind-annonce-media-preview { display: block; width: 100%; max-height: 230px; overflow: hidden; border-radius: 12px; background: #211b17; }
+.grind-annonce-media-preview img, .grind-annonce-media-preview video { display: block; width: 100%; max-height: 230px; object-fit: contain; }
+.grind-annonce-document { margin-top: 3px; }
+.grind-annonce-actions { display: flex; justify-content: flex-start; gap: 10px; margin-top: 10px; }
+.grind-annonce-actions button { min-height: 34px; padding: 7px 10px; border: 1px solid rgba(139, 101, 71, .18); border-radius: 9px; background: #f7f1eb; color: #75563c; font-size: 11px; font-weight: 700; }
+.grind-annonce-actions .annonce-fil-masquer { margin-left: auto; border-color: transparent; background: transparent; color: var(--text-dim, #887a6f); }
+
+/* Fenêtre de lecture : hiérarchie lisible, sans surcharge ni grand flou coûteux. */
+.annonce-modal-voile {
+  position: fixed;
+  inset: 0;
+  z-index: 10090;
+  display: grid;
+  place-items: center;
+  padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: rgba(25, 19, 14, .68);
+}
+.annonce-modal-carte {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 100%);
+  max-height: min(88dvh, 860px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(178, 143, 111, .34);
+  border-radius: 20px;
+  background: #fffdfa;
+  color: #372c23;
+  box-shadow: 0 24px 70px rgba(24, 17, 11, .28);
+}
+.annonce-modal-carte.annonce-modal-importante { border-color: rgba(153, 107, 71, .5); }
+.annonce-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 18px;
+  border-bottom: 1px solid rgba(157, 124, 94, .17);
+  background: linear-gradient(110deg, #f6ede4, #fffdfa);
+}
+.annonce-modal-fermer {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid rgba(128, 96, 68, .18);
+  border-radius: 50%;
+  background: #fffaf5;
+  color: #72563f;
+}
+.annonce-modal-auteur-ligne {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 13px 18px;
+  border-bottom: 1px solid rgba(157, 124, 94, .12);
+}
+.annonce-modal-auteur-icone {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 11px;
+  background: #f2e5d8;
+  color: #896447;
+}
+.annonce-modal-auteur-texte { display: grid; gap: 3px; min-width: 0; }
+.annonce-modal-auteur-texte strong { color: #3c3026; font-size: 12px; overflow-wrap: anywhere; }
+.annonce-modal-auteur-texte small { color: #87796d; font-size: 10px; line-height: 1.35; }
+.annonce-modal-auteur-ligne time { flex: 0 0 auto; margin-left: auto; color: #8a7b6e; font-size: 10px; white-space: nowrap; }
+.annonce-modal-contenu { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
+.annonce-modal-etiquettes { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
+.annonce-modal-etiquettes > span { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; font-size: 10px; font-weight: 780; }
+.annonce-modal-important { background: #f8e9df; color: #965a3c; }
+.annonce-modal-epinglee { border: 1px solid rgba(139, 101, 71, .2); background: #f6efe8; color: #77583e; }
+.annonce-modal-contenu h2 { margin: 0 0 13px; color: #35291f; font-size: clamp(19px, 4vw, 24px); font-weight: 820; line-height: 1.25; overflow-wrap: anywhere; }
+.annonce-modal-media { margin: 0 0 14px; overflow: hidden; border-radius: 13px; background: #241e19; }
+.annonce-modal-media img, .annonce-modal-media video { display: block; width: 100%; max-height: min(48dvh, 470px); object-fit: contain; }
+.annonce-modal-texte { margin: 0; color: #574a3e; font-size: 14px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.annonce-modal-document { margin-top: 16px; }
+.annonce-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 13px 18px;
+  border-top: 1px solid rgba(157, 124, 94, .16);
+  background: #fcf8f3;
+}
+.annonce-modal-footer button { min-height: 39px; padding: 9px 14px; border-radius: 10px; font-size: 12px; font-weight: 750; }
+.annonce-modal-secondary { border: 1px solid rgba(128, 96, 68, .2); background: transparent; color: #80634a; }
+.annonce-modal-primary { border: 1px solid #79583d; background: #8b6547; color: #fffaf5; }
+
+@media (max-width: 520px) {
+  .grind-annonces-section { border-radius: 14px; }
+  .grind-annonces-heading { padding: 12px; align-items: flex-start; }
+  .grind-annonces-heading-copy small { display: none; }
+  .grind-annonces-heading-tag { font-size: 8px; padding: 5px 7px; }
+  .grind-annonce-card { padding: 13px 12px; }
+  .grind-annonce-card-head { align-items: flex-start; }
+  .grind-annonce-card-head time { padding-top: 3px; font-size: 9px; }
+  .annonce-modal-voile { place-items: end center; padding: 8px 8px max(8px, env(safe-area-inset-bottom)); }
+  .annonce-modal-carte { width: 100%; max-height: 92dvh; border-radius: 18px 18px 13px 13px; }
+  .annonce-modal-header { padding: 12px 14px; }
+  .annonce-modal-auteur-ligne { padding: 10px 14px; gap: 7px; }
+  .annonce-modal-auteur-ligne time { font-size: 9px; }
+  .annonce-modal-contenu { padding: 15px 14px; }
+  .annonce-modal-footer { padding: 11px 14px; }
+}
+
+/* Les aperçus montrent le fichier entier : le cadrage appartient à l'affichage final,
+   jamais à une étape de validation imposée avant l'envoi. */
+.apercu-media-form img,
+.publication-gallery-preview img {
+  object-fit: contain;
+  background: #eee7df;
+}

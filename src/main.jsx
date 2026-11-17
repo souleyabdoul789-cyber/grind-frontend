@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./styles.css";
 import "./grind-ui-improvements.css";
+import "./grind-annonces-professional.css";
 
 // Le service worker reste actif sur le site web, mais pas dans l'APK Capacitor :
 // le cache PWA ne doit pas servir une ancienne version du bundle natif.
