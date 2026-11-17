@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { urlNotifs, listerAnnonces, listerNotifications, marquerNotificationLue, enregistrerJetonPush } from "../api.js";
+import { urlNotifs, listerAnnonces, listerNotifications, marquerNotificationLue, marquerToutesNotificationsLues, enregistrerJetonPush } from "../api.js";
 import ModaleAnnonce from "./ModaleAnnonce.jsx";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -7,6 +7,18 @@ import { PushNotifications } from "@capacitor/push-notifications";
 
 const CLE_ANNONCE_VUE = "grind_annonce_vue"; // plus grand numéro d'annonce déjà vu
 const CLE_ANNONCES_MASQUEES = "grind_annonces_masquees";
+
+function normaliserNotificationPersistante(n, idsLues = new Set(), forcerLue = false) {
+  const notificationId = Number(n.notificationId ?? n.id);
+  return {
+    ...n,
+    id: `persist-${notificationId}`,
+    notificationId,
+    eventType: n.eventType || n.type,
+    type: "persistante",
+    lu: forcerLue || Boolean(n.lu) || idsLues.has(notificationId),
+  };
+}
 
 function dernierNumeroVu() {
   return Number(localStorage.getItem(CLE_ANNONCE_VUE) || 0);
@@ -21,7 +33,9 @@ export default function Notifications({ sessionToken }) {
   const [notifs, setNotifs] = useState([]);
   const [annonceOuverte, setAnnonceOuverte] = useState(null);
   const socketRef = useRef(null);
+  const panneauOuvertRef = useRef(false);
   const idsMasques = useRef(new Set());
+  const idsNotificationsLues = useRef(new Set());
 
   async function ouvrirCiblePush(data = {}) {
     const type = data.event_type || "";
@@ -96,15 +110,28 @@ export default function Notifications({ sessionToken }) {
         }));
         ecouteurs.push(await PushNotifications.addListener("pushNotificationReceived", async (notification) => {
           if (!actif) return;
-          setNotifs(prev => [{
-            id: `push-${Date.now()}`, type: "push", title: notification?.title || "GRIND",
-            body: notification?.body || "Nouvelle activité", data: notification?.data || {}, lu: false,
-          }, ...prev].slice(0, 50));
+          const dataPush = notification?.data || {};
+          const notificationId = Number(dataPush.notification_id || 0);
+          if (!notificationId) {
+            setNotifs(prev => [{
+              id: `push-${Date.now()}`, type: "push", title: notification?.title || "GRIND",
+              body: notification?.body || "Nouvelle activité", data: dataPush, lu: panneauOuvertRef.current,
+            }, ...prev].slice(0, 50));
+          }
           try {
             const res = await listerNotifications(sessionToken);
             if (!actif) return;
-            const persistantes = (res.notifications || []).map(n => ({ ...n, id: `persist-${n.id}`, notificationId: n.id, eventType: n.type, type: "persistante" }));
-            setNotifs(prev => [...persistantes, ...prev.filter(n => n.type !== "persistante")].slice(0, 50));
+            const persistantes = (res.notifications || []).map(n => normaliserNotificationPersistante(n, idsNotificationsLues.current, panneauOuvertRef.current));
+            if (panneauOuvertRef.current && (res.notifications || []).some(n => !n.lu)) {
+              (res.notifications || []).forEach(n => idsNotificationsLues.current.add(Number(n.id)));
+              marquerToutesNotificationsLues(sessionToken).catch(() => {});
+            }
+            setNotifs(prev => {
+              const autres = prev.filter(n => n.type !== "persistante");
+              const idsServeur = new Set(persistantes.map(n => n.notificationId));
+              const temporaires = autres.filter(n => !(n.type === "push" && Number(n.data?.notification_id || 0) && idsServeur.has(Number(n.data.notification_id))));
+              return [...persistantes, ...temporaires].slice(0, 50);
+            });
           } catch {}
         }));
         ecouteurs.push(await PushNotifications.addListener("pushNotificationActionPerformed", ({ notification }) => {
@@ -158,11 +185,14 @@ export default function Notifications({ sessionToken }) {
       try {
         const res = await listerNotifications(sessionToken);
         if (!actif) return;
-        const persistantes = (res.notifications || []).map(n => ({ ...n, id: `persist-${n.id}`, notificationId: n.id, eventType: n.type, type: "persistante" }));
+        const persistantes = (res.notifications || []).map(n => normaliserNotificationPersistante(n, idsNotificationsLues.current, panneauOuvertRef.current));
+        if (panneauOuvertRef.current && (res.notifications || []).some(n => !n.lu)) {
+          (res.notifications || []).forEach(n => idsNotificationsLues.current.add(Number(n.id)));
+          marquerToutesNotificationsLues(sessionToken).catch(() => {});
+        }
         setNotifs(prev => {
           const autres = prev.filter(n => n.type !== "persistante");
-          const deja = new Set(autres.map(n => n.id));
-          return [...persistantes.filter(n => !deja.has(n.id)), ...autres].slice(0, 50);
+          return [...persistantes, ...autres].slice(0, 50);
         });
       } catch {}
     };
@@ -181,10 +211,23 @@ export default function Notifications({ sessionToken }) {
       // L'annonce arrive avec son numéro dans `id` : on le range dans `numero`
       // avant de donner à la notification son identifiant local.
       const base = data.type === "annonce" ? { ...data, numero: data.id } : data;
+      if (data.type === "persistante") {
+        const notificationId = Number(data.notificationId || 0);
+        const estVue = panneauOuvertRef.current;
+        if (estVue && notificationId) {
+          idsNotificationsLues.current.add(notificationId);
+          marquerNotificationLue(sessionToken, notificationId).catch(() => {});
+        }
+        const notification = normaliserNotificationPersistante({ ...data, lu: estVue || data.lu }, idsNotificationsLues.current, estVue);
+        setNotifs(prev => [notification, ...prev.filter(n => n.notificationId !== notification.notificationId)].slice(0, 50));
+        return;
+      }
       if (data.type !== "annonce" || data.important || !idsMasques.current.has(Number(data.id))) {
         setNotifs((prev) => {
           if (data.type === "annonce" && prev.some((n) => n.type === "annonce" && Number(n.numero || n.id) === Number(data.id))) return prev;
-          return [{ ...base, id: crypto.randomUUID(), lu: false }, ...prev].slice(0, 30);
+          const lue = panneauOuvertRef.current;
+          if (lue && data.type === "annonce") memoriserNumero(Number(data.id) || 0);
+          return [{ ...base, id: crypto.randomUUID(), lu: lue }, ...prev].slice(0, 30);
         });
       }
     };
@@ -209,7 +252,8 @@ export default function Notifications({ sessionToken }) {
         const vu = premiereVisite ? plusGrand : dernierNumeroVu();
         const nouvelles = res.annonces
           .filter((a) => (a.important || a.id > vu) && (a.important || !idsMasques.current.has(Number(a.id))))
-          .map((a) => ({ ...a, type: "annonce", id: `annonce-${a.id}`, numero: a.id, lu: false }));
+          .map((a) => ({ ...a, type: "annonce", id: `annonce-${a.id}`, numero: a.id, lu: panneauOuvertRef.current }));
+        if (panneauOuvertRef.current && nouvelles.length) memoriserNumero(plusGrand);
         if (nouvelles.length > 0) {
           setNotifs((prev) => {
             const presentes = new Set(prev.filter((n) => n.type === "annonce").map((n) => Number(n.numero || n.id)));
@@ -226,9 +270,21 @@ export default function Notifications({ sessionToken }) {
   const nonLues = notifs.filter((n) => !n.lu).length;
 
   function ouvrirPanneau() {
-    setOuvert(!ouvert);
-    if (!ouvert) {
-      setNotifs((prev) => prev.map((n) => ({ ...n, lu: true })));
+    const ouvrir = !ouvert;
+    panneauOuvertRef.current = ouvrir;
+    setOuvert(ouvrir);
+    if (ouvrir) {
+      for (const n of notifs) {
+        if (n.type === "persistante" && n.notificationId) idsNotificationsLues.current.add(Number(n.notificationId));
+      }
+      const numeroAnnonceVu = notifs.filter(n => n.type === "annonce").reduce((max, n) => Math.max(max, Number(n.numero || n.id) || 0), 0);
+      if (numeroAnnonceVu) memoriserNumero(numeroAnnonceVu);
+      setNotifs(prev => prev.map(n => ({ ...n, lu: true })));
+      // L'acquittement est persistant côté serveur : le prochain rafraîchissement
+      // ne doit pas réafficher le badge pour les notifications déjà consultées.
+      marquerToutesNotificationsLues(sessionToken).catch(erreur => {
+        console.warn("Acquittement des notifications GRIND différé", erreur?.message || erreur);
+      });
     }
   }
 
@@ -251,10 +307,11 @@ export default function Notifications({ sessionToken }) {
   function texteNotif(n) {
     if (n.type === "push") return n.title || n.body || "Nouvelle activité GRIND";
     if (n.type === "persistante") {
-      const nom = n.acteur_nom || n.acteur;
+      const nom = n.acteur_nom || n.acteur || "Un membre";
+      if (n.eventType === "message_classe") return `Classe · ${n.classe_nom || "Discussion"}`;
+      if (n.eventType === "nouveau_membre_classe") return `Classe · ${n.classe_nom || "Nouvelle adhésion"}`;
       if (n.eventType === "mention") return `${nom} t’a mentionné`;
       if (n.eventType === "mention_classe") return `${nom} t’a mentionné dans une discussion de classe`;
-      if (n.eventType === "message_classe") return `${nom} a envoyé un message dans une discussion de classe`;
       if (n.eventType === "like_publication") return `${nom} a aimé ta publication`;
       if (n.eventType === "commentaire") return `${nom} a commenté ta publication`;
       if (n.eventType === "reponse_commentaire") return `${nom} a répondu à ton commentaire`;
@@ -265,14 +322,28 @@ export default function Notifications({ sessionToken }) {
     }
     if (n.type === "nouvelle_demande") return `${n.demandeur} a besoin d'aide en ${n.sujet}`;
     if (n.type === "participant_rejoint") return `${n.username} a rejoint ta demande d'aide`;
-    if (n.type === "nouveau_membre_classe") return `${n.nouveau_membre} a rejoint ta classe "${n.nom_classe}"`;
-    if (n.type === "support_reponse") return "L'équipe a répondu à ta demande (Réglages › Assistance IA GRIND)";
+    if (n.type === "nouveau_membre_classe") return `Classe · ${n.nom_classe || "Nouvelle adhésion"}`;
+    if (n.type === "support_reponse") return "L'équipe a répondu à ta demande";
     return "Nouvelle activité";
+  }
+
+  function detailNotif(n) {
+    const nom = n.acteur_nom || n.acteur || n.nouveau_membre || n.username || "Un membre";
+    if (n.type === "persistante" && n.eventType === "message_classe") {
+      const salle = n.discussion_nom ? `${n.discussion_nom} · ` : "";
+      return `${salle}${nom} : ${n.extrait || "Nouveau message"}`;
+    }
+    if (n.type === "persistante" && n.eventType === "nouveau_membre_classe") {
+      return n.resource_type === "classe_discussion"
+        ? `${nom} a rejoint la discussion${n.discussion_nom ? ` « ${n.discussion_nom} »` : ""}`
+        : `${nom} a rejoint la classe`;
+    }
+    return n.extrait || n.body || "Ouvrir le contenu";
   }
 
   return (
     <div className="notifs-conteneur">
-      <button className="bouton-cloche" onClick={ouvrirPanneau} type="button">
+      <button className="bouton-cloche" onClick={ouvrirPanneau} type="button" aria-label="Notifications" aria-expanded={ouvert}>
         <i className="fa-solid fa-bell"></i>
         {nonLues > 0 && <span className="badge-notif">{nonLues}</span>}
       </button>
@@ -293,9 +364,10 @@ export default function Notifications({ sessionToken }) {
                   setOuvert(false);
                   if (n.resource_type === "library_document") window.dispatchEvent(new CustomEvent("grind-open-library-doc", { detail: n.resource_id }));
                   else if (n.resource_type === "classe_discussion_message" && n.classe_id) window.dispatchEvent(new CustomEvent("grind-open-discussion", { detail: { classe_id: n.classe_id, message_id: n.resource_id } }));
+                  else if (n.eventType === "nouveau_membre_classe" && n.classe_id) window.dispatchEvent(new CustomEvent("grind-open-class", { detail: { classe_id: Number(n.classe_id) } }));
                   else if (n.post_id) window.dispatchEvent(new CustomEvent("grind-navigate-post", { detail: { post_id: n.post_id, commentaire_id: n.commentaire_id || null } }));
                 }}>
-                  <i className={n.eventType === "mention" || n.eventType === "mention_classe" ? "fa-solid fa-at" : n.eventType?.includes("like") || n.eventType === "avis_doc" ? "fa-solid fa-heart" : "fa-solid fa-comment"}></i><span>{texteNotif(n)}<small>{n.extrait || "Ouvrir le contenu"}</small></span>
+                  <i className={n.eventType === "mention" || n.eventType === "mention_classe" ? "fa-solid fa-at" : n.eventType?.includes("like") || n.eventType === "avis_doc" ? "fa-solid fa-heart" : n.eventType === "nouveau_membre_classe" ? "fa-solid fa-user-plus" : "fa-solid fa-comment"}></i><span><strong>{texteNotif(n)}</strong><small>{detailNotif(n)}</small></span>
                 </button>
               ) : n.type === "push" ? (
                 <button key={n.id} type="button" className="ligne-notif" onClick={() => { setOuvert(false); ouvrirCiblePush(n.data || {}); }}>

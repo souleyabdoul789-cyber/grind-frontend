@@ -81,12 +81,17 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     charger();
     const actualiser = () => charger({ silencieux: true });
     const statutApi = event => { if (event.detail?.online) actualiser(); };
+    const visibilite = () => { if (document.visibilityState === "visible") actualiser(); };
     window.addEventListener("online", actualiser);
     window.addEventListener("grind-api-status", statutApi);
-    const intervalle = window.setInterval(actualiser, 45000);
+    window.addEventListener("focus", actualiser);
+    document.addEventListener("visibilitychange", visibilite);
+    const intervalle = window.setInterval(actualiser, 20000);
     return () => {
       window.removeEventListener("online", actualiser);
       window.removeEventListener("grind-api-status", statutApi);
+      window.removeEventListener("focus", actualiser);
+      document.removeEventListener("visibilitychange", visibilite);
       window.clearInterval(intervalle);
     };
   }, [sessionToken, cleCacheClasses]);
@@ -516,7 +521,16 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
             <div className="discussion-actions-classe">
               {c.est_membre_discussion !== false ? (
                 <button className="discussion-ouvrir-groupe" onClick={() => ouvrirDiscussion(c)} type="button">
-                  <i className="fa-solid fa-comments" /> Ouvrir la discussion <span>{c.discussion_membres ?? 0}</span>
+                  <i className="fa-solid fa-comments" /> Ouvrir la discussion
+                  {Number(c.discussion_messages_non_lus || 0) > 0 && (
+                    <span
+                      className="discussion-non-lus"
+                      title={`${Number(c.discussion_messages_non_lus)} message(s) non lu(s)`}
+                      aria-label={`${Number(c.discussion_messages_non_lus)} message(s) non lu(s)`}
+                    >
+                      {Number(c.discussion_messages_non_lus) > 99 ? "99+" : Number(c.discussion_messages_non_lus)}
+                    </span>
+                  )}
                 </button>
               ) : (
                 <div className="info discussion-acces-retire"><i className="fa-solid fa-lock" /> Accès à la discussion retiré. Contacte un administrateur du groupe.</div>

@@ -27,6 +27,20 @@ jobs:
           VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
           echo "GRIND_VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      - name: Check Google OAuth Web client configuration
+        shell: bash
+        run: |
+          if [ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]; then
+            echo "::warning::VITE_GOOGLE_CLIENT_ID is missing. The APK will build, but the Google button will be unavailable."
+            echo "- ⚠️ VITE_GOOGLE_CLIENT_ID absent : la connexion Google ne sera pas incluse dans cet APK." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$VITE_GOOGLE_CLIENT_ID" != *.apps.googleusercontent.com ]]; then
+            echo "::warning::VITE_GOOGLE_CLIENT_ID does not look like a Google OAuth Web client ID."
+            echo "- ⚠️ VITE_GOOGLE_CLIENT_ID ne semble pas être un Client ID OAuth Web valide." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Google OAuth Web client ID detected (value hidden)."
+            echo "- ✅ Client ID OAuth Web présent dans les variables de build (valeur non affichée)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Prepare Java 21
         uses: actions/setup-java@v4
         with:

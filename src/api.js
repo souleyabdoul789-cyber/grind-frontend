@@ -116,6 +116,7 @@ export async function connecterGoogle(credential, username = null, cguAcceptees 
       const detail = data.detail;
       const error = new Error(typeof detail === "string" ? detail : detail?.message || "La vérification du compte Google a échoué.");
       error.status = res.status;
+      error.code = typeof detail === "object" && detail ? detail.code || null : null;
       throw error;
     }
     return data;
@@ -1186,6 +1187,9 @@ export function listerNotifications(sessionToken) {
 }
 export function marquerNotificationLue(sessionToken, id) {
   return poster(`${GRIND_URL}/api/notifications/${id}/lue`, { session_token: sessionToken });
+}
+export function marquerToutesNotificationsLues(sessionToken) {
+  return poster(`${GRIND_URL}/api/notifications/lues`, { session_token: sessionToken });
 }
 
 // ---------- Bibliothèque GRIND : documents partagés ----------

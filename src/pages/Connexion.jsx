@@ -18,6 +18,7 @@ import AideGrind from "../components/AideGrind.jsx";
 // GIS s'initialise une seule fois par page. Le gestionnaire actif est remplacé
 // quand l'écran Connexion est monté/démonté (déconnexion puis reconnexion).
 let googleIdentityInitialisee = false;
+let googleSignInInitialisation = null;
 let traiterCredentialGoogle = null;
 
 
@@ -96,7 +97,14 @@ export default function Connexion({ onConnecte }) {
         }
       } catch (err) {
         setMessage(null);
-        setErreur(err.message || "La connexion Google a échoué.");
+        const detail = err?.code === "google_jeton_invalide"
+          ? "Google a renvoyé un jeton que le serveur GRIND n’a pas accepté. Vérifie que VITE_GOOGLE_CLIENT_ID (frontend) et GOOGLE_CLIENT_ID (Render) contiennent exactement le même Client ID OAuth Web, dans le même projet Google Cloud."
+          : err?.code === "google_indisponible"
+            ? "La connexion Google n’est pas configurée sur le serveur GRIND. La variable GOOGLE_CLIENT_ID doit contenir le Client ID OAuth Web."
+            : err?.code === "google_validation_indisponible"
+              ? "Le serveur GRIND ne parvient pas à joindre le service de validation Google. Vérifie la disponibilité réseau du serveur puis réessaie."
+              : err?.message || "La connexion Google a échoué.";
+        setErreur(detail);
       } finally {
         setChargement(false);
       }
@@ -106,9 +114,21 @@ export default function Connexion({ onConnecte }) {
     if (estAppNative) {
       // Sur Android, Google interdit le flux OAuth intégré dans une WebView.
       // Le plugin ouvre le sélecteur natif et renvoie un ID token vérifié côté API.
-      GoogleSignIn.initialize({ clientId: GOOGLE_CLIENT_ID })
+      // Le plugin indique que initialize() doit être appelé une seule fois.
+      // Le composant Connexion peut être remonté après une déconnexion : on
+      // réutilise alors la promesse native au lieu de réinitialiser le SDK.
+      if (!googleSignInInitialisation) {
+        googleSignInInitialisation = GoogleSignIn.initialize({ clientId: GOOGLE_CLIENT_ID }).catch((erreurGoogle) => {
+          googleSignInInitialisation = null;
+          throw erreurGoogle;
+        });
+      }
+      googleSignInInitialisation
         .then(() => { if (actif) setGooglePret(true); })
-        .catch(() => { if (actif) setErreur("La connexion Google native n'a pas pu être initialisée."); });
+        .catch((erreurGoogle) => {
+          console.warn("Initialisation Google Android GRIND impossible", erreurGoogle?.code || erreurGoogle?.message || "erreur inconnue");
+          if (actif) setErreur("La connexion Google native n'a pas pu être initialisée. Vérifie le Client ID OAuth Web et la configuration Android (package + SHA-1) dans Google Cloud.");
+        });
 
       return () => {
         actif = false;
@@ -164,14 +184,22 @@ export default function Connexion({ onConnecte }) {
   // le bouton officiel dans son conteneur après initialisation, à chaque retour.
   useEffect(() => {
     if (!googlePret || !googleButtonRef.current || !window.google?.accounts?.id) return;
-    googleButtonRef.current.replaceChildren();
-    window.google.accounts.id.renderButton(googleButtonRef.current, {
-      type: "icon",
-      theme: "outline",
-      size: "large",
-      shape: "circle",
-      logo_alignment: "center",
-    });
+    try {
+      googleButtonRef.current.replaceChildren();
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        type: "standard",
+        text: "continue_with",
+        theme: "outline",
+        size: "large",
+        shape: "rectangular",
+        logo_alignment: "left",
+        locale: "fr",
+        width: Math.min(320, Math.max(220, Math.floor(googleButtonRef.current.clientWidth || 280))),
+      });
+    } catch (erreurGoogle) {
+      console.warn("Rendu du bouton Google GRIND impossible", erreurGoogle?.message || erreurGoogle);
+      setErreur("Le bouton Google n'a pas pu être initialisé. Vérifie que l'origine Web de GRIND est autorisée dans le client OAuth Google.");
+    }
   }, [googlePret, mode, ecran, credentialGoogle]);
 
   function terminer(res) {
@@ -389,9 +417,19 @@ export default function Connexion({ onConnecte }) {
     <div className="page">
       <FondAnime />
       <div className="carte">
-        <div className="logo-grind">
-          <i className="fa-solid fa-brain"></i>
-          <span>GRIND</span>
+        <div className="grind-auth-card-header">
+          <div className="logo-grind">
+            <i className="fa-solid fa-brain"></i>
+            <span>GRIND</span>
+          </div>
+          <div className="grind-auth-tools" aria-label="Assistance et contact">
+            <button type="button" className="grind-auth-icon" onClick={() => setAideOuverte(true)} title="Centre d’aide" aria-label="Ouvrir le centre d’aide">
+              <i className="fa-regular fa-circle-question" aria-hidden="true"></i>
+            </button>
+            <a className="grind-auth-icon" href="mailto:grind.supportt@gmail.com?subject=Contact%20GRIND" title="Contacter G-SOCIETY" aria-label="Contacter G-SOCIETY par e-mail">
+              <i className="fa-regular fa-envelope" aria-hidden="true"></i>
+            </a>
+          </div>
         </div>
 
         <div key={ecran} className="etape-auth">
@@ -502,12 +540,17 @@ export default function Connexion({ onConnecte }) {
                             if (traiterCredentialGoogle) await traiterCredentialGoogle({ credential: resultat.idToken });
                             else throw new Error("Le service de connexion Google n'est pas prêt. Réessaie.");
                           } catch (err) {
-                            if (err?.code !== ErrorCode.SignInCanceled) {
-                              const detail = err?.code === ErrorCode.NoCredentialAvailable
-                                ? "Aucun compte Google disponible sur cet appareil."
-                                : err?.code === ErrorCode.ProviderConfigurationError
-                                  ? "Les services Google Play ne sont pas disponibles ou doivent être mis à jour."
-                                  : err?.message || "La connexion Google a échoué. Réessaie.";
+                            const messageErreur = String(err?.message || "");
+                            const reauthentificationRefusee = /reauth|unregistered_on_api_console|api console/i.test(messageErreur);
+                            const annulationUtilisateur = err?.code === ErrorCode.SignInCanceled && !reauthentificationRefusee;
+                            if (!annulationUtilisateur) {
+                              const detail = reauthentificationRefusee
+                                ? "Google a refusé l’application après le choix du compte. La configuration OAuth Android doit contenir le package com.gsociety.grind et l’empreinte SHA-1 de cet APK. Consulte le guide GUIDE_GOOGLE_AUTH.md."
+                                : err?.code === ErrorCode.NoCredentialAvailable
+                                  ? "Aucun compte Google disponible sur cet appareil. Ajoute un compte Google dans les paramètres Android puis réessaie."
+                                  : err?.code === ErrorCode.ProviderConfigurationError
+                                    ? "Les services Google Play ne sont pas disponibles ou doivent être mis à jour."
+                                    : messageErreur || "La connexion Google a échoué. Vérifie les réglages OAuth et réessaie.";
                               setMessage(null);
                               setErreur(detail);
                             }
@@ -535,7 +578,7 @@ export default function Connexion({ onConnecte }) {
                   </div>
                 </div>
               )}
-              {!GOOGLE_CLIENT_ID && (mode === "login" || mode === "signup") && <p className="info info-google">La connexion Google n'est pas configurée sur ce déploiement.</p>}
+              {!GOOGLE_CLIENT_ID && (mode === "login" || mode === "signup") && <p className="info info-google">La connexion Google n'est pas configurée sur ce déploiement. Le build frontend doit recevoir la variable VITE_GOOGLE_CLIENT_ID (Client ID OAuth Web).</p>}
               {mode === "login" && <button type="button" className="lien" onClick={() => setMode("proviseur")}>Candidater comme proviseur / directeur</button>}
               <button type="button" className="lien" onClick={() => setCguOuvertes(true)}>
                 Conditions d'utilisation
@@ -639,17 +682,6 @@ export default function Connexion({ onConnecte }) {
           )}
         </div>
 
-        {ecran === "formulaire" && mode === "login" && !credentialGoogle && (
-          <div className="grind-login-actions" aria-label="Aide et contact GRIND">
-            <button type="button" onClick={() => setAideOuverte(true)}>
-              <i className="fa-solid fa-circle-question" aria-hidden="true" /> Aide GRIND
-            </button>
-            <a className="grind-contact-human" href="mailto:grind.supportt@gmail.com?subject=Contact%20GRIND" aria-label="Contacter G-SOCIETY par e-mail">
-              <i className="fa-solid fa-envelope" aria-hidden="true" />
-              <span><strong>Contactez-nous</strong><small>grind.supportt@gmail.com</small></span>
-            </a>
-          </div>
-        )}
         {cguOuvertes && <PageCgu onFermer={() => setCguOuvertes(false)} />}
       </div>
     </div>

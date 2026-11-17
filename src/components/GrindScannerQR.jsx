@@ -163,9 +163,25 @@ export default function GrindScannerQR({ onDetected, onFermer }) {
         ecouteursRef.current.push(ecouteur);
 
         if (estNatif) {
-          // Le plugin affiche la caméra derrière la WebView.
-          // On masque seulement l'application, pas le portail du scanner.
+          const ecouteurErreur = await BarcodeScanner.addListener("scanError", (evenement) => {
+            if (annule) return;
+            const detail = typeof evenement?.message === "string" ? evenement.message.trim() : "";
+            setEtatCamera("erreur");
+            setErreur(detail || "La caméra a rencontré une erreur pendant la lecture du QR code.");
+          });
+          if (annule) {
+            await ecouteurErreur.remove();
+            return;
+          }
+          ecouteursRef.current.push(ecouteurErreur);
+          // ML Kit dessine la caméra derrière la WebView. Le CSS associé rend
+          // html/body transparents et laisse uniquement le portail du scanner visible.
           document.body.classList.add("barcode-scanner-active");
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          if (annule) {
+            document.body.classList.remove("barcode-scanner-active");
+            return;
+          }
           await BarcodeScanner.startScan({
             formats: [BarcodeFormat.QrCode],
             lensFacing: faceCamera,

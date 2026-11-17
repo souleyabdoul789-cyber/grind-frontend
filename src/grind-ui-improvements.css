@@ -7,8 +7,29 @@
   visibility: visible;
 }
 
+/* ML Kit dessine la caméra derrière la WebView. Toute surface opaque de la page
+   (y compris le fond du body) masque donc l'aperçu. On rend la WebView transparente
+   et on ne conserve visible que le portail du scanner. */
+html:has(body.barcode-scanner-active),
+body.barcode-scanner-active {
+  background: transparent !important;
+}
+
+body.barcode-scanner-active {
+  visibility: hidden !important;
+}
+
 body.barcode-scanner-active #root {
-  visibility: hidden;
+  visibility: hidden !important;
+}
+
+body.barcode-scanner-active #grind-scanner-portal {
+  visibility: visible !important;
+  background: transparent !important;
+}
+
+body.barcode-scanner-active #grind-scanner-portal * {
+  visibility: visible;
 }
 
 .grind-scanner-portal {
@@ -25,7 +46,15 @@ body.barcode-scanner-active #root {
 }
 
 .grind-scanner-native {
-  background: transparent;
+  background: transparent !important;
+}
+
+.grind-scanner-native .grind-scanner-main {
+  background: transparent !important;
+}
+
+.grind-scanner-native .grind-scanner-viewfinder {
+  background: transparent !important;
 }
 
 .grind-scanner-web {
@@ -415,14 +444,14 @@ body.barcode-scanner-active #root {
 /* ---------- Réactivité pendant la saisie / ouverture du clavier ---------- */
 /* Réduit temporairement les effets coûteux pendant que le clavier mobile apparaît. */
 body:has(input:focus, textarea:focus, select:focus) .fond-bulles .bulle {
+  /* On fige le fond pendant la saisie, sans supprimer son flou ni le blur des cartes.
+     Désactiver les filtres sur Android WebView exposait les formes du fond derrière
+     les cartes translucides et produisait des artefacts visuels au redimensionnement. */
   animation-play-state: paused !important;
-  filter: none !important;
 }
 
 body:has(input:focus, textarea:focus, select:focus) .carte-post,
 body:has(input:focus, textarea:focus, select:focus) .carte {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
   animation: none !important;
 }
 
@@ -477,4 +506,189 @@ select {
 .app-shell-discussion .barre-nav,
 .app-shell-discussion .barre-onglets {
   display: none !important;
+}
+
+
+/* ---------- Finition mobile et en-tête d'authentification ---------- */
+.grind-auth-card-header {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 18px;
+}
+.grind-auth-card-header .logo-grind { margin: 0; min-width: 0; }
+.grind-auth-tools { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.grind-auth-icon {
+  display: inline-grid !important;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  place-items: center;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 50% !important;
+  color: var(--text-dim) !important;
+  background: rgba(255,255,255,.035) !important;
+  box-shadow: none !important;
+  font-size: 14px;
+  text-decoration: none !important;
+}
+.grind-auth-icon:hover { color: var(--text) !important; border-color: rgba(216,191,166,.65) !important; transform: none !important; }
+.grind-auth-icon:focus-visible { outline: 2px solid var(--brown); outline-offset: 3px; }
+
+/* The notification flyout stays inside the viewport and allows long names/messages. */
+.panneau-notifs {
+  z-index: 1200;
+  width: min(360px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: min(68vh, 520px);
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  box-shadow: 0 14px 36px rgba(0,0,0,.2);
+}
+.ligne-notif {
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.ligne-notif > span { display: flex; min-width: 0; flex: 1 1 auto; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.ligne-notif > span strong { display: block; color: var(--text); font-size: 12.5px; font-weight: 700; line-height: 1.35; }
+.ligne-notif > span small { display: block; min-width: 0; color: var(--text-dim); font-size: 11.5px; font-weight: 400; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
+.notification-non-lue { background: rgba(216,191,166,.075); }
+.notification-non-lue > span strong { color: var(--text); }
+
+/* Prevent intrinsic content widths from pushing cards and controls outside the phone. */
+#root, #root > *, .page, .carte, .etape-auth, .carte-post { min-width: 0; }
+.page { width: 100%; max-width: 100%; }
+.carte { max-width: min(100%, 520px); }
+.carte *, .carte-post *, .etape-auth * { min-width: 0; }
+.carte img, .carte video, .carte canvas, .carte iframe,
+.carte-post img, .carte-post video, .carte-post canvas { max-width: 100%; }
+.carte p, .carte small, .carte label, .carte a,
+.carte-post p, .carte-post small, .carte-post a { overflow-wrap: anywhere; }
+.etape-auth form { width: 100%; min-width: 0; }
+.etape-auth input, .etape-auth textarea, .etape-auth select, .etape-auth button { max-width: 100%; }
+
+@media (max-width: 560px) {
+  .page { padding-right: max(12px, env(safe-area-inset-right)); padding-left: max(12px, env(safe-area-inset-left)); }
+  .carte { width: 100%; padding-right: clamp(14px, 4vw, 22px); padding-left: clamp(14px, 4vw, 22px); }
+  .grind-auth-card-header { gap: 8px; margin-bottom: 14px; }
+  .grind-auth-tools { gap: 6px; }
+  .grind-auth-icon { width: 36px; height: 36px; min-width: 36px; min-height: 36px; }
+  .panneau-notifs { right: -6px; }
+}
+
+
+/* Google Identity Services : bouton standard lisible, dimensions adaptatives. */
+.bloc-google-auth { width: 100%; min-width: 0; }
+.google-action { width: 100%; min-width: 0; align-items: center; }
+.bouton-google-grind {
+  display: block;
+  width: min(100%, 320px);
+  max-width: 320px;
+  min-width: min(220px, 100%);
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+.bouton-google-grind iframe {
+  display: block;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 44px !important;
+}
+.google-action-label { display: none; }
+
+/* Les barres et cartes conservent leurs dimensions dans les viewports étroits. */
+.app-shell { width: 100%; max-width: 100%; min-width: 0; overflow-x: clip; }
+.app-shell > * { min-width: 0; }
+.barre-nav { width: 100%; min-width: 0; gap: 10px; }
+.barre-nav .logo-petit { min-width: 0; flex: 0 1 auto; white-space: nowrap; }
+.barre-nav-droite { min-width: 0; flex: 0 0 auto; gap: 7px; }
+.notifs-conteneur, .notifs-conteneur button { flex-shrink: 0; }
+.carte-post { box-sizing: border-box; max-width: 100%; }
+.carte-post img, .carte-post video, .carte-post iframe { max-width: 100%; }
+
+@media (max-width: 420px) {
+  .barre-nav {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    gap: 8px;
+  }
+  .logo-petit { font-size: 18px; gap: 7px; }
+  .logo-petit i { font-size: 16px; }
+  .barre-nav-droite { gap: 6px; }
+  .bouton-cloche, .barre-nav .bouton-icone { width: 36px; height: 36px; }
+  .panneau-notifs { right: 0; width: min(340px, calc(100vw - 24px)); }
+}
+
+@media (max-width: 340px) {
+  .barre-nav { padding-left: 10px; padding-right: 10px; }
+  .logo-petit { font-size: 16px; }
+  .barre-nav-droite { gap: 5px; }
+  .bouton-cloche, .barre-nav .bouton-icone { width: 34px; height: 34px; }
+}
+
+
+/* Android/WebView : empêcher les libellés longs de pousser les cartes hors écran. */
+.carte button,
+.carte-post button,
+.etape-auth button,
+.carte a,
+.carte-post a,
+.etape-auth a {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.carte button > span,
+.carte-post button > span,
+.etape-auth button > span,
+.carte a > span,
+.carte-post a > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.carte-post .discussion-actions-classe,
+.carte-post .discussion-ouvrir-groupe,
+.carte-post .discussion-ouvrir-classe {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+.discussion-ouvrir-groupe .discussion-non-lus {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: #211c17;
+  background: var(--brown);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 360px) {
+  .discussion-ouvrir-groupe { gap: 7px; padding-left: 10px; padding-right: 10px; }
 }
