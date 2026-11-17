@@ -41,9 +41,11 @@ export function formaterDate(iso) {
 }
 
 export const ROLES_EQUIPE = {
-  admin: { label: "Administrateur", icone: "fa-solid fa-crown" },
-  associe: { label: "Associé", icone: "fa-solid fa-star" },
-  controleur: { label: "Contrôleur", icone: "fa-solid fa-shield-halved" },
+  admin: { label: "Administration officielle", icone: "fa-solid fa-crown", description: "Compte officiel de GRIND. Il représente l’administration centrale et supervise l’ensemble des services de la plateforme." },
+  associe: { label: "Associé", icone: "fa-solid fa-star", description: "Membre de l’équipe de direction GRIND, habilité à superviser la modération, les sanctions et la certification." },
+  controleur: { label: "Contrôleur", icone: "fa-solid fa-shield-halved", description: "Membre de l’équipe de modération. Il examine les signalements et peut appliquer les mesures de courte durée prévues par son rôle." },
+  annonceur: { label: "Annonceur", icone: "fa-solid fa-bullhorn", description: "Collaborateur autorisé par l’administration GRIND à publier des annonces destinées à la communauté. Les annonces importantes et épinglées restent réservées à l’administrateur." },
+  supprimeur: { label: "Modérateur de contenus", icone: "fa-solid fa-trash-can", description: "Collaborateur chargé du retrait ciblé de publications, commentaires et classes appartenant à des comptes déjà sanctionnés. Il ne peut pas sanctionner ni supprimer un compte." },
 };
 
 export function libelleRole(role) {

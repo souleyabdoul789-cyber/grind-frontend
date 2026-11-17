@@ -8,6 +8,7 @@ import SalleExamens from "./SalleExamens.jsx";
 import SalleProviseurs from "./SalleProviseurs.jsx";
 import { libelleRole } from "../moderationInfos.js";
 import SallePays from "./SallePays.jsx";
+import SalleSuppression from "./SalleSuppression.jsx";
 
 const NOM_PAR_DEFAUT = "GRIND Admin";
 
@@ -18,8 +19,9 @@ const SALLES = [
   { cle: "utilisateurs", titre: "Registre des comptes", desc: "Rechercher un compte, suspendre, bannir.", icone: "fa-solid fa-address-book", permission: "utilisateurs" },
   { cle: "examens", titre: "Examens", desc: "Dossiers des demandes d'examen après une sanction.", icone: "fa-solid fa-scale-balanced", permission: "examens" },
   { cle: "certification", titre: "Certification", desc: "Accorder ou retirer le badge de certification.", icone: "fa-solid fa-circle-check", permission: "certification" },
-  { cle: "equipe", titre: "Équipe", desc: "Nommer des associés et des contrôleurs.", icone: "fa-solid fa-people-group", permission: "equipe" },
-  { cle: "annonces", titre: "Annonces", desc: "Publier un message à tous les utilisateurs.", icone: "fa-solid fa-bullhorn", permission: "annonces" },
+  { cle: "equipe", titre: "Équipe", desc: "Attribuer les rôles, périmètres et responsabilités des collaborateurs.", icone: "fa-solid fa-people-group", permission: "equipe" },
+  { cle: "annonces", titre: "Communication", desc: "Préparer et publier les annonces destinées à la communauté.", icone: "fa-solid fa-bullhorn", permission: "annonces" },
+  { cle: "suppression", titre: "Gestion des contenus", desc: "Retirer des publications, commentaires et classes de comptes sanctionnés.", icone: "fa-solid fa-trash-can", permission: "suppression" },
   { cle: "proviseurs", titre: "Candidatures établissement", desc: "Vérifier les pièces privées et autoriser les directions.", icone: "fa-solid fa-school-circle-check", permission: "equipe" },
   { cle: "pays", titre: "Disponibilité par pays", desc: "Suspendre l’accès régional à GRIND selon l’IP.", icone: "fa-solid fa-earth-africa", permission: "pays" },
 ];
@@ -70,34 +72,25 @@ function EcranEntree({ sessionToken, onTermine }) {
   );
 }
 
-/* ------------------------------ Salle de contrôle (décor) ------------------------------ */
-function ScenePupitre({ alerte }) {
+/* ------------------------------ En-tête du centre d'administration ------------------------------ */
+function VueEnsemble({ nom, role }) {
   return (
-    <svg viewBox="0 0 600 150" role="img" aria-label="Salle de contrôle">
-      <rect x="70" y="112" width="460" height="14" rx="7" fill="#3a3347" />
-      <rect x="96" y="124" width="8" height="22" fill="#2c2738" />
-      <rect x="496" y="124" width="8" height="22" fill="#2c2738" />
-
-      {[110, 250, 390].map((x, i) => (
-        <g key={x}>
-          <rect x={x} y="36" width="100" height="62" rx="7" fill="#12131c" stroke="#c9b6e4" strokeWidth="1.5" />
-          <rect x={x + 6} y="42" width="88" height="50" rx="4" fill="#1b1d2b" />
-          <rect x={x + 12} y="50" width={52 - i * 8} height="5" rx="2.5" fill="#d8bfa6" opacity="0.85" />
-          <rect x={x + 12} y="60" width={70 - i * 10} height="5" rx="2.5" fill="#c9b6e4" opacity="0.7" />
-          <rect x={x + 12} y="70" width={40 + i * 12} height="5" rx="2.5" fill="#c9b6e4" opacity="0.45" />
-          <rect x={x + 12} y="80" width={58 - i * 6} height="5" rx="2.5" fill="#d8bfa6" opacity="0.4" />
-          <rect x={x + 40} y="98" width="20" height="8" fill="#2c2738" />
-        </g>
-      ))}
-
-      {/* Voyant : rouge et clignotant s'il y a des signalements à traiter, vert sinon */}
-      <circle cx="300" cy="22" r="7" fill={alerte ? "#e08a8a" : "#9fd8b0"} className={alerte ? "voyant-alerte" : undefined} />
-      <rect x="296" y="29" width="8" height="6" rx="2" fill="#2c2738" />
-
-      {/* Lampe de bureau */}
-      <path d="M 540 112 L 556 70 L 574 58" stroke="#d8bfa6" strokeWidth="3" fill="none" strokeLinecap="round" />
-      <ellipse cx="578" cy="56" rx="12" ry="6" fill="#f5d485" opacity="0.9" />
-    </svg>
+    <section className="bureau-overview">
+      <div className="bureau-overview-marque">
+        <span className="bureau-overview-logo"><i className="fa-solid fa-brain" /> G-SOCIETY</span>
+        <span className="bureau-overview-separateur" />
+        <span>PLATEFORME GRIND</span>
+      </div>
+      <div className="bureau-overview-contenu">
+        <span className="bureau-overview-eyebrow">ESPACE DE GESTION</span>
+        <h1>Centre d’administration</h1>
+        <p>Pilotage de la communauté, suivi des opérations et modération des espaces GRIND.</p>
+      </div>
+      <div className="bureau-overview-session">
+        <span className="bureau-session-indicateur" />
+        <span><strong>{nom}</strong><small>{role === "admin" ? "Administration officielle" : libelleRole(role)}</small></span>
+      </div>
+    </section>
   );
 }
 
@@ -107,6 +100,8 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
   const [apercu, setApercu] = useState(null);
   const [salle, setSalle] = useState(null);
   const [erreur, setErreur] = useState(null);
+  const permissions = statut?.permissions || [];
+  const peutVoirApercu = ["signalements", "support", "examens", "utilisateurs", "certification", "equipe"].some((permission) => permissions.includes(permission));
 
   useEffect(() => {
     obtenirMonStatut(sessionToken)
@@ -122,8 +117,9 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
   }, [sessionToken]);
 
   useEffect(() => {
-    if (statut && salle === null) chargerApercu();
-  }, [statut, salle, chargerApercu]);
+    if (statut && salle === null && peutVoirApercu) chargerApercu();
+    else if (statut && !peutVoirApercu) setApercu(null);
+  }, [statut, salle, peutVoirApercu, chargerApercu]);
 
   if (erreur && !statut) {
     return (
@@ -146,13 +142,9 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
   }
 
   const monRole = statut.role || role;
-  const permissions = statut.permissions || [];
   const sallesVisibles = SALLES.filter((s) => s.permission === "pays" ? monRole === "admin" : permissions.includes(s.permission));
   const nom = statut.nom_affiche || statut.username;
   const salleActive = SALLES.find((s) => s.cle === salle);
-  const alerte =
-    (apercu?.nb_signalements_ouverts || 0) + (apercu?.nb_support_attente || 0) + (apercu?.nb_examens_attente || 0) > 0;
-
   return (
     <div className="bureau">
       <header className="bureau-hud">
@@ -185,53 +177,36 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
           {salle === "examens" && <SalleExamens sessionToken={sessionToken} />}
           {salle === "utilisateurs" && <SalleUtilisateurs sessionToken={sessionToken} role={monRole} />}
           {salle === "certification" && <SalleCertification sessionToken={sessionToken} />}
-          {salle === "equipe" && <SalleEquipe sessionToken={sessionToken} />}
-          {salle === "annonces" && <SalleAnnonces sessionToken={sessionToken} />}
+          {salle === "equipe" && <SalleEquipe sessionToken={sessionToken} role={monRole} />}
+          {salle === "annonces" && <SalleAnnonces sessionToken={sessionToken} role={monRole} username={statut.username} />}
+          {salle === "suppression" && <SalleSuppression sessionToken={sessionToken} />}
           {salle === "proviseurs" && <SalleProviseurs sessionToken={sessionToken} />}
           {salle === "pays" && monRole === "admin" && <SallePays sessionToken={sessionToken} />}
         </>
       ) : (
         <>
-          <div className="bureau-scene">
-            <ScenePupitre alerte={alerte} />
-          </div>
+          <VueEnsemble nom={nom} role={monRole} />
 
-          {apercu && (
-            <div className="bureau-kpis">
-              <div className={`kpi ${alerte ? "kpi-alerte" : ""}`}>
-                <div className="kpi-valeur">{apercu.nb_signalements_ouverts}</div>
-                <div className="kpi-libelle">signalements à traiter</div>
+          {apercu && (permissions.includes("signalements") || permissions.includes("support") || permissions.includes("examens") || permissions.includes("utilisateurs") || permissions.includes("certification") || permissions.includes("equipe")) && (
+            <section className="bureau-indicateurs" aria-label="Indicateurs d’activité">
+              <div className="bureau-section-heading"><div><span className="bureau-section-eyebrow">SUIVI OPÉRATIONNEL</span><h2>Vue d’ensemble</h2></div></div>
+              <div className="bureau-kpis">
+                {permissions.includes("signalements") && <div className={`kpi ${apercu.nb_signalements_ouverts > 0 ? "kpi-alerte" : ""}`}><span className="kpi-icone"><i className="fa-solid fa-flag" /></span><div className="kpi-valeur">{apercu.nb_signalements_ouverts}</div><div className="kpi-libelle">signalements ouverts</div></div>}
+                {permissions.includes("support") && <div className={`kpi ${apercu.nb_support_attente > 0 ? "kpi-alerte" : ""}`}><span className="kpi-icone"><i className="fa-solid fa-headset" /></span><div className="kpi-valeur">{apercu.nb_support_attente}</div><div className="kpi-libelle">demandes de support</div></div>}
+                {permissions.includes("examens") && <div className={`kpi ${apercu.nb_examens_attente > 0 ? "kpi-alerte" : ""}`}><span className="kpi-icone"><i className="fa-solid fa-scale-balanced" /></span><div className="kpi-valeur">{apercu.nb_examens_attente}</div><div className="kpi-libelle">examens en attente</div></div>}
+                {permissions.includes("utilisateurs") && <div className="kpi"><span className="kpi-icone"><i className="fa-solid fa-users" /></span><div className="kpi-valeur">{apercu.nb_comptes}</div><div className="kpi-libelle">comptes utilisateurs</div></div>}
+                {permissions.includes("certification") && <div className="kpi"><span className="kpi-icone"><i className="fa-solid fa-certificate" /></span><div className="kpi-valeur">{apercu.nb_certifies}</div><div className="kpi-libelle">comptes certifiés</div></div>}
+                {permissions.includes("equipe") && <div className="kpi"><span className="kpi-icone"><i className="fa-solid fa-people-group" /></span><div className="kpi-valeur">{apercu.nb_equipe}</div><div className="kpi-libelle">collaborateurs</div></div>}
               </div>
-              <div className={`kpi ${apercu.nb_support_attente > 0 ? "kpi-alerte" : ""}`}>
-                <div className="kpi-valeur">{apercu.nb_support_attente}</div>
-                <div className="kpi-libelle">discussions à répondre</div>
-              </div>
-              {permissions.includes("examens") && (
-                <div className={`kpi ${apercu.nb_examens_attente > 0 ? "kpi-alerte" : ""}`}>
-                  <div className="kpi-valeur">{apercu.nb_examens_attente}</div>
-                  <div className="kpi-libelle">examens en attente</div>
-                </div>
-              )}
-              <div className="kpi">
-                <div className="kpi-valeur">{apercu.nb_comptes}</div>
-                <div className="kpi-libelle">comptes</div>
-              </div>
-              <div className="kpi">
-                <div className="kpi-valeur">{apercu.nb_certifies}</div>
-                <div className="kpi-libelle">certifiés</div>
-              </div>
-              <div className="kpi">
-                <div className="kpi-valeur">{apercu.nb_equipe}</div>
-                <div className="kpi-libelle">dans l'équipe</div>
-              </div>
-            </div>
+            </section>
           )}
 
-          <div className="bureau-salles">
+          <section className="bureau-section">
+            <div className="bureau-section-heading"><div><span className="bureau-section-eyebrow">OUTILS ET SERVICES</span><h2>Espaces de travail</h2><p>Accède aux modules correspondant à ton niveau d’autorisation.</p></div><span className="bureau-section-count">{sallesVisibles.length} espace(s)</span></div>
+            <div className="bureau-salles">
             {sallesVisibles.map((s) => (
               <button key={s.cle} type="button" className="salle-tuile" onClick={() => setSalle(s.cle)}>
-                <span className="salle-icone"><i className={s.icone}></i></span>
-                <span className="salle-titre">{s.titre}</span>
+                <span className="salle-tuile-entete"><span className="salle-icone"><i className={s.icone}></i></span><span className="salle-titre">{s.titre}</span><i className="fa-solid fa-arrow-up-right-from-square salle-tuile-ouvrir" aria-hidden="true" /></span>
                 <span className="salle-desc">{s.desc}</span>
                 {s.cle === "signalements" && apercu?.nb_signalements_ouverts > 0 && (
                   <span className="salle-etiquette" style={{ color: "var(--erreur)", borderColor: "rgba(224,138,138,0.5)" }}>
@@ -250,16 +225,8 @@ export default function BureauAdmin({ sessionToken, role, autonome = false, onDe
                 )}
               </button>
             ))}
-
-            {permissions.includes("equipe") && (
-              <button type="button" className="salle-tuile" disabled>
-                <span className="salle-icone"><i className="fa-solid fa-coins"></i></span>
-                <span className="salle-titre">Caisse G</span>
-                <span className="salle-desc">Monnaie G, frais de certification et cadeaux.</span>
-                <span className="salle-etiquette">Bientôt</span>
-              </button>
-            )}
-          </div>
+            </div>
+          </section>
         </>
       )}
     </div>

@@ -49,7 +49,12 @@ export default function BandeauAnnonces({ sessionToken }) {
       {visibles.map((annonce) => (
         <article key={annonce.id} className={`carte-annonce-fil ${annonce.important ? "annonce-fil-importante" : ""}`}>
           <div className="carte-annonce-fil-entete">
-            <span className="annonce-fil-auteur"><i className="fa-solid fa-circle-check" /> Compte officiel GRIND</span>
+            <span className="annonce-fil-auteur">
+              <i className="fa-solid fa-bullhorn" />
+              <span>{annonce.auteur || "GRIND"}</span>
+              <BadgeCompte badge={{ role: annonce.role || "admin" }} taille={13} />
+              <small>{annonce.role === "annonceur" ? "Annonceur autorisé" : annonce.role === "associe" ? "Associé de l’administration GRIND" : "Administration GRIND"}</small>
+            </span>
             <time>{formaterDate(annonce.created_at)}</time>
           </div>
           <div className="carte-annonce-fil-tags">

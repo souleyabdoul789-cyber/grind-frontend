@@ -18,10 +18,10 @@ import EditeurPhoto from "../components/EditeurPhoto.jsx";
 import { ROLES_EQUIPE, libelleRole, formaterDate } from "../moderationInfos.js";
 
 /* ------------------------------- Équipe ------------------------------- */
-export function SalleEquipe({ sessionToken }) {
+export function SalleEquipe({ sessionToken, role = "admin" }) {
   const [equipe, setEquipe] = useState([]);
   const [username, setUsername] = useState("");
-  const [role, setRole] = useState("controleur");
+  const [roleChoisi, setRoleChoisi] = useState("controleur");
   const [chargement, setChargement] = useState(true);
   const [envoi, setEnvoi] = useState(false);
   const [erreur, setErreur] = useState(null);
@@ -52,8 +52,8 @@ export function SalleEquipe({ sessionToken }) {
     setErreur(null);
     setMessage(null);
     try {
-      await adminNommer(sessionToken, username.trim(), role);
-      setMessage(`${username.trim()} est maintenant ${libelleRole(role).toLowerCase()}.`);
+      await adminNommer(sessionToken, username.trim(), roleChoisi);
+      setMessage(`${username.trim()} est maintenant ${libelleRole(roleChoisi).toLowerCase()}.`);
       setUsername("");
       await charger();
     } catch (err) {
@@ -81,7 +81,7 @@ export function SalleEquipe({ sessionToken }) {
           <i className="fa-solid fa-user-plus"></i> Nommer un membre
         </div>
         <div className="info" style={{ fontSize: 13, marginBottom: 10 }}>
-          La personne doit déjà avoir un compte GRIND. Tu ne peux nommer que des associés et des contrôleurs : il n'y a qu'un seul administrateur.
+          La personne doit déjà posséder un compte GRIND. Chaque rôle dispose d’un périmètre précis. Les nominations d’associés, d’annonceurs et de responsables des retraits sont réservées au compte officiel.
         </div>
         <input
           value={username}
@@ -90,16 +90,15 @@ export function SalleEquipe({ sessionToken }) {
           style={{ marginBottom: 10 }}
         />
         <div className="choix-categorie" style={{ flexWrap: "wrap" }}>
-          {["controleur", "associe"].map((r) => (
-            <button key={r} type="button" className={`chip ${role === r ? "chip-actif" : ""}`} onClick={() => setRole(r)}>
+          {(role === "admin" ? ["controleur", "associe", "annonceur", "supprimeur"] : ["controleur"]).map((r) => (
+            <button key={r} type="button" aria-pressed={roleChoisi === r} className={`chip ${roleChoisi === r ? "chip-actif" : ""}`} onClick={() => setRoleChoisi(r)}>
               <i className={ROLES_EQUIPE[r].icone}></i> {ROLES_EQUIPE[r].label}
             </button>
           ))}
         </div>
-        <div className="info" style={{ fontSize: 12.5, marginBottom: 12 }}>
-          {role === "controleur"
-            ? "Contrôleur : traite les signalements, supprime les contenus, suspend jusqu'à 7 jours."
-            : "Associé : tout ce que fait un contrôleur, plus les bannissements, la levée des sanctions et la certification."}
+        <div className="equipe-role-description">
+          <i className={ROLES_EQUIPE[roleChoisi].icone} aria-hidden="true" />
+          <span>{ROLES_EQUIPE[roleChoisi].description}</span>
         </div>
         <button type="button" className="bouton-admin" onClick={nommer} disabled={envoi}>
           {envoi ? <span className="grind-spinner" aria-label="Envoi" /> : "Nommer"}
@@ -115,14 +114,20 @@ export function SalleEquipe({ sessionToken }) {
         {chargement && <div className="info"><i className="fa-solid fa-spinner fa-spin"></i> Chargement...</div>}
         {!chargement && equipe.length === 0 && <div className="info">Personne pour l'instant.</div>}
         {equipe.map((m) => (
-          <div key={m.username} className="ligne-membre">
-            <span>
+          <div key={m.username} className="ligne-membre equipe-membre">
+            <div className="equipe-membre-identite">
               <strong>{m.username}</strong>
-              <BadgeCompte badge={{ role: m.role, certifie: m.certifie }} taille={14} />
-              <span className="bureau-role"> · {libelleRole(m.role)}</span>
-            </span>
-            <button type="button" className="bouton-admin bouton-admin-doux" onClick={() => setARetirer(m.username)}>
-              Retirer
+              <BadgeCompte badge={{ role: m.role, certifie: m.certifie }} taille={15} />
+              <span className="bureau-role">{libelleRole(m.role)}</span>
+            </div>
+            <button
+              type="button"
+              className="bouton-admin bouton-admin-doux"
+              onClick={() => setARetirer(m.username)}
+              disabled={role !== "admin" && m.role !== "controleur"}
+              title={role !== "admin" && m.role !== "controleur" ? "Seul le compte officiel peut retirer ce rôle." : "Retirer de l’équipe"}
+            >
+              <i className="fa-solid fa-user-minus" aria-hidden="true" /> Retirer
             </button>
           </div>
         ))}
@@ -239,7 +244,8 @@ export function SalleCertification({ sessionToken }) {
 }
 
 /* ------------------------------- Annonces ------------------------------- */
-export function SalleAnnonces({ sessionToken }) {
+export function SalleAnnonces({ sessionToken, role = "admin", username = "" }) {
+  const estAdministrateur = role === "admin";
   const [titre, setTitre] = useState("");
   const [contenu, setContenu] = useState("");
   const [annonces, setAnnonces] = useState([]);
@@ -300,7 +306,7 @@ export function SalleAnnonces({ sessionToken }) {
         document_url: document.document_url, document_name: document.document_name, document_type: document.document_type,
         important, epinglee,
       });
-      setMessage("Annonce officielle publiée. Les utilisateurs connectés sont notifiés.");
+      setMessage(estAdministrateur ? "Annonce GRIND publiée. Les utilisateurs connectés sont notifiés." : "Annonce publiée. Les utilisateurs connectés sont notifiés.");
       setTitre(""); setContenu(""); setFichier(null); setApercu(null); setEditionVideo(null); setEditionPhoto(null); setDecoupeVideo(null); setImportant(false); setEpinglee(false);
       await charger();
     } catch (err) { setErreur(err.message); }
@@ -316,8 +322,12 @@ export function SalleAnnonces({ sessionToken }) {
   return (
     <div className="admin-grille salle-annonces">
       <div className="carte-post annonce-editeur-admin">
-        <div className="sous-titre" style={{ marginBottom: 10 }}><i className="fa-solid fa-bullhorn"></i> Nouvelle annonce officielle</div>
-        <div className="info" style={{ fontSize: 13, marginBottom: 10 }}>Publication réservée à l'administrateur global. Elle est envoyée à tous les utilisateurs et possède un niveau de priorité distinct du fil des élèves.</div>
+        <div className="sous-titre annonce-editeur-titre" style={{ marginBottom: 10 }}><i className="fa-solid fa-bullhorn"></i> {estAdministrateur ? "Nouvelle annonce GRIND" : "Nouvelle annonce communautaire"}</div>
+        <div className="info annonce-editeur-intro" style={{ fontSize: 13, marginBottom: 10 }}>
+          {estAdministrateur
+            ? "Communique une information de la plateforme à tous les utilisateurs. L’administrateur peut définir le niveau de priorité et épingler une annonce."
+            : "Tu es habilité à publier des annonces pour la communauté GRIND. Les annonces importantes et épinglées restent sous la responsabilité de l’administrateur."}
+        </div>
         <input value={titre} onChange={(e) => setTitre(e.target.value)} placeholder="Titre de l'annonce" maxLength={120} style={{ marginBottom: 10 }} />
         <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} placeholder="Légende ou message officiel..." rows={5} maxLength={3000} style={{ resize: "vertical", marginBottom: 12 }} />
         <div className="compteur-caracteres">{contenu.length} / 3 000</div>
@@ -328,18 +338,20 @@ export function SalleAnnonces({ sessionToken }) {
           <button type="button" className="bouton-retirer-media" onClick={() => { setFichier(null); setApercu(null); setEditionVideo(null); setDecoupeVideo(null); }} aria-label="Retirer la pièce jointe"><i className="fa-solid fa-xmark"></i></button>
         </div>}
         {!editionPhoto && !editionVideo && <label className="bouton-ajouter-media bouton-document-annonce"><i className="fa-solid fa-paperclip"></i> Ajouter photo, vidéo ou document<input type="file" accept="image/*,video/*,.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={choisirFichier} hidden /></label>}
-        <div className="options-annonce-admin">
-          <label><input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} /> <span><strong>Important</strong><small>Reste visible dans la cloche ; ne peut pas être masquée.</small></span></label>
-          <label><input type="checkbox" checked={epinglee} onChange={(e) => setEpinglee(e.target.checked)} /> <span><strong>Épingler</strong><small>Priorité d'affichage dans la liste des annonces.</small></span></label>
-        </div>
+        {estAdministrateur && (
+          <div className="options-annonce-admin">
+            <label><input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} /> <span><strong>Information importante</strong><small>Reste visible dans le centre de notifications et ne peut pas être masquée.</small></span></label>
+            <label><input type="checkbox" checked={epinglee} onChange={(e) => setEpinglee(e.target.checked)} /> <span><strong>Épingler l’annonce</strong><small>Place l’annonce en tête des informations publiées.</small></span></label>
+          </div>
+        )}
         <button type="button" className="bouton-admin" onClick={publier} disabled={envoi || !!editionVideo || !!editionPhoto || titre.trim().length < 3 || (!contenu.trim() && !fichier)}><i className="fa-solid fa-paper-plane"></i> {envoi ? <><span className="grind-spinner" aria-hidden="true" /> Publication en cours</> : "Publier à tous"}</button>
         {message && <div className="info" style={{ color: "var(--succes)", marginTop: 10 }}>{message}</div>}
         {erreur && <div className="erreur" style={{ marginTop: 10 }}>{erreur}</div>}
       </div>
-      <div className="carte-post">
-        <div className="sous-titre" style={{ marginBottom: 6 }}><i className="fa-solid fa-clock-rotate-left"></i> Annonces publiées</div>
+      <div className="carte-post annonce-historique-admin">
+        <div className="sous-titre" style={{ marginBottom: 6 }}><i className="fa-solid fa-clock-rotate-left"></i> {estAdministrateur ? "Historique des annonces" : "Mes annonces publiées"}</div>
         {annonces.length === 0 && <div className="info">Aucune annonce pour l'instant.</div>}
-        {annonces.map((a) => <div key={a.id} className="ligne-membre ligne-annonce-admin"><span style={{ minWidth: 0 }}><strong>{a.epinglee ? "📌 " : ""}{a.titre}</strong><div className="bureau-role">{formaterDate(a.created_at)}{a.important ? " · IMPORTANT" : ""}{a.media_type ? ` · ${a.media_type}` : ""}{a.document_url ? " · DOCUMENT" : ""}</div></span><button type="button" className="bouton-admin bouton-admin-doux" onClick={() => setASupprimer(a)} aria-label="Supprimer l'annonce"><i className="fa-solid fa-trash"></i></button></div>)}
+        {annonces.map((a) => <div key={a.id} className="ligne-membre ligne-annonce-admin"><span style={{ minWidth: 0 }}><strong>{a.epinglee ? "📌 " : ""}{a.titre}</strong><div className="bureau-role">{formaterDate(a.created_at)} · {a.role === "annonceur" ? "Annonceur" : a.role === "associe" ? "Associé" : "Administration"}{a.important ? " · IMPORTANT" : ""}{a.media_type ? ` · ${a.media_type}` : ""}{a.document_url ? " · DOCUMENT" : ""}</div></span>{(estAdministrateur || a.auteur_username === username) && <button type="button" className="bouton-admin bouton-admin-doux" onClick={() => setASupprimer(a)} aria-label="Supprimer l'annonce"><i className="fa-solid fa-trash"></i></button>}</div>)}
       </div>
       {aSupprimer && <ConfirmModal message={`Supprimer l'annonce « ${aSupprimer.titre} » ?`} onConfirmer={() => supprimer(aSupprimer.id)} onAnnuler={() => setASupprimer(null)} />}
     </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import AdminSelect from "../components/AdminSelect.jsx";
 import {
   listerCandidaturesProviseurs,
   telechargerDocumentProviseur,
@@ -64,12 +65,17 @@ export default function SalleProviseurs({ sessionToken }) {
           <h2>Candidatures proviseur / direction</h2>
           <p>Les pièces d'identité restent privées et ne sont accessibles qu'à l'administrateur.</p>
         </div>
-        <select value={filtre} onChange={(e) => setFiltre(e.target.value)} aria-label="Filtrer les candidatures">
-          <option value="en_attente">En attente</option>
-          <option value="approuve">Approuvées</option>
-          <option value="rejete">Rejetées</option>
-          <option value="toutes">Toutes</option>
-        </select>
+        <AdminSelect
+          value={filtre}
+          onChange={setFiltre}
+          ariaLabel="Filtrer les candidatures"
+          options={[
+            { value: "en_attente", label: "En attente" },
+            { value: "approuve", label: "Approuvées" },
+            { value: "rejete", label: "Rejetées" },
+            { value: "toutes", label: "Toutes les candidatures" },
+          ]}
+        />
       </div>
       {erreur && <div className="erreur" role="alert">{erreur}</div>}
       {chargement && <p className="info">Chargement...</p>}

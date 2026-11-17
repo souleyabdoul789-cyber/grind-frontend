@@ -9,7 +9,7 @@ export default function ModaleAnnonce({ annonce, onFermer, onMasquer }) {
       <div className={`carte-modal carte-modal-large modal-annonce-officielle ${annonce.important ? "annonce-importante" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="annonce-entete">
           <i className="fa-solid fa-bullhorn" style={{ color: "#f5d485" }}></i>
-          <span>Annoncé par <strong>{annonce.auteur}</strong> <BadgeCompte badge={{ role: annonce.role || "admin" }} taille={13} /></span>
+          <span className="annonce-modal-auteur">Publié par <strong>{annonce.auteur}</strong> <BadgeCompte badge={{ role: annonce.role || "admin" }} taille={13} /> <small>{annonce.role === "annonceur" ? "Annonceur autorisé GRIND" : annonce.role === "associe" ? "Associé de l’administration GRIND" : "Administration officielle GRIND"}</small></span>
           <span style={{ marginLeft: "auto" }}>{formaterDate(annonce.created_at)}</span>
         </div>
         <div className="priorite-annonce">

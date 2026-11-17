@@ -886,6 +886,14 @@ export function adminChercherUtilisateurs(sessionToken, q) {
   return poster(`${GRIND_URL}/api/admin/utilisateurs`, { session_token: sessionToken, q });
 }
 
+export function adminListerComptesSanctionnes(sessionToken, q = "") {
+  return poster(`${GRIND_URL}/api/admin/suppression/comptes`, { session_token: sessionToken, q });
+}
+
+export function adminDossierSuppression(sessionToken, username) {
+  return poster(`${GRIND_URL}/api/admin/suppression/dossier`, { session_token: sessionToken, username });
+}
+
 export function adminSanctionner(sessionToken, { username, type, duree_jours, motif, examen_possible }) {
   return poster(`${GRIND_URL}/api/admin/sanctionner`, {
     session_token: sessionToken,
