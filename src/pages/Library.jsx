@@ -4,9 +4,10 @@ import {
   uploaderDocumentLibrary,
   commenterDocumentLibrary,
   listerCommentairesDocumentLibrary,
-  obtenirDocumentLibrary, estGrindEnLigne,
+  obtenirDocumentLibrary, supprimerDocumentLibrary, estGrindEnLigne,
 } from "../api.js";
 import ProfilPublic from "../components/ProfilPublic.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 import ChargementGrind from "../components/ChargementGrind.jsx";
 import ApercuDocument from "../components/ApercuDocument.jsx";
 import { telechargerDocumentLibrary } from "../libraryMedia.js";
@@ -62,13 +63,17 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
   const [envoiCommentaire, setEnvoiCommentaire] = useState(false);
   const [telechargementDocumentId, setTelechargementDocumentId] = useState(null);
   const [progressionTelechargement, setProgressionTelechargement] = useState(null);
+  const [documentASupprimer, setDocumentASupprimer] = useState(null);
+  const [suppressionEnCours, setSuppressionEnCours] = useState(false);
+  const suppressionDocumentRef = useRef(false);
   const retourLibraryRef = useRef({});
-  retourLibraryRef.current = { profil, documentCible, apercu, partageOuvert };
+  retourLibraryRef.current = { profil, documentCible, apercu, partageOuvert, documentASupprimer, suppressionEnCours };
 
   useEffect(() => {
     const gererRetourLibrary = (event) => {
       if (event.defaultPrevented) return;
       const vue = retourLibraryRef.current;
+      if (vue.documentASupprimer) { if (!vue.suppressionEnCours) setDocumentASupprimer(null); event.preventDefault(); return; }
       if (vue.profil) { setProfil(null); event.preventDefault(); return; }
       if (vue.documentCible) { setDocumentCible(null); event.preventDefault(); return; }
       if (vue.apercu) { setApercu(null); event.preventDefault(); return; }
@@ -250,6 +255,47 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
     }
   }
 
+  function demanderSuppressionDocument(doc) {
+    if (!doc || doc.auteur?.username !== monUsername || suppressionDocumentRef.current) return;
+    if (!estGrindEnLigne()) {
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour supprimer ce document." }));
+      return;
+    }
+    setDocumentASupprimer(doc);
+  }
+
+  async function confirmerSuppressionDocument() {
+    const cible = documentASupprimer;
+    if (!cible || cible.auteur?.username !== monUsername || suppressionDocumentRef.current) return;
+    suppressionDocumentRef.current = true;
+    setSuppressionEnCours(true);
+    setErreur("");
+    try {
+      await supprimerDocumentLibrary(sessionToken, Number(cible.id));
+      const id = Number(cible.id);
+      const filtrer = liste => liste.filter(item => Number(item.id) !== id);
+      documentsCache.current = filtrer(documentsCache.current);
+      setDocuments(filtrer);
+      setTotal(value => Math.max(0, value - 1));
+      try {
+        localStorage.setItem(cleCacheDocuments, JSON.stringify(documentsCache.current.slice(0, 100)));
+        localStorage.removeItem(`grind_library_comments_${monUsername || "compte"}_${id}`);
+      } catch {}
+      if (Number(apercu?.id) === id) setApercu(null);
+      if (Number(documentCible?.id) === id) {
+        setDocumentCible(null);
+        setCommentaires([]);
+      }
+      setDocumentASupprimer(null);
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Document supprimé de la Library." }));
+    } catch (e) {
+      setErreur(e.message || "Le document n'a pas pu être supprimé.");
+    } finally {
+      suppressionDocumentRef.current = false;
+      setSuppressionEnCours(false);
+    }
+  }
+
   async function telechargerDocument(doc) {
     if (telechargementDocumentId !== null) return;
     setTelechargementDocumentId(Number(doc.id));
@@ -333,6 +379,18 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
                 : <i className="fa-solid fa-download" />}
             </button>
             <button type="button" onClick={() => ouvrirCommentaires(doc)} title="Commentaires" aria-label="Commentaires"><i className="fa-regular fa-comment" /> <small>{doc.commentaires || 0}</small></button>
+            {doc.auteur?.username === monUsername && (
+              <button
+                type="button"
+                className="library-doc-delete"
+                onClick={() => demanderSuppressionDocument(doc)}
+                title="Supprimer mon document"
+                aria-label={`Supprimer le document ${doc.titre}`}
+                disabled={suppressionEnCours}
+              >
+                <i className="fa-solid fa-trash" />
+              </button>
+            )}
           </div>
         </div>
       </article>)}
@@ -363,5 +421,14 @@ export default function Library({ sessionToken, monUsername, documentAouvrirId =
         </form>
       </section>
     </div>}
+
+    {documentASupprimer && (
+      <ConfirmModal
+        message={`Supprimer définitivement « ${documentASupprimer.titre} » de la Library ? Cette action retire le document et ses commentaires.`}
+        texteConfirmer={suppressionEnCours ? "Suppression…" : "Supprimer définitivement"}
+        onConfirmer={confirmerSuppressionDocument}
+        onAnnuler={() => { if (!suppressionEnCours) setDocumentASupprimer(null); }}
+      />
+    )}
   </main>;
 }

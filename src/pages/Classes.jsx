@@ -1,7 +1,6 @@
 import FormulaireClasse from "../components/FormulaireClasse.jsx";
+import GrindScannerQR from "../components/GrindScannerQR.jsx";
 import { useState, useEffect, useRef } from "react";
-import { Capacitor } from "@capacitor/core";
-import { BarcodeScanner, BarcodeFormat } from "@capacitor-mlkit/barcode-scanning";
 import QRCode from "qrcode";
 import { rejoindreClasse, rejoindreDiscussion, listerMesClasses, renommerClasse, supprimerClasse, extraireCode, estGrindEnLigne } from "../api.js";
 import SalleClasse from "../components/SalleClasse.jsx";
@@ -28,6 +27,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [erreurScanner, setErreurScanner] = useState("");
   const [codeInvitationSaisi, setCodeInvitationSaisi] = useState("");
   const [scannerEnCours, setScannerEnCours] = useState(false);
+  const [scannerOuvert, setScannerOuvert] = useState(false);
   const [qrClasse, setQrClasse] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const codeLienTraite = useRef(null);
@@ -42,7 +42,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const retourInterneRef = useRef({});
   retourInterneRef.current = {
     qrClasse, classeASupprimer, profilConsulte, discussionActive, salleActive,
-    classeEnEdition, formulaireOuvert,
+    classeEnEdition, formulaireOuvert, scannerOuvert,
     actualiserClasses: () => charger({ silencieux: true }),
   };
 
@@ -105,6 +105,7 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     const gererRetourInterne = (event) => {
       if (event.defaultPrevented) return;
       const vue = retourInterneRef.current;
+      if (vue.scannerOuvert) { setScannerOuvert(false); event.preventDefault(); return; }
       if (vue.qrClasse) { setQrClasse(null); event.preventDefault(); return; }
       if (vue.classeASupprimer) { setClasseASupprimer(null); event.preventDefault(); return; }
       if (vue.profilConsulte) { setProfilConsulte(null); event.preventDefault(); return; }
@@ -208,30 +209,14 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     } finally { setScannerEnCours(false); }
   }
 
-  async function gererAdhesion() {
-    if (scannerEnCours) return;
+  function gererAdhesion() {
+    if (scannerEnCours || scannerOuvert) return;
     if (!estGrindEnLigne()) {
-      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour rejoindre une classe." }));
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Connexion requise pour scanner une invitation." }));
       return;
     }
     setErreurScanner("");
-    setScannerEnCours(true);
-    try {
-      if (Capacitor.getPlatform() === "android") {
-        const statutModule = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
-        if (!statutModule.available) {
-          await BarcodeScanner.installGoogleBarcodeScannerModule();
-          setErreurScanner("Le lecteur QR Android vient d'être installé. Appuie de nouveau sur le bouton pour scanner.");
-          return;
-        }
-      }
-      const resultat = await BarcodeScanner.scan({ formats: [BarcodeFormat.QrCode], autoZoom: true });
-      const valeur = resultat.barcodes?.find(code => code.rawValue)?.rawValue;
-      if (!valeur) return;
-      await rejoindreAvecCode(valeur);
-    } catch (err) {
-      setErreurScanner(err.message || "Impossible d'ouvrir le scanner QR.");
-    } finally { setScannerEnCours(false); }
+    setScannerOuvert(true);
   }
 
   useEffect(() => {
@@ -405,6 +390,15 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
 
           {erreurScanner && <div className="erreur classe-rejoindre-erreur" role="alert">{erreurScanner}</div>}
         </section>
+        {scannerOuvert && (
+          <GrindScannerQR
+            onFermer={() => setScannerOuvert(false)}
+            onDetected={(valeur) => {
+              setScannerOuvert(false);
+              void rejoindreAvecCode(valeur);
+            }}
+          />
+        )}
       </div>
     );
   }

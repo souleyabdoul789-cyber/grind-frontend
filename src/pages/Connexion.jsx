@@ -13,6 +13,7 @@ import EtapeVerification from "../components/EtapeVerification.jsx";
 import EtapeNomProfil from "../components/EtapeNomProfil.jsx";
 import EtapeNouveauMotDePasse, { IndicateurForce } from "../components/EtapeNouveauMotDePasse.jsx";
 import CandidatureProviseur from "./CandidatureProviseur.jsx";
+import AideGrind from "../components/AideGrind.jsx";
 
 // GIS s'initialise une seule fois par page. Le gestionnaire actif est remplacé
 // quand l'écran Connexion est monté/démonté (déconnexion puis reconnexion).
@@ -46,6 +47,7 @@ export default function Connexion({ onConnecte }) {
   const [confirmation, setConfirmation] = useState("");
   const [cgu, setCgu] = useState(false);
   const [cguOuvertes, setCguOuvertes] = useState(false);
+  const [aideOuverte, setAideOuverte] = useState(false);
   const [chargement, setChargement] = useState(false);
   const [erreur, setErreur] = useState(null);
   const [message, setMessage] = useState(null);
@@ -366,6 +368,10 @@ export default function Connexion({ onConnecte }) {
     aller("formulaire");
   }
 
+  if (aideOuverte) {
+    return <AideGrind onFermer={() => setAideOuverte(false)} />;
+  }
+
   if (mode === "proviseur") {
     return <CandidatureProviseur onRetour={() => setMode("login")} onConnecte={terminer} />;
   }
@@ -414,7 +420,7 @@ export default function Connexion({ onConnecte }) {
                 {mode === "login" ? "Connecte-toi pour continuer" : "Crée ton compte GRIND"}
               </div>
 
-              {mode === "login" && <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder="@nom_de_profil ou adresse e-mail" autoComplete="username" maxLength={254} autoFocus />}
+              {mode === "login" && <ChampAvecIcone icone="fa-solid fa-user" valeur={username} onChange={setUsername} placeholder="@nom_de_profil ou adresse e-mail" autoComplete="username" maxLength={254} />}
 
               {mode === "signup" && (
                 <>
@@ -633,6 +639,17 @@ export default function Connexion({ onConnecte }) {
           )}
         </div>
 
+        {ecran === "formulaire" && mode === "login" && !credentialGoogle && (
+          <div className="grind-login-actions" aria-label="Aide et contact GRIND">
+            <button type="button" onClick={() => setAideOuverte(true)}>
+              <i className="fa-solid fa-circle-question" aria-hidden="true" /> Aide GRIND
+            </button>
+            <a className="grind-contact-human" href="mailto:grind.supportt@gmail.com?subject=Contact%20GRIND" aria-label="Contacter G-SOCIETY par e-mail">
+              <i className="fa-solid fa-envelope" aria-hidden="true" />
+              <span><strong>Contactez-nous</strong><small>grind.supportt@gmail.com</small></span>
+            </a>
+          </div>
+        )}
         {cguOuvertes && <PageCgu onFermer={() => setCguOuvertes(false)} />}
       </div>
     </div>

@@ -1233,6 +1233,18 @@ export async function obtenirDocumentLibrary(sessionToken, id) {
   if (!r.ok) throw new Error(d.detail || "Document introuvable.");
   return d;
 }
+export async function supprimerDocumentLibrary(sessionToken, id) {
+  const u = new URL(`${GRIND_URL}/api/library/documents/${id}`);
+  u.searchParams.set("session_token", sessionToken);
+  const r = await fetchApi(u, { method: "DELETE" });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const erreur = new Error(d.detail || "Le document n'a pas pu être supprimé.");
+    erreur.status = r.status;
+    throw erreur;
+  }
+  return d;
+}
 export async function statutBienvenue(sessionToken) {
   const u = new URL(`${GRIND_URL}/api/compte/bienvenue`); u.searchParams.set("session_token", sessionToken);
   const r = await fetchApi(u); const d = await r.json(); if (!r.ok) throw new Error(d.detail || "Accueil indisponible."); return d;

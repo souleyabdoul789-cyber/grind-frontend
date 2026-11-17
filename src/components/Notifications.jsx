@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { urlNotifs, listerAnnonces, listerNotifications, marquerNotificationLue, enregistrerJetonPush, retirerJetonPush } from "../api.js";
+import { urlNotifs, listerAnnonces, listerNotifications, marquerNotificationLue, enregistrerJetonPush } from "../api.js";
 import ModaleAnnonce from "./ModaleAnnonce.jsx";
 import { Capacitor } from "@capacitor/core";
+import { App as CapacitorApp } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 
 const CLE_ANNONCE_VUE = "grind_annonce_vue"; // plus grand numéro d'annonce déjà vu
@@ -57,22 +58,41 @@ export default function Notifications({ sessionToken }) {
   }, []);
 
   // Notifications Android natives (FCM). Le site web garde son système actuel.
+  // Le jeton est conservé sur l'appareil et rattaché à la session active à chaque reprise réseau.
   useEffect(() => {
-    if (!sessionToken || !Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "android") return;
+    if (!sessionToken || Capacitor.getPlatform() !== "android") return undefined;
     let actif = true;
+    let associationEnCours = false;
     let jeton = localStorage.getItem("grind_push_token") || "";
     const ecouteurs = [];
+    let ecouteurCycle = null;
+
+    const synchroniserJeton = async (nouveauJeton = jeton) => {
+      if (!actif || !nouveauJeton || navigator.onLine === false || associationEnCours) return;
+      associationEnCours = true;
+      try {
+        await enregistrerJetonPush(sessionToken, nouveauJeton);
+        jeton = nouveauJeton;
+        try { localStorage.setItem("grind_push_token", nouveauJeton); } catch {}
+      } catch (erreur) {
+        // Le jeton reste local : la reprise réseau ou le retour dans l'application relancera l'association.
+        console.warn("Association du jeton FCM GRIND différée", erreur?.message || "réseau indisponible");
+      } finally {
+        associationEnCours = false;
+      }
+    };
 
     const initialiser = async () => {
       try {
-        ecouteurs.push(await PushNotifications.addListener("registration", async ({ value }) => {
-          if (!actif || !value) return;
-          jeton = value;
-          localStorage.setItem("grind_push_token", value);
-          try { await enregistrerJetonPush(sessionToken, value); } catch {}
+        ecouteurs.push(await PushNotifications.addListener("registration", ({ value }) => {
+          const valeur = String(value || "").trim();
+          if (!valeur) return;
+          jeton = valeur;
+          try { localStorage.setItem("grind_push_token", valeur); } catch {}
+          void synchroniserJeton(valeur);
         }));
         ecouteurs.push(await PushNotifications.addListener("registrationError", (error) => {
-          console.warn("Enregistrement des notifications GRIND impossible", error);
+          console.warn("Enregistrement des notifications GRIND impossible", error?.error || error);
         }));
         ecouteurs.push(await PushNotifications.addListener("pushNotificationReceived", async (notification) => {
           if (!actif) return;
@@ -89,28 +109,45 @@ export default function Notifications({ sessionToken }) {
         }));
         ecouteurs.push(await PushNotifications.addListener("pushNotificationActionPerformed", ({ notification }) => {
           if (!actif) return;
-          ouvrirCiblePush(notification?.data || {});
+          void ouvrirCiblePush(notification?.data || {});
         }));
 
         const permissions = await PushNotifications.checkPermissions();
         let reception = permissions.receive;
-        if (reception === "prompt") reception = (await PushNotifications.requestPermissions()).receive;
+        if (reception === "prompt" || reception === "prompt-with-rationale") {
+          reception = (await PushNotifications.requestPermissions()).receive;
+        }
         if (!actif || reception !== "granted") return;
         await PushNotifications.createChannel({ id: "grind-notifications", name: "GRIND", description: "Notifications de ton activité GRIND", importance: 5, visibility: 1 });
         await PushNotifications.register();
+        // Une session peut déjà disposer d'un jeton enregistré lors d'un lancement précédent.
+        if (jeton) void synchroniserJeton(jeton);
       } catch (error) {
-        console.warn("Notifications Android GRIND indisponibles", error);
+        console.warn("Notifications Android GRIND indisponibles", error?.message || error);
       }
     };
 
+    const reprendre = (event) => {
+      if (event?.isActive === false) return;
+      void synchroniserJeton();
+    };
+    const enLigne = () => { void synchroniserJeton(); };
+    const visibilite = () => { if (document.visibilityState === "visible") void synchroniserJeton(); };
+    window.addEventListener("online", enLigne);
+    window.addEventListener("grind-api-status", enLigne);
+    document.addEventListener("visibilitychange", visibilite);
     initialiser();
+    ecouteurCycle = CapacitorApp.addListener("appStateChange", reprendre);
+
     return () => {
       actif = false;
+      window.removeEventListener("online", enLigne);
+      window.removeEventListener("grind-api-status", enLigne);
+      document.removeEventListener("visibilitychange", visibilite);
       for (const ecouteur of ecouteurs) ecouteur.remove().catch(() => {});
-      if (jeton) {
-        retirerJetonPush(sessionToken, jeton).catch(() => {});
-        if (localStorage.getItem("grind_push_token") === jeton) localStorage.removeItem("grind_push_token");
-      }
+      ecouteurCycle?.then(handle => handle.remove()).catch(() => {});
+      // Ne pas désenregistrer ici : un démontage peut simplement correspondre
+      // à un changement de compte. La déconnexion explicite appelle /api/push/unregister.
     };
   }, [sessionToken]);
 
@@ -229,7 +266,7 @@ export default function Notifications({ sessionToken }) {
     if (n.type === "nouvelle_demande") return `${n.demandeur} a besoin d'aide en ${n.sujet}`;
     if (n.type === "participant_rejoint") return `${n.username} a rejoint ta demande d'aide`;
     if (n.type === "nouveau_membre_classe") return `${n.nouveau_membre} a rejoint ta classe "${n.nom_classe}"`;
-    if (n.type === "support_reponse") return "L'équipe a répondu à ta demande (Réglages › Contactez-nous)";
+    if (n.type === "support_reponse") return "L'équipe a répondu à ta demande (Réglages › Assistance IA GRIND)";
     return "Nouvelle activité";
   }
 

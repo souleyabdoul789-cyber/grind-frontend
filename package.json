@@ -1,7 +1,7 @@
 {
   "name": "grind-frontend",
   "private": true,
-  "version": "2.10.18",
+  "version": "3.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,7 +23,8 @@
     "@capacitor-mlkit/barcode-scanning": "8.2.2",
     "qrcode": "1.5.4",
     "@capacitor/app": "8.1.2",
-    "@capacitor/browser": "8.0.5"
+    "@capacitor/browser": "8.0.5",
+    "barcode-detector": "3.2.3"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

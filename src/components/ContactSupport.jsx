@@ -106,7 +106,7 @@ export default function ContactSupport({ sessionToken, onFermer }) {
       <div className="page-support" onClick={(e) => e.stopPropagation()}>
         <div className="entete-page-cgu">
           <div className="sous-titre" style={{ margin: 0 }}>
-            <i className="fa-solid fa-headset"></i> Contactez-nous
+            <i className="fa-solid fa-robot"></i> Assistance IA GRIND
           </div>
           <button type="button" className="bouton-admin bouton-admin-doux" onClick={onFermer}>
             <i className="fa-solid fa-xmark"></i> Fermer

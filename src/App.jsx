@@ -190,7 +190,7 @@ export default function App() {
     let delaiAnnulation = null;
 
     const verifierConnexion = async () => {
-      if (!actif || verificationEnCours) return;
+      if (!actif || verificationEnCours || document.visibilityState === "hidden") return;
       if (navigator.onLine === false) {
         echecsApiConsecutifs = 0;
         setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
@@ -200,7 +200,9 @@ export default function App() {
       verificationEnCours = true;
       setEtatConnexion((precedent) => ({ ...precedent, verification: true }));
       controleur = new AbortController();
-      delaiAnnulation = window.setTimeout(() => controleur?.abort(), 9000);
+      // Le backend gratuit peut avoir besoin de plusieurs dizaines de secondes
+      // pour se réveiller après une période d'inactivité.
+      delaiAnnulation = window.setTimeout(() => controleur?.abort(), 65000);
 
       try {
         const reponse = await fetch(`${GRIND_URL}/api/health`, {
@@ -243,19 +245,25 @@ export default function App() {
       setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
     };
     const enLigne = () => { verifierConnexion(); };
-
+    const reprendreVisibilite = () => { if (document.visibilityState === "visible") verifierConnexion(); };
     window.addEventListener("offline", horsLigne);
     window.addEventListener("online", enLigne);
+    document.addEventListener("visibilitychange", reprendreVisibilite);
+    const listenerResume = CapacitorApp.addListener("appStateChange", event => {
+      if (event.isActive) verifierConnexion();
+    });
     verifierConnexion();
-    const intervalle = window.setInterval(verifierConnexion, 15000);
+    const intervalle = window.setInterval(verifierConnexion, 30000);
 
     return () => {
       actif = false;
       window.removeEventListener("offline", horsLigne);
       window.removeEventListener("online", enLigne);
+      document.removeEventListener("visibilitychange", reprendreVisibilite);
       window.clearInterval(intervalle);
       controleur?.abort();
       if (delaiAnnulation !== null) window.clearTimeout(delaiAnnulation);
+      listenerResume?.then(handle => handle.remove()).catch(() => {});
     };
   }, [tentativeConnexion]);
 
@@ -808,7 +816,7 @@ export default function App() {
         </div>
       )}
       {toastGrind && <div className="grind-toast" role="status">{toastGrind}</div>}
-      {!discussionPleineEcran && <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />}
+      <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />
 
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
       {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}

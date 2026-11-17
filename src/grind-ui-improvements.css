@@ -1,0 +1,480 @@
+/* Améliorations isolées GRIND : scanner, liens d'assistance et saisie mobile. */
+
+/* ---------- GRIND Scan ---------- */
+#grind-scanner-portal {
+  position: relative;
+  z-index: 10050;
+  visibility: visible;
+}
+
+body.barcode-scanner-active #root {
+  visibility: hidden;
+}
+
+.grind-scanner-portal {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #f7f4f0;
+  background: rgba(8, 9, 12, .38);
+  font-family: "Inter", sans-serif;
+  isolation: isolate;
+}
+
+.grind-scanner-native {
+  background: transparent;
+}
+
+.grind-scanner-web {
+  background: rgba(7, 8, 11, .16);
+}
+
+.grind-scanner-camera-web {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background: #090a0d;
+}
+
+.grind-scanner-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.grind-scanner-header {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: max(12px, env(safe-area-inset-top)) 16px 14px;
+  background: linear-gradient(180deg, rgba(8, 9, 12, .92), rgba(8, 9, 12, .42));
+}
+
+.grind-scanner-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.grind-scanner-brand > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.grind-scanner-brand strong {
+  font: 600 15px "Space Grotesk", sans-serif;
+  letter-spacing: .01em;
+}
+
+.grind-scanner-brand small {
+  color: rgba(247, 244, 240, .72);
+  font-size: 11px;
+}
+
+.grind-scanner-brand-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  border: 1px solid rgba(216, 191, 166, .34);
+  border-radius: 12px;
+  color: #e1c7ad;
+  background: rgba(216, 191, 166, .12);
+}
+
+.grind-scanner-tools {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.grind-scanner-icon-button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(15, 16, 20, .58);
+  box-shadow: none;
+  font-size: 15px;
+  backdrop-filter: blur(8px);
+}
+
+.grind-scanner-icon-button:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(225, 199, 173, .65);
+}
+
+.grind-scanner-icon-button.active {
+  color: #171513;
+  border-color: #e1c7ad;
+  background: #e1c7ad;
+}
+
+.grind-scanner-main {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  min-height: 0;
+  padding: 16px 20px max(20px, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(8, 9, 12, .1), rgba(8, 9, 12, .68));
+}
+
+.grind-scanner-instruction {
+  margin: 0;
+  color: #fff;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .45);
+}
+
+.grind-scanner-viewfinder {
+  position: relative;
+  width: min(72vw, 310px);
+  max-width: 100%;
+  aspect-ratio: 1;
+  flex: 0 1 auto;
+  overflow: hidden;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, .025);
+  box-shadow: 0 0 0 100vmax rgba(4, 5, 8, .23);
+}
+
+.grind-scanner-corner {
+  position: absolute;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border-color: #e6cbb0;
+  border-style: solid;
+  filter: drop-shadow(0 1px 5px rgba(0, 0, 0, .55));
+}
+
+.grind-scanner-corner.top-left {
+  top: 0; left: 0;
+  border-width: 3px 0 0 3px;
+  border-radius: 17px 0 0;
+}
+
+.grind-scanner-corner.top-right {
+  top: 0; right: 0;
+  border-width: 3px 3px 0 0;
+  border-radius: 0 17px 0 0;
+}
+
+.grind-scanner-corner.bottom-left {
+  bottom: 0; left: 0;
+  border-width: 0 0 3px 3px;
+  border-radius: 0 0 0 17px;
+}
+
+.grind-scanner-corner.bottom-right {
+  right: 0; bottom: 0;
+  border-width: 0 3px 3px 0;
+  border-radius: 0 0 17px;
+}
+
+.grind-scanner-scan-line {
+  position: absolute;
+  top: 8%;
+  left: 8%;
+  right: 8%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #e6cbb0, transparent);
+  box-shadow: 0 0 12px rgba(230, 203, 176, .65);
+  animation: grind-scan-line 2.2s ease-in-out infinite alternate;
+}
+
+@keyframes grind-scan-line {
+  from { transform: translateY(0); opacity: .45; }
+  to { transform: translateY(calc(min(72vw, 310px) * .78)); opacity: 1; }
+}
+
+.grind-scanner-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #fff;
+  background: rgba(8, 9, 12, .26);
+  font-size: 12px;
+}
+
+.grind-scanner-loading i {
+  color: #e6cbb0;
+  font-size: 21px;
+}
+
+.grind-scanner-status {
+  max-width: 340px;
+  margin: 0;
+  color: rgba(255, 255, 255, .78);
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, .55);
+}
+
+.grind-scanner-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: min(100%, 420px);
+  padding: 10px 12px;
+  border: 1px solid rgba(238, 156, 146, .48);
+  border-radius: 12px;
+  color: #ffe2dd;
+  background: rgba(83, 29, 28, .72);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.grind-scanner-error i {
+  margin-top: 1px;
+}
+
+.grind-scanner-secondary,
+.grind-scanner-import {
+  display: flex;
+  width: min(100%, 350px);
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 0;
+  padding: 11px 15px;
+  border: 1px solid rgba(225, 199, 173, .5);
+  border-radius: 13px;
+  color: #211c17;
+  background: #e1c7ad;
+  font-size: 13px;
+  font-weight: 650;
+  box-shadow: none;
+}
+
+.grind-scanner-secondary {
+  color: #f7f4f0;
+  background: rgba(20, 20, 24, .7);
+}
+
+.grind-scanner-import:hover:not(:disabled),
+.grind-scanner-secondary:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  filter: brightness(1.04);
+}
+
+.grind-scanner-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 350px);
+  color: rgba(255, 255, 255, .6);
+  font-size: 10px;
+  letter-spacing: .16em;
+}
+
+.grind-scanner-divider::before,
+.grind-scanner-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: rgba(255, 255, 255, .24);
+}
+
+.grind-scanner-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.grind-scanner-privacy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: rgba(255, 255, 255, .67);
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.grind-scanner-privacy i {
+  color: #d9c3ad;
+}
+
+/* ---------- Connexion : aide et contact humain ---------- */
+.grind-login-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 18px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+
+.grind-login-actions a,
+.grind-login-actions button {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, .035);
+  font: 600 11.5px "Inter", sans-serif;
+  text-align: center;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.grind-login-actions a:hover,
+.grind-login-actions button:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(216, 191, 166, .55);
+  color: var(--text);
+}
+
+.grind-login-actions i {
+  color: var(--brown);
+  font-size: 13px;
+}
+
+.grind-contact-human {
+  display: flex !important;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none !important;
+  color: var(--text) !important;
+}
+
+.grind-contact-human > i {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--brown);
+  background: rgba(216, 191, 166, .11);
+}
+
+.grind-contact-human > span {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.grind-contact-human strong {
+  font-size: 13px;
+}
+
+.grind-contact-human small {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* ---------- Réactivité pendant la saisie / ouverture du clavier ---------- */
+/* Réduit temporairement les effets coûteux pendant que le clavier mobile apparaît. */
+body:has(input:focus, textarea:focus, select:focus) .fond-bulles .bulle {
+  animation-play-state: paused !important;
+  filter: none !important;
+}
+
+body:has(input:focus, textarea:focus, select:focus) .carte-post,
+body:has(input:focus, textarea:focus, select:focus) .carte {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  animation: none !important;
+}
+
+.page:has(input:focus, textarea:focus, select:focus) {
+  align-items: flex-start;
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.page:has(input:focus, textarea:focus, select:focus) .carte {
+  transform: none;
+}
+
+input,
+textarea,
+select {
+  scroll-margin-top: 88px;
+}
+
+@media (max-width: 420px) {
+  .grind-login-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .grind-scanner-header {
+    padding-right: 12px;
+    padding-left: 12px;
+    gap: 8px;
+  }
+
+  .grind-scanner-main {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grind-scanner-scan-line {
+    animation: none;
+  }
+}
+
+
+/* Suppression propriétaire Library et contact humain des paramètres. */
+.library-doc-actions .library-doc-delete { color: #c56d63; }
+.library-doc-actions .library-doc-delete:hover:not(:disabled) { color: #fff; border-color: rgba(197,109,99,.65); background: rgba(197,109,99,.12); }
+.grind-human-contact-settings { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; }
+.grind-human-contact-settings i { color: var(--brown); }
+
+
+/* La navigation reste montée en discussion plein écran pour garder FCM actif. */
+.app-shell-discussion .barre-nav,
+.app-shell-discussion .barre-onglets {
+  display: none !important;
+}

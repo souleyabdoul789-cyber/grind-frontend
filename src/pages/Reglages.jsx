@@ -285,9 +285,13 @@ export default function Reglages({ sessionToken, monUsername, onDeconnexion }) {
       )}
 
       <button className="carte-post bouton-lien-carte" onClick={() => setContactOuvert(true)} type="button">
-        <i className="fa-solid fa-headset"></i> Contactez-nous
+        <i className="fa-solid fa-robot"></i> Assistance IA GRIND
       </button>
       {contactOuvert && <ContactSupport sessionToken={sessionToken} onFermer={() => setContactOuvert(false)} />}
+
+      <a className="carte-post bouton-lien-carte grind-human-contact-settings" href="mailto:grind.supportt@gmail.com?subject=Contact%20GRIND">
+        <i className="fa-solid fa-envelope"></i> Contacter G-SOCIETY par e-mail · grind.supportt@gmail.com
+      </a>
 
       <button className="carte-post bouton-lien-carte" onClick={() => setCguOuvertes(true)} type="button">
         <i className="fa-solid fa-file-contract"></i> Conditions d'utilisation

@@ -1,165 +1,50 @@
-// Conditions générales d'utilisation (CGU) et politique de confidentialité de GRIND.
-//
-// ATTENTION — TEXTE À FAIRE RELIRE PAR UN JURISTE AVANT L'OUVERTURE AU PUBLIC.
-// Il a été rédigé sous forme juridique, mais Claude n'est pas juriste et ne connaît ni la structure légale de
-// GRIND, ni le droit applicable. Chaque mention « [À COMPLÉTER : ...] » est une information que seul le propriétaire
-// du projet peut fournir ; ces mentions sont volontairement visibles pour qu'on ne puisse pas les oublier.
-//
-// Quand tu modifies ce texte, change aussi CGU_VERSION ici ET dans le serveur (moderation.py) :
-// chaque compte devra alors accepter la nouvelle version à sa prochaine connexion.
+// Conditions générales d'utilisation et politique de confidentialité de GRIND.
+// Version synchronisée avec moderation.py. Les informations juridiques d'identification
+// qui ne sont pas établies dans le projet ne sont pas inventées ici.
 
-export const CGU_VERSION = "2026-11-03";
+export const CGU_VERSION = "2026-11-17";
 
 export const DOCUMENTS = [
   {
     cle: "cgu",
     titre: "Conditions générales d'utilisation",
-    intro:
-      "Les présentes conditions générales d'utilisation (« CGU ») régissent l'accès et l'utilisation du service GRIND. En créant un compte, tu reconnais les avoir lues et acceptées.",
+    intro: "Les présentes conditions encadrent l'accès à GRIND et son utilisation. La création d'un compte ou la poursuite de l'utilisation après acceptation vaut accord sur la version affichée.",
     articles: [
-      {
-        titre: "Article 1 — Objet et éditeur",
-        texte:
-          "GRIND est un service d'entraide scolaire entre élèves et étudiants, proposé dans un navigateur web (le « Service »). Il est édité par [À COMPLÉTER : dénomination, forme juridique et adresse de l'éditeur] (l'« Éditeur »), société mère G-SOCIETY, qui fournit l'identité et les clés d'accès. Contact : [À COMPLÉTER : adresse e-mail de contact].",
-      },
-      {
-        titre: "Article 2 — Définitions",
-        texte:
-          "« Utilisateur » : toute personne titulaire d'un compte. « Compte » : espace personnel créé à l'inscription. « Contenu » : tout texte, image, vidéo, document, commentaire ou feuille de travail publié ou saisi dans le Service. « Administration » : les personnes habilitées par l'Éditeur pour modérer et administrer le Service (administrateur, associés, contrôleurs).",
-      },
-      {
-        titre: "Article 3 — Accès au Service et âge minimum",
-        texte:
-          "Le Service est réservé aux personnes âgées d'au moins 11 ans. L'Utilisateur déclare un âge exact ; une déclaration inexacte peut entraîner la suspension ou la suppression du compte. Lorsque la loi applicable l'exige, l'Utilisateur mineur déclare disposer de l'autorisation de son représentant légal : [À COMPLÉTER : règles de consentement parental selon le droit applicable]. Un Utilisateur ne peut détenir qu'un seul compte.",
-      },
-      {
-        titre: "Article 4 — Création du compte et sécurité",
-        texte:
-          "L'inscription exige un pseudo, une adresse e-mail valide et unique, un mot de passe et une clé d'accès G-SOCIETY, dont la validité n'est contrôlée qu'à l'inscription. L'adresse e-mail est vérifiée par un code à 7 chiffres envoyé par G-SOCIETY, valable 10 minutes, utilisable une seule fois et limité à 3 essais ; sans cette vérification, le compte n'est pas activé. L'Utilisateur garde ses identifiants confidentiels et s'interdit de communiquer son mot de passe ou un code de vérification à qui que ce soit : l'Éditeur ne les demande jamais. L'Utilisateur informe l'Administration sans délai de toute utilisation non autorisée de son compte. Un mot de passe oublié se réinitialise uniquement après validation d'un code envoyé à l'adresse e-mail du compte.",
-      },
-      {
-        titre: "Article 5 — Règles d'utilisation",
-        texte:
-          "Sont interdits : le harcèlement ou l'intimidation d'un autre Utilisateur ; l'usurpation d'identité ou de rôle (notamment celui de « prof ») ; la publication de contenus illicites, haineux, violents, sexuellement explicites, trompeurs, publicitaires ou hors sujet ; la diffusion de données personnelles d'autrui sans son accord ; la tentative d'accéder à un compte, à une feuille de travail ou à des données sans autorisation ; la création de comptes multiples ou de noms de classes et de matières fictifs ou dénués de sens ; toute action visant à perturber ou à contourner la sécurité du Service.",
-      },
-      {
-        titre: "Article 6 — Contenus des Utilisateurs",
-        texte:
-          "L'Utilisateur reste titulaire des droits sur les Contenus qu'il publie et garantit en avoir le droit. Il accorde à l'Éditeur, pour la durée de présence du Contenu sur le Service, une licence non exclusive et gratuite d'hébergement, de reproduction technique et d'affichage, strictement nécessaire au fonctionnement du Service. L'Administration peut masquer ou supprimer tout Contenu contraire aux CGU ou à la loi.",
-      },
-      {
-        titre: "Article 7 — Classes, feuilles de travail et partage",
-        texte:
-          "Une classe est créée avec un niveau et une matière choisis dans le catalogue scolaire du Service, et ne se rejoint que par code d'invitation. Une feuille de travail est privée par défaut : elle n'est visible par un tiers qu'avec l'autorisation de son auteur ou, dans les conditions prévues par le Service, du responsable de la classe.",
-      },
-      {
-        titre: "Article 8 — Signalement, modération, sanctions et examen",
-        texte:
-          "Tout Utilisateur peut signaler un contenu ou un compte et choisir de ne plus voir les contenus d'un compte (mesure personnelle et réversible). Les signalements sont examinés par des personnes de l'Administration, jamais par un algorithme. L'Administration peut ignorer un signalement, supprimer un contenu, suspendre un compte pour une durée limitée ou le bannir. Un compte suspendu ou banni ne peut plus se connecter ; ses publications et ses classes sont alors masquées ou suspendues mais conservées. La décision est motivée. Lorsque l'Administration l'autorise, la personne sanctionnée peut déposer une demande d'examen (une seule par décision) ; l'Administration consulte alors l'ensemble de ses contenus. Si l'examen est accepté, le compte et ses contenus sont rétablis ; s'il est refusé, la décision est définitive. Certaines décisions n'ouvrent pas droit à examen. Les signalements abusifs ou répétés peuvent eux-mêmes être sanctionnés.",
-      },
-      {
-        titre: "Article 9 — Assistance et assistant automatisé",
-        texte:
-          "Le Service propose une assistance (« Contactez-nous ») qui combine un assistant automatisé et l'Administration. L'assistant est limité à l'aide sur le fonctionnement de GRIND, peut commettre des erreurs et n'a aucun pouvoir de décision sur les comptes. Les messages échangés avec l'assistant sont transmis à un prestataire d'intelligence artificielle pour produire la réponse (voir la politique de confidentialité). L'Utilisateur évite d'y saisir des informations sensibles. L'Administration peut lire ces conversations, prendre la main et désactiver l'assistant à tout moment.",
-      },
-      {
-        titre: "Article 10 — Disponibilité du Service",
-        texte:
-          "Le Service est fourni « en l'état », en évolution continue. L'Éditeur s'efforce d'en assurer la disponibilité mais ne garantit ni l'absence d'interruption ni l'exactitude de l'aide apportée par d'autres Utilisateurs, qui n'est ni vérifiée ni garantie.",
-      },
-      {
-        titre: "Article 11 — Responsabilité",
-        texte:
-          "Dans la limite permise par la loi applicable, l'Éditeur n'est pas responsable des Contenus publiés par les Utilisateurs, ni des dommages indirects résultant de l'utilisation du Service. Rien dans les présentes ne limite les droits que l'Utilisateur tient de la loi et auxquels il ne peut être renoncé. [À COMPLÉTER : vérification juridique de cette clause].",
-      },
-      {
-        titre: "Article 12 — Propriété intellectuelle",
-        texte:
-          "Le Service, sa marque, son interface, ses illustrations et ses logiciels sont protégés. Aucun droit n'est cédé à l'Utilisateur en dehors du droit personnel et non exclusif d'utiliser le Service conformément aux CGU.",
-      },
-      {
-        titre: "Article 13 — Données personnelles",
-        texte:
-          "Le traitement des données personnelles est décrit dans la politique de confidentialité ci-après, qui fait partie des présentes.",
-      },
-      {
-        titre: "Article 14 — Fin du compte",
-        texte:
-          "L'Utilisateur peut cesser d'utiliser le Service à tout moment et demander la suppression de son compte depuis Paramètres › Contactez-nous. L'Éditeur peut suspendre ou supprimer un compte en cas de manquement aux CGU, dans les conditions de l'article 8.",
-      },
-      {
-        titre: "Article 15 — Modification des CGU",
-        texte:
-          "Les CGU peuvent évoluer. Chaque nouvelle version est identifiée par une date et doit être acceptée à la connexion suivante pour continuer à utiliser le Service.",
-      },
-      {
-        titre: "Article 16 — Droit applicable et litiges",
-        texte:
-          "Les présentes sont régies par [À COMPLÉTER : droit applicable]. En cas de litige, les parties recherchent d'abord une solution amiable via Paramètres › Contactez-nous ; à défaut, [À COMPLÉTER : juridiction compétente ou mode de règlement des litiges].",
-      },
+      { titre: "Article 1 — Éditeur et contact", texte: "GRIND est un service numérique d'entraide scolaire édité et exploité par G-SOCIETY, désigné dans ce document comme l'Éditeur. Pour toute demande relative au service, à un compte ou aux présentes conditions, écris à grind.supportt@gmail.com. Cette adresse constitue le point de contact opérationnel de GRIND. Les informations d'identification juridique et l'adresse physique de l'Éditeur sont communiquées par les canaux officiels lorsqu'elles sont établies." },
+      { titre: "Article 2 — Objet du service", texte: "GRIND met à disposition des espaces d'entraide scolaire : fil de publications, demandes d'aide et démonstrations, commentaires, classes, discussions de groupe, salles audio, annonces officielles et Library de documents. Certaines fonctions dépendent du rôle du compte, des autorisations et de la disponibilité technique. L'assistance IA est un outil complémentaire ; elle ne remplace ni l'entraide humaine ni les décisions de l'équipe." },
+      { titre: "Article 3 — Définitions", texte: "Un Utilisateur est une personne qui accède au Service. Un Compte est l'espace personnel associé à ses identifiants. Un Contenu désigne les textes, commentaires, images, vidéos, documents, messages, demandes d'aide et autres éléments envoyés ou publiés. L'Administration désigne les personnes habilitées par G-SOCIETY à exploiter, sécuriser et modérer GRIND. Un Responsable d'établissement désigne un compte directeur ou proviseur dont la candidature et les autorisations ont été validées." },
+      { titre: "Article 4 — Accès et âge", texte: "GRIND est destiné aux personnes âgées d'au moins 11 ans, conformément au seuil configuré dans le service. L'Utilisateur fournit des informations exactes. Les règles d'autorisation du représentant légal applicables aux mineurs dépendent du droit applicable et doivent être respectées par l'Utilisateur et son représentant. L'accès peut être limité selon le pays, l'état du compte ou les règles de sécurité." },
+      { titre: "Article 5 — Création du compte et sécurité", texte: "L'inscription classique utilise une adresse e-mail unique, un mot de passe et une vérification par code envoyé à cette adresse. Le code est temporaire, à usage limité et soumis à des restrictions de tentatives. Après vérification, le parcours de création prévoit la configuration d'un PIN de sécurité puis le choix du nom de profil. Le parcours Google utilise l'authentification Google, puis les étapes de sécurité et de profil prévues pour le compte concerné. Les mots de passe et PIN sont conservés sous forme de hachage côté serveur ; ils ne sont pas stockés en clair. L'Utilisateur protège ses identifiants, ne partage aucun code et signale toute utilisation suspecte." },
+      { titre: "Article 6 — Utilisation acceptable", texte: "Il est interdit d'utiliser GRIND pour harceler, intimider, menacer, usurper une identité ou un rôle, publier des contenus illicites, frauduleux, discriminatoires ou explicitement inappropriés, diffuser les données privées d'autrui sans autorisation, contourner les contrôles d'accès, perturber les services, tenter d'accéder à des comptes ou fichiers sans droit, ou utiliser la plateforme à des fins étrangères à son objet scolaire. Les invitations et codes d'accès doivent être partagés de manière responsable." },
+      { titre: "Article 7 — Publications, documents et propriété intellectuelle", texte: "L'Utilisateur reste responsable des Contenus qu'il transmet et doit disposer des droits ou autorisations nécessaires. Il accorde à G-SOCIETY une autorisation non exclusive, gratuite et limitée aux opérations nécessaires à l'hébergement, au stockage, à la sécurité, à la transmission et à l'affichage du Contenu dans GRIND. Cette autorisation cesse lorsque le Contenu est supprimé, sous réserve des copies techniques temporaires et des obligations légales ou de sécurité. La publication d'un document dans le fil et son référencement dans la Library peuvent être liés ; les espaces et droits de suppression suivent les règles affichées par le service." },
+      { titre: "Article 8 — Classes et discussions", texte: "Les classes et leurs discussions sont des espaces distincts : la capacité d'une classe n'est pas celle de son groupe de discussion ou de sa salle audio. L'accès se fait selon les invitations, les rôles et les autorisations validées par le serveur. Un code QR ou un code d'invitation ne garantit pas l'accès : chaque invitation est vérifiée par GRIND. L'Utilisateur ne doit partager ces codes qu'avec les personnes concernées." },
+      { titre: "Article 9 — Modération et sanctions", texte: "Les Utilisateurs peuvent signaler les contenus ou comptes proposés dans l'interface. G-SOCIETY peut examiner les signalements et prendre les mesures adaptées : avertissement, retrait ou masquage d'un contenu, restriction, suspension ou fermeture d'un compte. Les décisions tiennent compte des éléments disponibles, des règles du Service et du droit applicable. Une demande de réexamen peut être adressée à grind.supportt@gmail.com ; elle n'entraîne pas automatiquement la levée d'une mesure." },
+      { titre: "Article 10 — Assistance humaine et assistance IA", texte: "L'assistance intégrée peut utiliser un système automatisé fondé sur l'IA et, selon la demande, être relayée à l'équipe. Les réponses automatisées peuvent être inexactes et ne constituent pas un avis professionnel ou une décision officielle. Les informations saisies dans l'assistance peuvent être traitées par le prestataire IA configuré pour produire la réponse. N'y transmets pas de mot de passe, PIN, code de vérification ni donnée sensible inutile. Le contact direct avec G-SOCIETY est disponible à grind.supportt@gmail.com et reste distinct de l'assistance IA." },
+      { titre: "Article 11 — Disponibilité et évolution", texte: "GRIND évolue et peut être interrompu pour maintenance, incident, mise à jour ou indisponibilité d'un prestataire. G-SOCIETY met en œuvre des mesures raisonnables pour maintenir le service, sans garantir une disponibilité continue ni l'absence d'erreur ou de perte temporaire de connexion. Certaines fonctions nécessitent Internet ; les données affichées hors ligne peuvent être anciennes et doivent être synchronisées lorsque le réseau revient." },
+      { titre: "Article 12 — Limites et responsabilité", texte: "Les contenus et explications apportés par les membres ou par l'assistance IA ne sont pas garantis comme exacts ou adaptés à chaque situation. L'Utilisateur doit vérifier les informations importantes et respecter les règles de son établissement. Les présentes conditions ne retirent aucun droit impératif reconnu à l'Utilisateur par la loi applicable et ne limitent pas les responsabilités qui ne peuvent légalement être exclues." },
+      { titre: "Article 13 — Propriété du Service", texte: "Les éléments propres à GRIND, notamment son nom, son identité visuelle, son logiciel, son interface et ses contenus éditoriaux, restent protégés par les droits applicables. Aucun droit de propriété sur le Service n'est transféré à l'Utilisateur. Celui-ci ne peut copier, revendre, décompiler ou exploiter le Service en dehors des autorisations légales ou écrites applicables." },
+      { titre: "Article 14 — Fermeture et suppression du compte", texte: "L'Utilisateur peut demander la fermeture de son compte et l'exercice de ses droits en écrivant à grind.supportt@gmail.com. G-SOCIETY peut demander des informations raisonnables pour vérifier l'identité et éviter une suppression frauduleuse. La suppression des données suit les règles de la politique de confidentialité ; les données nécessaires à la sécurité, à la prévention des abus ou au respect d'obligations légales peuvent être conservées dans les limites applicables." },
+      { titre: "Article 15 — Modifications des conditions", texte: "G-SOCIETY peut mettre à jour les présentes conditions pour refléter les évolutions du Service, de sa sécurité ou du cadre légal. Chaque version porte une date. Lorsque l'application l'exige, l'Utilisateur doit accepter la nouvelle version avant de poursuivre l'utilisation des fonctions protégées." },
+      { titre: "Article 16 — Droit applicable et règlement des différends", texte: "Les présentes conditions s'appliquent sous réserve des règles impératives du droit applicable à l'Utilisateur et à G-SOCIETY. En cas de difficulté, les parties sont invitées à contacter d'abord grind.supportt@gmail.com afin de rechercher une solution amiable. Les autorités et juridictions compétentes sont celles déterminées par les règles légales applicables ; aucune juridiction particulière n'est désignée ici sans validation de l'identité et du siège juridique de l'Éditeur." },
     ],
   },
   {
     cle: "confidentialite",
     titre: "Politique de confidentialité",
-    intro:
-      "Cette politique explique quelles données personnelles GRIND traite, pourquoi, avec qui elles sont partagées, combien de temps elles sont conservées et comment exercer tes droits.",
+    intro: "Cette politique décrit les catégories de données traitées par GRIND, les usages associés, les principaux prestataires techniques et les moyens de contacter G-SOCIETY au sujet de tes données.",
     articles: [
-      {
-        titre: "1. Responsable du traitement",
-        texte:
-          "Le responsable du traitement est [À COMPLÉTER : dénomination et adresse de l'Éditeur]. Contact pour toute question sur tes données : [À COMPLÉTER : adresse e-mail dédiée à la protection des données].",
-      },
-      {
-        titre: "2. Données traitées",
-        texte:
-          "Compte : pseudo, adresse e-mail (vérifiée), mot de passe (conservé uniquement sous forme chiffrée irréversible, jamais en clair), identité G-SOCIETY liée à la clé d'accès, dates d'acceptation des CGU. Profil scolaire : âge, pays, niveau, matières de difficulté. Contenus : publications, commentaires, médias, documents, feuilles de travail, classes et leurs membres. Interactions : mentions « j'aime », signalements, comptes masqués, demandes d'aide. Assistance : messages envoyés à l'assistant et à l'Administration. Sécurité : adresse IP et horodatage des tentatives de connexion et de vérification, sessions ouvertes, codes de vérification (conservés sous forme d'empreinte, jamais en clair). Modération : signalements, décisions, motifs, demandes d'examen.",
-      },
-      {
-        titre: "3. Finalités et bases légales",
-        texte:
-          "Fournir le Service et gérer ton compte (exécution des CGU) ; assurer la sécurité, prévenir la fraude et les abus, limiter les tentatives répétées (intérêt légitime) ; modérer les contenus et traiter les signalements (intérêt légitime, obligations légales) ; répondre à tes demandes d'assistance (exécution des CGU) ; envoyer les e-mails nécessaires à ton compte : vérification, réinitialisation, alerte de sécurité (exécution des CGU). GRIND n'utilise tes données ni pour de la publicité ni pour de la vente à des tiers. [À COMPLÉTER : validation juridique des bases légales selon le droit applicable].",
-      },
-      {
-        titre: "4. Destinataires et prestataires",
-        texte:
-          "Tes données sont accessibles à l'Administration dans la limite de ses rôles. Elles sont traitées par des prestataires techniques : Render (hébergement du service), Aiven (base de données), Cloudinary (stockage des photos et vidéos), LiveKit (audio des classes), Groq (génération des réponses de l'assistant : le texte des messages qui lui sont adressés lui est transmis), Google (envoi des e-mails depuis le compte de G-SOCIETY) et G-SOCIETY (contrôle de la clé d'accès). Ces prestataires ne sont autorisés à traiter les données que pour fournir leur service.",
-      },
-      {
-        titre: "5. Transferts hors de ton pays",
-        texte:
-          "Certains prestataires sont établis hors de ton pays et peuvent traiter des données sur leurs serveurs à l'étranger. [À COMPLÉTER : liste des pays de traitement et garanties applicables].",
-      },
-      {
-        titre: "6. Durées de conservation",
-        texte:
-          "Inscription non vérifiée : supprimée au bout d'une heure. Code de vérification : valable 10 minutes, inutilisable ensuite. Session de connexion : 30 jours au plus, supprimée à la déconnexion et à chaque changement de mot de passe. Compte actif : tant que le compte existe. Conversations d'assistance : [À COMPLÉTER : durée, par exemple 12 mois]. Signalements et décisions de modération : [À COMPLÉTER : durée]. Après la suppression du compte : [À COMPLÉTER : délai de purge des données et des sauvegardes].",
-      },
-      {
-        titre: "7. Sécurité",
-        texte:
-          "Mots de passe chiffrés de manière irréversible ; codes à usage unique, limités à 3 essais et à durée courte ; limitation des tentatives de connexion ; déconnexion effective côté serveur ; réponses identiques qu'une adresse e-mail soit connue ou non ; accès à l'administration restreint par rôle ; secrets techniques conservés hors du code et hors du navigateur. Aucun système n'étant infaillible, toute suspicion de compromission doit être signalée à l'Administration. [À COMPLÉTER : procédure de notification des violations de données].",
-      },
-      {
-        titre: "8. Tes droits",
-        texte:
-          "Tu peux demander l'accès à tes données, leur rectification, leur effacement, la limitation ou l'opposition à leur traitement, leur portabilité, et retirer un consentement donné. Tu peux exercer ces droits depuis Paramètres › Contactez-nous ou à [À COMPLÉTER : adresse de contact]. Tu peux aussi introduire une réclamation auprès de [À COMPLÉTER : autorité de protection des données compétente].",
-      },
-      {
-        titre: "9. Mineurs",
-        texte:
-          "GRIND est ouvert dès 11 ans. Nous limitons les données demandées au strict nécessaire et ne contactons pas les mineurs à des fins commerciales. [À COMPLÉTER : conditions du consentement du représentant légal selon le droit applicable].",
-      },
-      {
-        titre: "10. Stockage local et traceurs",
-        texte:
-          "GRIND utilise le stockage local de ton navigateur uniquement pour garder ta session (jeton de connexion), ton pseudo, ton rôle et tes préférences. Il n'utilise ni cookie publicitaire ni traceur tiers.",
-      },
-      {
-        titre: "11. Modification de cette politique",
-        texte:
-          "Cette politique peut évoluer. La version en vigueur est identifiée par sa date ; une nouvelle version doit être acceptée à la connexion suivante.",
-      },
+      { titre: "1. Responsable du traitement", texte: "Le responsable du traitement des données de GRIND est G-SOCIETY. Pour toute question relative à la confidentialité ou pour exercer une demande, contacte grind.supportt@gmail.com." },
+      { titre: "2. Données traitées", texte: "Selon les fonctions utilisées, GRIND traite : les identifiants de compte et l'adresse e-mail ; le nom, le prénom et le nom de profil ; les informations du parcours scolaire (notamment âge, pays, niveau et matières) ; les publications, commentaires, messages, documents, images et vidéos ; les classes, invitations et participations ; les réactions, signalements et éléments de modération ; les demandes d'assistance et messages adressés à l'IA ; les paramètres et préférences ; les jetons techniques de notification ; les informations de session, de vérification et de sécurité, notamment les empreintes de jetons et événements de connexion. Les mots de passe et PIN sont conservés sous forme de hachage, non en clair." },
+      { titre: "3. Finalités", texte: "Ces données sont utilisées pour créer et gérer les comptes, vérifier les adresses e-mail, sécuriser les sessions et les PIN, fournir les classes et discussions, publier et distribuer les contenus, exploiter la Library, envoyer les notifications demandées, répondre aux demandes d'assistance, modérer les abus, prévenir la fraude, diagnostiquer les incidents et améliorer la fiabilité du Service." },
+      { titre: "4. Fondements du traitement", texte: "Les traitements nécessaires à la création du compte et à la fourniture des fonctions demandées sont liés à l'utilisation du Service. Les traitements de sécurité, de prévention des abus, de journalisation et de modération répondent aux besoins de protection de la communauté et de l'infrastructure. Lorsqu'un consentement est requis par la loi applicable ou par une fonction particulière, il est demandé dans l'interface correspondante. Les bases précises sont appréciées au regard du droit applicable." },
+      { titre: "5. Prestataires et destinataires", texte: "Les données sont accessibles aux personnes habilitées de G-SOCIETY selon leurs fonctions. Les prestataires techniques utilisés ou configurés par GRIND peuvent inclure Render pour l'hébergement du backend, Aiven pour la base de données, Cloudinary pour le stockage de médias et documents, LiveKit pour les communications audio, Google pour l'authentification ou le relais e-mail, Firebase Cloud Messaging pour les notifications Android et Groq pour les réponses de l'assistance IA. Seules les données nécessaires à la fonction concernée sont transmises à ces prestataires. La liste opérationnelle peut évoluer avec l'infrastructure." },
+      { titre: "6. Transferts et hébergement", texte: "Les prestataires peuvent traiter ou héberger des données dans des pays différents de celui de l'Utilisateur. Les lieux de traitement dépendent de la configuration et de la localisation des services choisis. G-SOCIETY prend en compte les garanties et obligations prévues par le droit applicable aux transferts concernés. Pour obtenir les informations disponibles sur un traitement précis, écris à grind.supportt@gmail.com." },
+      { titre: "7. Durées de conservation", texte: "Les codes de vérification sont temporaires et leur validité est configurée à 10 minutes ; les flux de vérification ont une durée limitée, généralement de 30 minutes, et les inscriptions non finalisées font l'objet d'un nettoyage automatique. Les sessions serveur ont une durée maximale configurée de 30 jours, sous réserve de déconnexion ou révocation anticipée. Les comptes et contenus actifs sont conservés tant que le compte ou le contenu reste nécessaire au Service. Les éléments de sécurité, de signalement et de modération sont conservés pendant la durée nécessaire à la sécurité, à l'examen des incidents et au respect des obligations applicables. Les durées exactes de certaines archives techniques peuvent dépendre du prestataire et de ses sauvegardes." },
+      { titre: "8. Sécurité", texte: "GRIND applique des mesures techniques et organisationnelles adaptées, notamment le hachage des mots de passe et PIN, la vérification des sessions côté serveur, des contrôles d'accès par rôle, des codes de vérification à durée limitée, la limitation de tentatives, la protection des transferts et la conservation des secrets côté serveur. Aucun système connecté ne peut être garanti invulnérable. En cas de suspicion d'accès non autorisé, contacte rapidement grind.supportt@gmail.com." },
+      { titre: "9. Droits des personnes", texte: "Sous réserve des règles et exceptions du droit applicable, tu peux demander l'accès à tes données, leur rectification, leur effacement, la limitation de certains traitements, t'opposer à certains usages ou demander la portabilité lorsque ce droit s'applique. Adresse ta demande à grind.supportt@gmail.com et précise le compte concerné ; G-SOCIETY peut demander une vérification d'identité avant d'agir. Tu peux également saisir l'autorité de protection des données compétente selon le droit applicable à ta situation." },
+      { titre: "10. Mineurs", texte: "GRIND est configuré pour un âge minimum de 11 ans. Les informations demandées sont destinées à fournir le Service scolaire et à sécuriser le compte. Les représentants légaux peuvent contacter G-SOCIETY à grind.supportt@gmail.com pour toute question concernant les données d'un mineur, sous réserve des règles de vérification et du droit applicable." },
+      { titre: "11. Stockage local et notifications", texte: "Le navigateur ou l'application peut conserver localement des informations nécessaires à la session, à la navigation, aux préférences, aux caches de contenus et à la reprise hors ligne. Sur Android, le jeton de notification permet à Firebase Cloud Messaging de transmettre les notifications activées. Ces données locales peuvent être supprimées depuis les paramètres de l'appareil, la déconnexion ou la suppression de l'application ; leur disponibilité dépend du système et du navigateur." },
+      { titre: "12. Modifications de la politique", texte: "La politique peut être mise à jour lorsque les fonctions, prestataires ou obligations évoluent. La version en vigueur est indiquée par la date de version des CGU. Les changements importants sont portés à la connaissance des Utilisateurs et peuvent nécessiter une nouvelle acceptation." },
     ],
   },
 ];
