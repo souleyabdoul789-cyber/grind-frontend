@@ -2968,7 +2968,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
             <h3>{discussion.nom}</h3><p>Discussion privée liée à la classe {discussion.nom_classe}.</p>
           </div>
           <div className="discussion-invitation"><span><small>Code d'invitation au groupe</small><strong>{discussion.code_invitation}</strong></span><button type="button" onClick={copierInvitation} title="Copier le code"><i className={inviteCopie ? "fa-solid fa-check" : "fa-solid fa-copy"} /></button>{estAdmin && <button type="button" onClick={renouvelerCodeInvitation} disabled={renouvellementInvitation} title="Renouveler le code"><i className={renouvellementInvitation ? "fa-solid fa-circle-notch fa-spin" : "fa-solid fa-rotate"} /></button>}</div>
-          {!discussion.est_membre_classe && <button type="button" className="discussion-joindre-classe-panneau" onClick={rejoindreVraieClasse} disabled={actionEnCours === "classe"}><i className="fa-solid fa-school" /> Rejoindre la vraie classe (10 places max)</button>}
+          {!discussion.est_membre_classe && <button type="button" className="discussion-joindre-classe-panneau" onClick={rejoindreVraieClasse} disabled={actionEnCours === "classe"}><i className="fa-solid fa-school" /> Rejoindre la vraie classe (200 membres max)</button>}
           <div className="discussion-membres-titre"><strong>Membres</strong><span>{membres.length}/200</span></div>
           <div className="discussion-liste-membres">{membres.map(m => <div key={m.username} className="discussion-membre-ligne">
             <AvatarIcone username={m.username} taille={36} onClic={ouvrirProfil} />

@@ -395,8 +395,11 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
 
       try {
         await room.connect(jetonData.url, jetonData.token);
-      } catch {
-        setErreur("Connexion à la salle impossible");
+      } catch (error) {
+        const detail = String(error?.message || "").toLowerCase();
+        setErreur(detail.includes("room has exceeded its max participants")
+          ? "La salle vocale est complète (10 participants maximum). Réessaie lorsqu’une place se libère."
+          : "Connexion à la salle impossible");
         setConnexion("echec");
         return;
       }
@@ -712,10 +715,23 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
   }
 
   const occupants = Array.from({ length: NB_SIEGES }, () => null);
+  const presentsSansSiege = [];
+
+  // Les sièges enregistrés restent prioritaires, mais un membre qui a rejoint
+  // la classe sans pupitre permanent doit aussi apparaître s'il rejoint le vocal.
   presents.forEach((id) => {
     const i = membresParNom.get(id)?.siege_index;
-    if (Number.isInteger(i) && i >= 0 && i < NB_SIEGES) occupants[i] = infosDe(id);
+    if (Number.isInteger(i) && i >= 0 && i < NB_SIEGES && occupants[i] === null) {
+      occupants[i] = infosDe(id);
+    } else {
+      presentsSansSiege.push(id);
+    }
   });
+  presentsSansSiege.forEach((id) => {
+    const siegeLibre = occupants.findIndex((occupant) => occupant === null);
+    if (siegeLibre !== -1) occupants[siegeLibre] = infosDe(id);
+  });
+
   const profInfos = profActuel ? infosDe(profActuel) : null;
   const autresOrdonnes = [...participants].sort(
     (a, b) => (b.identity === participantSelectionne ? 1 : 0) - (a.identity === participantSelectionne ? 1 : 0)
