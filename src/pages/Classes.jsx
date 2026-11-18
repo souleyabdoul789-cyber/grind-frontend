@@ -2,14 +2,14 @@ import FormulaireClasse from "../components/FormulaireClasse.jsx";
 import GrindScannerQR from "../components/GrindScannerQR.jsx";
 import { useState, useEffect, useRef } from "react";
 import QRCode from "qrcode";
-import { rejoindreClasse, rejoindreDiscussion, listerMesClasses, renommerClasse, supprimerClasse, extraireCode, estGrindEnLigne } from "../api.js";
+import { apercuClasseInvitation, obtenirCapaciteVocale, rejoindreClasse, rejoindreDiscussion, listerMesClasses, renommerClasse, supprimerClasse, extraireCode, estGrindEnLigne } from "../api.js";
 import SalleClasse from "../components/SalleClasse.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import EtatVide from "../components/EtatVide.jsx";
 import DiscussionClasse from "../components/DiscussionClasse.jsx";
 import ProfilPublic from "../components/ProfilPublic.jsx";
 
-export default function Classes({ sessionToken, monUsername, codeAttente, onCodeConsomme, discussionAouvrir, onDiscussionOuverte, onModeDiscussion }) {
+export default function Classes({ sessionToken, monUsername, codeAttente, codeAttenteVersion = 0, onCodeConsomme, discussionAouvrir, onDiscussionOuverte, onModeDiscussion }) {
   const cleCacheClasses = `grind_classes_${monUsername || "compte"}`;
   const classesDepuisCache = (() => { try { const data = JSON.parse(localStorage.getItem(cleCacheClasses) || "[]"); return Array.isArray(data) ? data : []; } catch { return []; } })();
   const [classes, setClasses] = useState(classesDepuisCache);
@@ -26,6 +26,9 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   const [adhesionDiscussion, setAdhesionDiscussion] = useState(false);
   const [erreurScanner, setErreurScanner] = useState("");
   const [codeInvitationSaisi, setCodeInvitationSaisi] = useState("");
+  const [apercuClasse, setApercuClasse] = useState(null);
+  const [etatApercuClasse, setEtatApercuClasse] = useState("idle");
+  const [erreurApercuClasse, setErreurApercuClasse] = useState("");
   const [scannerEnCours, setScannerEnCours] = useState(false);
   const [scannerOuvert, setScannerOuvert] = useState(false);
   const [qrClasse, setQrClasse] = useState(null);
@@ -95,6 +98,42 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
       window.clearInterval(intervalle);
     };
   }, [sessionToken, cleCacheClasses]);
+
+  useEffect(() => {
+    const code = extraireCode(String(codeInvitationSaisi || "").trim());
+    if (!code || !/^[A-Za-z0-9_-]{6,80}$/.test(code)) {
+      setApercuClasse(null);
+      setErreurApercuClasse("");
+      setEtatApercuClasse("idle");
+      return undefined;
+    }
+
+    const controleur = new AbortController();
+    let actif = true;
+    setApercuClasse(null);
+    setErreurApercuClasse("");
+    setEtatApercuClasse("loading");
+    const delai = window.setTimeout(() => {
+      apercuClasseInvitation(sessionToken, code, controleur.signal)
+        .then(resultat => {
+          if (!actif) return;
+          setApercuClasse({ ...resultat, code_invitation: code });
+          setEtatApercuClasse("ready");
+        })
+        .catch(error => {
+          if (!actif || error?.name === "AbortError") return;
+          setApercuClasse(null);
+          setErreurApercuClasse(error.message || "Impossible de vérifier ce code.");
+          setEtatApercuClasse("error");
+        });
+    }, 280);
+
+    return () => {
+      actif = false;
+      window.clearTimeout(delai);
+      controleur.abort();
+    };
+  }, [codeInvitationSaisi, sessionToken]);
 
   useEffect(() => {
     try { localStorage.setItem(cleCacheClasses, JSON.stringify(classes.slice(-100))); } catch {}
@@ -202,15 +241,23 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     setErreurScanner("");
     setScannerEnCours(true);
     try {
-      await rejoindreClasse(sessionToken, code);
+      const adhesion = await rejoindreClasse(sessionToken, code);
+      const dejaMembre = adhesion?.message === "Déjà membre" || adhesion?.deja_membre === true;
       setFormulaireOuvert(null);
       setCodeInvitationSaisi("");
+      setApercuClasse(null);
+      setEtatApercuClasse("idle");
+      setErreurApercuClasse("");
       setQrClasse(null);
       onCodeConsomme?.();
       await charger({ silencieux: true });
-      window.dispatchEvent(new CustomEvent("grind-toast", { detail: "Tu as rejoint la classe." }));
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: dejaMembre ? "Tu fais déjà partie de cette classe." : "Tu as rejoint la classe." }));
     } catch (err) {
-      setErreurScanner(err.message || "Impossible de rejoindre cette classe.");
+      const message = err.message || "Impossible de rejoindre cette classe.";
+      setErreurScanner(message);
+      // Les liens #code peuvent être ouverts depuis un autre onglet, sans
+      // que le formulaire Rejoindre soit affiché : le toast garantit le retour.
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: message }));
     } finally { setScannerEnCours(false); }
   }
 
@@ -225,16 +272,20 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
   }
 
   useEffect(() => {
-    if (!codeAttente) return undefined;
+    if (!codeAttente) {
+      codeLienTraite.current = null;
+      return undefined;
+    }
+    const cleTraitement = `${codeAttente}:${codeAttenteVersion}`;
     const traiterLien = () => {
-      if (!estGrindEnLigne() || codeLienTraite.current === codeAttente) return;
-      codeLienTraite.current = codeAttente;
+      if (!estGrindEnLigne() || codeLienTraite.current === cleTraitement) return;
+      codeLienTraite.current = cleTraitement;
       rejoindreAvecCode(codeAttente);
     };
     traiterLien();
     window.addEventListener("online", traiterLien);
     return () => window.removeEventListener("online", traiterLien);
-  }, [codeAttente]);
+  }, [codeAttente, codeAttenteVersion]);
 
   function ouvrirDiscussion(c, messageId = null) {
     setSalleActive(null);
@@ -242,17 +293,32 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
     setDiscussionActive(c);
   }
 
-  function ouvrirSalle(classeId) {
+  async function ouvrirSalle(classeId) {
     if (!estGrindEnLigne()) {
       window.dispatchEvent(new CustomEvent("grind-toast", { detail: "La salle de classe nécessite une connexion Internet." }));
       return;
     }
     if (ouvertureSalleId !== null) return;
     setOuvertureSalleId(classeId);
-    window.setTimeout(() => {
+    try {
+      const capacite = await obtenirCapaciteVocale(sessionToken, classeId);
+      const restantes = Math.max(0, Number(capacite.places_restantes) || 0);
+      if (restantes === 0) {
+        window.dispatchEvent(new CustomEvent("grind-toast", { detail: "La salle audio est complète (10 participants). Réessaie lorsqu'une place se libère." }));
+        return;
+      }
+      if (restantes <= 2) {
+        window.dispatchEvent(new CustomEvent("grind-toast", { detail: `Il reste ${restantes} place${restantes > 1 ? "s" : ""} dans la salle audio.` }));
+      }
       setSalleActive(classeId);
+    } catch (error) {
+      // Le contrôle préalable améliore l'information, mais ne doit pas empêcher
+      // l'entrée si l'API de comptage est temporairement indisponible.
+      window.dispatchEvent(new CustomEvent("grind-toast", { detail: error.message || "Vérification des places audio indisponible. GRIND va tenter la connexion." }));
+      setSalleActive(classeId);
+    } finally {
       setOuvertureSalleId(null);
-    }, 250);
+    }
   }
 
   function copierLien(code) {
@@ -359,7 +425,12 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
             className="classe-code-form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!scannerEnCours) rejoindreAvecCode(codeInvitationSaisi);
+              const codeConfirme = extraireCode(String(codeInvitationSaisi || "").trim());
+              const apercuCourant = etatApercuClasse === "ready"
+                && apercuClasse?.code_invitation === codeConfirme
+                && !apercuClasse?.deja_membre
+                && apercuClasse?.peut_rejoindre !== false;
+              if (!scannerEnCours && apercuCourant) rejoindreAvecCode(codeConfirme);
             }}
           >
             <label htmlFor="grind-code-invitation">Code d'invitation</label>
@@ -378,12 +449,19 @@ export default function Classes({ sessionToken, monUsername, codeAttente, onCode
                 disabled={scannerEnCours}
                 aria-describedby="aide-code-invitation"
               />
-              <button type="submit" disabled={scannerEnCours || !codeInvitationSaisi.trim()}>
-                {scannerEnCours ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-arrow-right" />}
-                <span>Valider</span>
+              <button type="submit" disabled={scannerEnCours || etatApercuClasse !== "ready" || apercuClasse?.code_invitation !== extraireCode(String(codeInvitationSaisi || "").trim()) || !!apercuClasse?.deja_membre || apercuClasse?.peut_rejoindre === false}>
+                {scannerEnCours || etatApercuClasse === "loading" ? <i className="fa-solid fa-circle-notch fa-spin" /> : <i className="fa-solid fa-arrow-right" />}
+                <span>{etatApercuClasse === "loading" ? "Vérification…" : apercuClasse?.deja_membre ? "Déjà membre" : apercuClasse?.peut_rejoindre === false ? "Classe complète" : scannerEnCours ? "Validation…" : "Rejoindre"}</span>
               </button>
             </div>
             <small id="aide-code-invitation">Tu peux saisir le code seul ou coller le lien d'invitation GRIND.</small>
+            {etatApercuClasse === "loading" && <div className="info" role="status"><i className="fa-solid fa-circle-notch fa-spin" /> Vérification de l'invitation…</div>}
+            {apercuClasse && apercuClasse.code_invitation === extraireCode(String(codeInvitationSaisi || "").trim()) && <div className="info" role="status">
+              <span>Classe : <strong>{apercuClasse.nom}</strong> · Créateur : <strong>{apercuClasse.createur}</strong></span>
+              {apercuClasse.deja_membre && <span><i className="fa-solid fa-circle-check" /> Tu es déjà membre de cette classe.</span>}
+              {!apercuClasse.deja_membre && apercuClasse.peut_rejoindre === false && <span><i className="fa-solid fa-circle-exclamation" /> Cette classe a atteint sa limite de 200 membres.</span>}
+            </div>}
+            {etatApercuClasse === "error" && erreurApercuClasse && <div className="erreur classe-rejoindre-erreur" role="alert">{erreurApercuClasse}</div>}
           </form>
 
           <div className="classe-rejoindre-separateur"><span>OU</span></div>

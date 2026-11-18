@@ -550,6 +550,13 @@ export function creerClasse(sessionToken, { nom, niveau, matiere, complement } =
   });
 }
 
+export function apercuClasseInvitation(sessionToken, codeInvitation, signal = undefined) {
+  return poster(`${GRIND_URL}/api/classes/apercu-invitation`, {
+    session_token: sessionToken,
+    code_invitation: codeInvitation,
+  }, { signal });
+}
+
 export function rejoindreClasse(sessionToken, codeInvitation) {
   return poster(`${GRIND_URL}/api/classes/rejoindre`, { session_token: sessionToken, code_invitation: codeInvitation });
 }
@@ -592,6 +599,12 @@ export async function modererMicroClasse(sessionToken, classeId, username, mute)
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || "La modération du micro a échoué.");
   return data;
+}
+
+export async function obtenirCapaciteVocale(sessionToken, classeId) {
+  return poster(`${GRIND_URL}/api/livekit/classes/${classeId}/capacite`, {
+    session_token: sessionToken,
+  });
 }
 
 export async function obtenirJetonLiveKit(sessionToken, classeId) {

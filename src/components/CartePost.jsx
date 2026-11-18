@@ -12,12 +12,19 @@ import ModaleSignalement from "./ModaleSignalement.jsx";
 import BadgeCompte from "./BadgeCompte.jsx";
 import ActionsCompte from "./ActionsCompte.jsx";
 import ChampMention from "./ChampMention.jsx";
+import { ouvrirInvitationClasse } from "../classeInvitation.js";
 
 function rendreTexteAvecMentions(texte, onClicAuteur) {
-  const morceaux = String(texte || "").split(/(@[A-Za-z_]{3,24})/g);
-  return morceaux.map((morceau, index) => /^@[A-Za-z_]{3,24}$/.test(morceau)
-    ? <button key={`${morceau}-${index}`} type="button" className="mention-profil" onClick={() => onClicAuteur?.(morceau.slice(1))}>{morceau}</button>
-    : <span key={`texte-${index}`}>{morceau}</span>);
+  const morceaux = String(texte || "").split(/(@[A-Za-z_]{3,24}|#[A-Za-z0-9_-]{11})/g);
+  return morceaux.map((morceau, index) => {
+    if (/^@[A-Za-z_]{3,24}$/.test(morceau)) {
+      return <button key={`${morceau}-${index}`} type="button" className="mention-profil" onClick={() => onClicAuteur?.(morceau.slice(1))}>{morceau}</button>;
+    }
+    if (/^#[A-Za-z0-9_-]{11}$/.test(morceau)) {
+      return <button key={`${morceau}-${index}`} type="button" className="mention-profil" title="Ouvrir l'invitation de classe" onClick={() => ouvrirInvitationClasse(morceau.slice(1))}>{morceau}</button>;
+    }
+    return <span key={`texte-${index}`}>{morceau}</span>;
+  });
 }
 function formaterDelai(dateLimiteIso) {
   const diffMs = new Date(dateLimiteIso).getTime() - Date.now();

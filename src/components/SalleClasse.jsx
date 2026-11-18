@@ -752,7 +752,12 @@ export default function SalleClasse({ sessionToken, demandeId, monUsername, prof
       <div className="hud hud-haut-gauche">
         <div className="hud-pastille">
           {connexion === "connexion" && <><i className="fa-solid fa-spinner fa-spin"></i> Préparation...</>}
-          {connexion === "connecte" && <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 9 }}></i> {participants.length + 1}/10</>}
+          {connexion === "connecte" && (() => {
+            const total = Math.min(10, participants.length + 1);
+            const libres = Math.max(0, 10 - total);
+            const libelle = libres === 0 ? "complet" : `${libres} libre${libres > 1 ? "s" : ""}`;
+            return <><i className="fa-solid fa-circle" style={{ color: "var(--succes)", fontSize: 9 }}></i> {total}/10 · {libelle}</>;
+          })()}
           {connexion === "echec" && <><i className="fa-solid fa-triangle-exclamation"></i> {erreur || "Connexion interrompue"}</>}
         </div>
       </div>

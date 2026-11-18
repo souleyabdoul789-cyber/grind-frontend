@@ -61,6 +61,7 @@ export default function App() {
   const [profilErreur, setProfilErreur] = useState("");
   const [username, setUsername] = useState(null);
   const [codeAttente, setCodeAttente] = useState(extraireCodeDepuisUrl());
+  const [codeAttenteVersion, setCodeAttenteVersion] = useState(0);
   const ongletInitial = codeAttente ? "classes" : "fil";
   const [onglet, setOngletEtat] = useState(ongletInitial);
   const pileOngletsRef = useRef(codeAttente ? ["fil", "classes"] : ["fil"]);
@@ -77,6 +78,17 @@ export default function App() {
     ongletActifRef.current = cible;
     setOngletEtat(cible);
   }, []);
+  useEffect(() => {
+    const ouvrirInvitation = (event) => {
+      const code = String(event.detail || "").trim();
+      if (!/^[A-Za-z0-9_-]{6,80}$/.test(code)) return;
+      setCodeAttente(code);
+      setCodeAttenteVersion(version => version + 1);
+      setOnglet("classes");
+    };
+    window.addEventListener("grind-rejoindre-classe", ouvrirInvitation);
+    return () => window.removeEventListener("grind-rejoindre-classe", ouvrirInvitation);
+  }, [setOnglet]);
   const [statut, setStatut] = useState(null); // { role, est_equipe, cgu_a_accepter, ... }
   const [role, setRole] = useState(null); // rôle global de l'équipe GRIND
   const [typeCompte, setTypeCompte] = useState("eleve");
@@ -821,7 +833,7 @@ export default function App() {
       {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
       {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}
       {onglet === "classes" && (
-        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} onModeDiscussion={notifierModeDiscussion} />
+        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} codeAttenteVersion={codeAttenteVersion} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} onModeDiscussion={notifierModeDiscussion} />
       )}
       {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
       {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}

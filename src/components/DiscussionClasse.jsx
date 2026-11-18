@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AvatarIcone from "./AvatarIcone.jsx";
+import { ouvrirInvitationClasse } from "../classeInvitation.js";
 import {
   stockageAndroidDisponible, sourceLocaleMedia, nettoyerCacheMediaAndroid, effacerCacheClasseMediaAndroid,
   chercherMediaTemporaire, chercherMediaEnregistre, mettreEnCacheMedia,
@@ -727,10 +728,16 @@ function LecteurVocal({ src, id, dureeInitiale = 0 }) {
 }
 
 function TexteMessage({ texte, onProfil }) {
-  const fragments = String(texte || "").split(/(@[A-Za-z_]{3,24})/g);
-  return <>{fragments.map((part, index) => part.startsWith("@")
-    ? <button type="button" className="discussion-mention-texte" key={`${part}-${index}`} onClick={() => onProfil?.(part.slice(1))}>{part}</button>
-    : <span key={index}>{part}</span>)}</>;
+  const fragments = String(texte || "").split(/(@[A-Za-z_]{3,24}|#[A-Za-z0-9_-]{11})/g);
+  return <>{fragments.map((part, index) => {
+    if (/^@[A-Za-z_]{3,24}$/.test(part)) {
+      return <button type="button" className="discussion-mention-texte" key={`${part}-${index}`} onClick={() => onProfil?.(part.slice(1))}>{part}</button>;
+    }
+    if (/^#[A-Za-z0-9_-]{11}$/.test(part)) {
+      return <button type="button" className="discussion-mention-texte" key={`${part}-${index}`} title="Ouvrir cette invitation de classe" onClick={(event) => { event.stopPropagation(); ouvrirInvitationClasse(part.slice(1)); }}>{part}</button>;
+    }
+    return <span key={index}>{part}</span>;
+  })}</>;
 }
 
 function lireCacheDiscussion(classeId, username) {
@@ -2859,7 +2866,7 @@ export default function DiscussionClasse({ sessionToken, classe, monUsername, me
               {!propre && <AvatarIcone username={message.auteur} taille={34} onClic={ouvrirProfil} />}
               <div className={`discussion-bulle-wrap ${message.piece?.type === "video" ? "discussion-bulle-wrap-video" : ""}`}>
                 {!propre && <button type="button" className="discussion-auteur" onClick={() => ouvrirProfil(message.auteur)}>{message.auteur_nom} <small>@{message.auteur}</small></button>}
-                {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span>{message.reply.contenu || "Message"}</span></button>}
+                {message.reply && <button type="button" className="discussion-reponse-citee" onClick={() => messageRefs.current.get(message.reply.id)?.scrollIntoView({ behavior: "smooth", block: "center" })}><strong>{message.reply.auteur_nom}</strong><span><TexteMessage texte={message.reply.contenu || "Message"} onProfil={ouvrirProfil} /></span></button>}
                 <div className={`discussion-bulle style-${message.style_texte || "normal"} ${message.piece?.type === "image" ? "discussion-bulle-avec-image" : ""} ${message.piece?.type === "video" ? "discussion-bulle-avec-video" : ""}`}>
                   {message.supprime_pour_tous ? (
                     <div className="discussion-message-supprime"><i className="fa-solid fa-ban" /> Ce message a été supprimé.</div>
