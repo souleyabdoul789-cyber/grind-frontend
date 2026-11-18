@@ -17,9 +17,9 @@ function lireMasquees() {
 }
 
 function libelleAuteur(role) {
-  if (role === "annonceur") return "Annonceur autorisé";
-  if (role === "associe") return "Associé de l’administration";
-  return "Administration officielle";
+  if (role === "annonceur") return "Annonceur habilité";
+  if (role === "associe") return "Associé GRIND";
+  return "Équipe GRIND";
 }
 
 export default function BandeauAnnonces({ sessionToken }) {
@@ -77,6 +77,7 @@ export default function BandeauAnnonces({ sessionToken }) {
     };
   }, [sessionToken]);
 
+  // Le classement existant est conservé : important, puis épinglé, puis plus récent.
   const visibles = useMemo(() => annonces
     .filter((a) => a.important || !masquees.has(Number(a.id)))
     .sort((a, b) => Number(!!b.important) - Number(!!a.important) || Number(!!b.epinglee) - Number(!!a.epinglee) || Number(b.id) - Number(a.id))
@@ -96,17 +97,15 @@ export default function BandeauAnnonces({ sessionToken }) {
   if (erreur || visibles.length === 0) return null;
 
   return (
-    <section className="bandeau-annonces grind-annonces-section" aria-label="Communication officielle GRIND">
+    <section className="bandeau-annonces grind-annonces-section" aria-label="Annonces GRIND">
       <div className="bandeau-annonces-titre grind-annonces-heading">
         <div className="grind-annonces-identite">
-          <span className="grind-annonce-brand" aria-label="GRIND, identité de la plateforme">
+          <span className="grind-annonce-brand" aria-label="GRIND">
             <span className="grind-annonce-brand-g" aria-hidden="true">G</span>
             <strong>GRIND</strong>
-            <i className="fa-solid fa-check" aria-hidden="true" />
           </span>
-          <span className="grind-annonces-heading-copy">
-            <strong>Informations officielles</strong>
-            <small>Actualités et communications de la plateforme</small>
+          <span className="grind-annonce-verifie" role="img" aria-label="Compte GRIND vérifié" title="Compte GRIND vérifié">
+            <i className="fa-solid fa-check" aria-hidden="true" />
           </span>
         </div>
         <span className="grind-annonces-heading-tag">À LA UNE</span>
@@ -142,7 +141,7 @@ export default function BandeauAnnonces({ sessionToken }) {
             {annonce.document_url && (
               <a className="piece-jointe-document grind-annonce-document" href={annonce.document_url} target="_blank" rel="noopener noreferrer" download>
                 <span className="icone-document"><i className="fa-solid fa-file-lines" /></span>
-                <span><strong>{annonce.document_name || "Document officiel"}</strong><small>{annonce.document_type === "application/pdf" ? "PDF" : "DOCX"} · Ouvrir ou télécharger</small></span>
+                <span><strong>{annonce.document_name || "Document GRIND"}</strong><small>{annonce.document_type === "application/pdf" ? "PDF" : "DOCX"} · Ouvrir ou télécharger</small></span>
                 <i className="fa-solid fa-arrow-up-right-from-square" />
               </a>
             )}

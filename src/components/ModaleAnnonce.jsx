@@ -4,9 +4,9 @@ import LecteurMedia from "./LecteurMedia.jsx";
 import { formaterDate } from "../moderationInfos.js";
 
 function libelleAuteur(role) {
-  if (role === "annonceur") return "Annonceur habilité par l’administration GRIND";
-  if (role === "associe") return "Associé de l’administration GRIND";
-  return "Communication de l’administration officielle GRIND";
+  if (role === "annonceur") return "Annonceur habilité";
+  if (role === "associe") return "Associé GRIND";
+  return "Équipe GRIND";
 }
 
 /** Fenêtre de lecture des communications GRIND, adaptée aux écrans mobiles. */
@@ -30,14 +30,12 @@ export default function ModaleAnnonce({ annonce, onFermer, onMasquer }) {
       >
         <header className="annonce-modal-header">
           <div className="annonce-modal-identite">
-            <span className="grind-annonce-brand" aria-label="GRIND, identité de la plateforme">
+            <span className="grind-annonce-brand" aria-label="GRIND">
               <span className="grind-annonce-brand-g" aria-hidden="true">G</span>
               <strong>GRIND</strong>
-              <i className="fa-solid fa-check" aria-hidden="true" />
             </span>
-            <span className="annonce-modal-header-copy">
-              <strong>Communication officielle</strong>
-              <small>Information de la plateforme</small>
+            <span className="grind-annonce-verifie" role="img" aria-label="Compte GRIND vérifié" title="Compte GRIND vérifié">
+              <i className="fa-solid fa-check" aria-hidden="true" />
             </span>
           </div>
           <button type="button" className="annonce-modal-fermer" onClick={onFermer} aria-label="Fermer l'annonce">
@@ -66,7 +64,7 @@ export default function ModaleAnnonce({ annonce, onFermer, onMasquer }) {
           {annonce.document_url && (
             <a className="piece-jointe-document annonce-modal-document" href={annonce.document_url} target="_blank" rel="noopener noreferrer" download>
               <span className="icone-document"><i className="fa-solid fa-file-lines" /></span>
-              <span><strong>{annonce.document_name || "Document officiel"}</strong><small>{annonce.document_type === "application/pdf" ? "PDF" : "DOCX"} · Ouvrir ou télécharger</small></span>
+              <span><strong>{annonce.document_name || "Document GRIND"}</strong><small>{annonce.document_type === "application/pdf" ? "PDF" : "DOCX"} · Ouvrir ou télécharger</small></span>
               <i className="fa-solid fa-download" />
             </a>
           )}

@@ -308,7 +308,6 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
 
   return (
     <div className="fil-actu">
-      <BandeauAnnonces sessionToken={sessionToken} />
       <div className="filtres-fil">
         <button className={filtre === null ? "filtre-actif" : "filtre"} onClick={() => changerFiltre(null)}>
           Tout
@@ -330,6 +329,9 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
           <i className="fa-solid fa-star"></i> Démo
         </button>
       </div>
+
+      {/* Les annonces restent prioritaires dans le fil, mais sous les filtres. */}
+      <BandeauAnnonces sessionToken={sessionToken} />
 
       {editeurOuvert === "video" && (
         <div className="carte-post formulaire-post publication-composer">
