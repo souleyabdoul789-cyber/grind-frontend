@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { listerPosts, creerPost, uploaderMedia, uploaderDocument, estGrindEnLigne } from "../api.js";
 import CartePost from "../components/CartePost.jsx";
 import SelecteurDate from "../components/SelecteurDate.jsx";
@@ -441,9 +442,12 @@ export default function FilActu({ sessionToken, monUsername, modeInstitutionnel 
         ))
       )}
 
-      <button className={`bouton-flottant ${modeInstitutionnel ? "bouton-flottant-institution" : ""}`} onClick={() => setFormulaireOuvert(!formulaireOuvert)} type="button" aria-label="Nouvelle publication">
-        <i className={formulaireOuvert ? "fa-solid fa-xmark" : "fa-solid fa-plus"}></i>
-      </button>
+      {typeof document !== "undefined" && createPortal(
+        <button className={`bouton-flottant ${modeInstitutionnel ? "bouton-flottant-institution" : ""}`} onClick={() => setFormulaireOuvert(!formulaireOuvert)} type="button" aria-label={formulaireOuvert ? "Fermer la publication" : "Nouvelle publication"}>
+          <i className={formulaireOuvert ? "fa-solid fa-xmark" : "fa-solid fa-plus"}></i>
+        </button>,
+        document.body
+      )}
     </div>
   );
 }

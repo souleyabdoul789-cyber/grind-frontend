@@ -4,7 +4,7 @@ import { ROLES_EQUIPE } from "../moderationInfos.js";
 
 const ROLES = {
   admin: {
-    icone: "fa-solid fa-crown",
+    icone: "fa-solid fa-certificate",
     classe: "badge-admin",
     titre: "Compte officiel GRIND",
     description: "Ce compte est le compte officiel de GRIND. Il représente l’administration centrale de la plateforme et détient les pouvoirs de gestion globaux.",
@@ -70,7 +70,14 @@ export default function BadgeCompte({ badge, taille = 14 }) {
     <span className="badges-compte" style={{ fontSize: taille }}>
       {role && (
         <span className={`badge-compte-trigger ${role.classe}`} title={role.titre} aria-label={`En savoir plus : ${role.titre}`} role="button" tabIndex={0} aria-haspopup="dialog" onClick={(event) => { event.stopPropagation(); setDetail({ ...role, classe: role.classe }); }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); setDetail({ ...role, classe: role.classe }); } }}>
-          <i className={`${role.icone} badge-compte`} />
+          {badge.role === "admin" ? (
+            <>
+              <i className="fa-solid fa-certificate badge-compte badge-admin-seal" aria-hidden="true" />
+              <i className="fa-solid fa-check badge-compte badge-admin-check" aria-hidden="true" />
+            </>
+          ) : (
+            <i className={`${role.icone} badge-compte`} />
+          )}
         </span>
       )}
       {badge.proviseur && (

@@ -1,4 +1,4 @@
-/* Badge de vérification GRIND : brun doux et violet doux, sans libellé massif. */
+/* Badge de vérification GRIND : style Meta Verified, avec la palette GRIND. */
 .grind-annonces-identite,
 .annonce-modal-identite {
   display: flex;
@@ -26,15 +26,158 @@
   font-weight: 900;
 }
 
-/* Le bandeau est désormais dans le fil, sous la barre des filtres. */
+/* Badge Admin : sceau vérifié à coche blanche, décliné en violet doux GRIND. */
+.badge-compte-trigger.badge-admin {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 1.12em;
+  width: 1.12em;
+  height: 1.12em;
+  color: #ad91cb;
+  line-height: 1;
+}
+
+.badge-compte-trigger.badge-admin .badge-admin-seal {
+  color: #ad91cb;
+  font-size: 1.12em;
+  line-height: 1;
+}
+
+.badge-compte-trigger.badge-admin .badge-admin-check {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: #fff;
+  font-size: .46em;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+}
+
+/* Le bandeau reste dans le fil, juste après les filtres. */
 .fil-actu > .grind-annonces-section {
   margin-top: 0;
 }
 
-@media (max-width: 520px) {
-  .grind-annonce-verifie {
-    flex-basis: 16px;
-    width: 16px;
-    height: 16px;
+/* Navigation mobile : barre inférieure tactile, sans modifier les onglets disponibles. */
+@media (max-width: 640px) {
+  .app-shell {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .barre-onglets {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    display: flex;
+    justify-content: space-around;
+    gap: 4px;
+    width: 100%;
+    margin: 0;
+    padding: 7px max(8px, env(safe-area-inset-right, 0px)) calc(7px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+    background: rgba(10, 10, 15, .95);
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+  }
+
+  .onglet {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    min-height: 52px;
+    margin: 0;
+    padding: 6px 3px;
+    border-radius: 12px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+
+  .onglet i {
+    font-size: 17px;
+  }
+
+  .fil-actu {
+    width: 100%;
+    max-width: 760px;
+    padding: 12px max(12px, env(safe-area-inset-right, 0px)) calc(124px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+  }
+
+  .filtres-fil {
+    gap: 7px;
+    margin-bottom: 13px;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .filtres-fil::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filtre,
+  .filtre-actif {
+    min-height: 40px;
+    padding: 8px 13px;
+    font-size: 12px;
+  }
+
+  .fil-actu > .carte-post:not(.formulaire-post) {
+    padding: 14px;
+    border-radius: 15px;
+  }
+
+  .publication-composer {
+    gap: 10px;
+    padding: 13px;
+    border-radius: 15px;
+  }
+
+  .publication-composer textarea {
+    min-height: 104px;
+    font-size: 16px;
+  }
+
+  .publication-composer .rangee-boutons button {
+    min-height: 44px;
+  }
+
+  .bouton-flottant {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right, 0px));
+    bottom: calc(82px + env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+    width: 54px;
+    height: 54px;
+    min-width: 54px;
+    min-height: 54px;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+  }
+}
+
+@media (max-width: 380px) {
+  .fil-actu {
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
+  }
+
+  .onglet {
+    font-size: 9px;
+  }
+
+  .fil-actu > .carte-post:not(.formulaire-post) {
+    padding: 12px;
   }
 }
