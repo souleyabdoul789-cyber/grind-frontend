@@ -129,7 +129,13 @@ export default function Reglages({ sessionToken, monUsername, onDeconnexion }) {
           notes: [],
         });
       } else {
-        throw new Error("Le manifeste de mise à jour est plus ancien que la version installée. Vérifie la publication du manifeste.");
+        setEtatMaj({
+          statut: "notice",
+          message: `Les informations de mise à jour ne sont pas synchronisées : cette application est en version ${versionInstallee}, tandis que le catalogue référence ${manifeste.version}. La vérification sera disponible après actualisation du catalogue.`,
+          version: manifeste.version,
+          lien: null,
+          notes: [],
+        });
       }
     } catch (erreur) {
       const message = erreur?.name === "AbortError"
@@ -270,7 +276,7 @@ export default function Reglages({ sessionToken, monUsername, onDeconnexion }) {
             <i className={`fa-solid ${etatMaj.statut === "checking" ? "fa-spinner fa-spin" : "fa-rotate"}`} aria-hidden="true" />
             {etatMaj.statut === "checking" ? "Vérification…" : "Vérifier les mises à jour"}
           </button>
-          {etatMaj.message && <p className={`grind-update-status ${etatMaj.statut === "error" ? "error" : etatMaj.statut === "current" ? "success" : ""}`} role="status">{etatMaj.message}</p>}
+          {etatMaj.message && <p className={`grind-update-status ${etatMaj.statut === "error" ? "error" : etatMaj.statut === "current" ? "success" : etatMaj.statut === "notice" ? "notice" : ""}`} role="status">{etatMaj.message}</p>}
           {etatMaj.statut === "available" && (
             <>
               {etatMaj.notes.length > 0 && <ul className="grind-update-notes">{etatMaj.notes.map((note, index) => <li key={`${index}-${note}`}>{note}</li>)}</ul>}

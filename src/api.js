@@ -97,7 +97,7 @@ export function finaliserNomProfilInscription(jetonInscription, username) {
   });
 }
 
-async function reveillerServeurGrind() {
+async function verifierDisponibiliteServeurGrind() {
   if (navigator.onLine === false) {
     throw new Error("Aucune connexion à Internet. Vérifie ton réseau puis réessaie.");
   }
@@ -140,6 +140,32 @@ async function reveillerServeurGrind() {
   throw new Error(derniereErreur?.message || "Le serveur GRIND ne répond pas encore. Réessaie dans quelques instants.");
 }
 
+// Le préchauffage de l'écran de connexion et l'authentification partagent
+// la même vérification. Cela évite deux réveils Render concurrents.
+let promesseReveilGrind = null;
+let serveurPretJusqua = 0;
+
+function reveillerServeurGrind() {
+  if (Date.now() < serveurPretJusqua) return Promise.resolve();
+  if (!promesseReveilGrind) {
+    promesseReveilGrind = verifierDisponibiliteServeurGrind()
+      .then(() => { serveurPretJusqua = Date.now() + 30_000; })
+      .finally(() => { promesseReveilGrind = null; });
+  }
+  return promesseReveilGrind;
+}
+
+// À appeler dès que l'écran de connexion est affiché. L'erreur est volontairement
+// silencieuse ici : le formulaire donnera le message utile si l'utilisateur se connecte.
+export function prechaufferServeurGrind() {
+  if (navigator.onLine === false) return;
+  reveillerServeurGrind().catch(() => {});
+}
+
+export function attendreServeurGrind() {
+  return reveillerServeurGrind();
+}
+
 export async function connecterGrind(username, password) {
   await reveillerServeurGrind();
   return poster(`${GRIND_URL}/api/compte/login`, { username, password });
@@ -148,7 +174,7 @@ export async function connecterGrind(username, password) {
 export async function connecterGoogle(credential, username = null, cguAcceptees = false, password = null) {
   await reveillerServeurGrind();
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 35000);
+  const timeout = window.setTimeout(() => controller.abort(), 25000);
   try {
     const res = await fetchApi(`${GRIND_URL}/api/compte/google`, {
       method: "POST",
@@ -161,13 +187,12 @@ export async function connecterGoogle(credential, username = null, cguAcceptees 
       const detail = data.detail;
       const error = new Error(typeof detail === "string" ? detail : detail?.message || "La vérification du compte Google a échoué.");
       error.status = res.status;
-      error.code = typeof detail === "object" && detail ? detail.code || null : null;
-      throw error;
+            throw error;
     }
     return data;
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error("La vérification Google a dépassé 35 secondes. Vérifie la connexion au serveur GRIND puis réessaie.");
+      throw new Error("La vérification Google a dépassé 25 secondes. Vérifie la connexion au serveur GRIND puis réessaie.");
     }
     throw error;
   } finally {

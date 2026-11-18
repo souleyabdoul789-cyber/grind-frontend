@@ -9,19 +9,20 @@ import Classes from "./pages/Classes.jsx";
 import Profil from "./pages/Profil.jsx";
 import Reglages from "./pages/Reglages.jsx";
 import BureauAdmin from "./pages/BureauAdmin.jsx";
+import EspaceProviseur from "./pages/EspaceProviseur.jsx";
+import GestionComptes from "./components/GestionComptes.jsx";
+import Library from "./pages/Library.jsx";
 import ModaleAcceptationCgu from "./components/ModaleAcceptationCgu.jsx";
 import { obtenirMonStatut, deconnecterGrind, statutPin, relockerPin, obtenirMonProfil, estGrindEnLigne } from "./api.js";
 import { oublierBloques } from "./blocages.js";
 import BarreNav from "./components/BarreNav.jsx";
 import FondAnime from "./components/FondAnime.jsx";
-import EspaceProviseur from "./pages/EspaceProviseur.jsx";
 import VerrouPin from "./components/VerrouPin.jsx";
-import GestionComptes from "./components/GestionComptes.jsx";
-import Library from "./pages/Library.jsx";
 import BienvenueGrind from "./components/BienvenueGrind.jsx";
 import PaysIndisponible from "./components/PaysIndisponible.jsx";
-import { statutBienvenue, verifierAccesPays, GRIND_URL } from "./api.js";
+import { statutBienvenue, verifierAccesPays, prechaufferServeurGrind, attendreServeurGrind } from "./api.js";
 import { nettoyerCacheMediaAndroid } from "./mediaStorage.js";
+
 
 function extraireCodeDepuisUrl() {
   const correspondance = window.location.pathname.match(/^\/rejoindre\/(.+)$/);
@@ -56,6 +57,10 @@ function lireCachePinValide(cle) {
 
 export default function App() {
   const [sessionToken, setSessionToken] = useState(null);
+  useEffect(() => {
+    if (!sessionToken && !localStorage.getItem("grind_session_token")) prechaufferServeurGrind();
+  }, [sessionToken]);
+
   const [profilComplet, setProfilComplet] = useState(false);
   const [profilPret, setProfilPret] = useState(false);
   const [profilErreur, setProfilErreur] = useState("");
@@ -198,11 +203,9 @@ export default function App() {
     let actif = true;
     let verificationEnCours = false;
     let echecsApiConsecutifs = 0;
-    let controleur = null;
-    let delaiAnnulation = null;
 
     const verifierConnexion = async () => {
-      if (!actif || verificationEnCours || document.visibilityState === "hidden") return;
+      if (!actif || verificationEnCours) return;
       if (navigator.onLine === false) {
         echecsApiConsecutifs = 0;
         setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
@@ -211,21 +214,10 @@ export default function App() {
 
       verificationEnCours = true;
       setEtatConnexion((precedent) => ({ ...precedent, verification: true }));
-      controleur = new AbortController();
-      // Le backend gratuit peut avoir besoin de plusieurs dizaines de secondes
-      // pour se réveiller après une période d'inactivité.
-      delaiAnnulation = window.setTimeout(() => controleur?.abort(), 65000);
 
       try {
-        const reponse = await fetch(`${GRIND_URL}/api/health`, {
-          method: "GET",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-          signal: controleur.signal,
-        });
-        if (!reponse.ok) throw new Error(`Serveur GRIND indisponible (${reponse.status})`);
-        const donnees = await reponse.json();
-        if (donnees?.status !== "ok") throw new Error("Réponse de santé GRIND invalide");
+        // Réutilise la même sonde que le préchauffage et le formulaire de connexion.
+        await attendreServeurGrind();
         echecsApiConsecutifs = 0;
         if (actif) setEtatConnexion({ disponible: true, verifiee: true, verification: false, motif: null });
       } catch {
@@ -238,44 +230,31 @@ export default function App() {
             if (echecsApiConsecutifs >= 2) {
               setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "service" });
             } else {
-              // Garde le dernier état fiable pendant une erreur isolée (latence, timeout ou 5xx).
+              // Garde le dernier état fiable pendant une erreur isolée (latence ou 5xx).
               setEtatConnexion((precedent) => ({ ...precedent, verification: false }));
             }
           }
         }
       } finally {
-        if (delaiAnnulation !== null) window.clearTimeout(delaiAnnulation);
-        controleur = null;
-        delaiAnnulation = null;
         verificationEnCours = false;
       }
     };
 
     const horsLigne = () => {
-      controleur?.abort();
       echecsApiConsecutifs = 0;
       setEtatConnexion({ disponible: false, verifiee: true, verification: false, motif: "internet" });
     };
     const enLigne = () => { verifierConnexion(); };
-    const reprendreVisibilite = () => { if (document.visibilityState === "visible") verifierConnexion(); };
     window.addEventListener("offline", horsLigne);
     window.addEventListener("online", enLigne);
-    document.addEventListener("visibilitychange", reprendreVisibilite);
-    const listenerResume = CapacitorApp.addListener("appStateChange", event => {
-      if (event.isActive) verifierConnexion();
-    });
     verifierConnexion();
-    const intervalle = window.setInterval(verifierConnexion, 30000);
+    const intervalle = window.setInterval(verifierConnexion, 15000);
 
     return () => {
       actif = false;
       window.removeEventListener("offline", horsLigne);
       window.removeEventListener("online", enLigne);
-      document.removeEventListener("visibilitychange", reprendreVisibilite);
       window.clearInterval(intervalle);
-      controleur?.abort();
-      if (delaiAnnulation !== null) window.clearTimeout(delaiAnnulation);
-      listenerResume?.then(handle => handle.remove()).catch(() => {});
     };
   }, [tentativeConnexion]);
 
@@ -431,7 +410,7 @@ export default function App() {
 
   useEffect(() => {
     let actif = true;
-    verifierAccesPays().then((r) => {
+      verifierAccesPays().then((r) => {
       if (actif) setPaysAccess({ loading: false, blocked: r.allowed === false, country: r.country_name, message: r.message });
     }).catch(() => { if (actif) setPaysAccess({ loading: false, blocked: false }); });
     return () => { actif = false; };
@@ -755,16 +734,16 @@ export default function App() {
     return (
       <div className="app-shell">
         <FondAnime />
-        <GestionComptes
-          sessionToken={sessionToken}
-          monUsername={username}
-          role={role}
-          compteType={typeCompte}
-          chargementAction={changementCompteEnCours}
-          onRetour={() => setGestionComptesOuverte(false)}
-          onAjouter={changerCompte}
-          onSelectionner={selectionnerCompteMemorise}
-        />
+          <GestionComptes
+            sessionToken={sessionToken}
+            monUsername={username}
+            role={role}
+            compteType={typeCompte}
+            chargementAction={changementCompteEnCours}
+            onRetour={() => setGestionComptesOuverte(false)}
+            onAjouter={changerCompte}
+            onSelectionner={selectionnerCompteMemorise}
+          />
       </div>
     );
   }
@@ -775,7 +754,7 @@ export default function App() {
     return (
       <div className="app-shell">
         <FondAnime />
-        <BureauAdmin sessionToken={sessionToken} role="admin" autonome onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
+          <BureauAdmin sessionToken={sessionToken} role="admin" autonome onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
       </div>
     );
   }
@@ -784,7 +763,7 @@ export default function App() {
     return (
       <div className="app-shell">
         <FondAnime />
-        <EspaceProviseur sessionToken={sessionToken} onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
+          <EspaceProviseur sessionToken={sessionToken} onDeconnexion={deconnecter} onChangerCompte={ouvrirGestionComptes} changementCompteEnCours={false} />
         {bienvenueOuverte && <BienvenueGrind sessionToken={sessionToken} onTermine={() => setBienvenueOuverte(false)} />}
       </div>
     );
@@ -830,14 +809,14 @@ export default function App() {
       {toastGrind && <div className="grind-toast" role="status">{toastGrind}</div>}
       <BarreNav sessionToken={sessionToken} monUsername={username} ongletActif={onglet} onChangerOnglet={setOnglet} onGererComptes={ouvrirGestionComptes} estEquipe={!!statut?.est_equipe} />
 
-      {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
-      {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}
-      {onglet === "classes" && (
-        <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} codeAttenteVersion={codeAttenteVersion} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} onModeDiscussion={notifierModeDiscussion} />
-      )}
-      {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
-      {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}
-      {onglet === "admin" && statut?.est_equipe && <BureauAdmin sessionToken={sessionToken} role={statut.role} />}
+        {onglet === "fil" && <FilActu sessionToken={sessionToken} monUsername={username} postAouvrir={postAouvrir} />}
+        {onglet === "library" && <Library sessionToken={sessionToken} monUsername={username} documentAouvrirId={documentLibraryAouvrir} />}
+        {onglet === "classes" && (
+          <Classes sessionToken={sessionToken} monUsername={username} codeAttente={codeAttente} codeAttenteVersion={codeAttenteVersion} onCodeConsomme={consommerCode} discussionAouvrir={discussionAouvrir} onDiscussionOuverte={() => setDiscussionAouvrir(null)} onModeDiscussion={notifierModeDiscussion} />
+        )}
+        {onglet === "profil" && <Profil sessionToken={sessionToken} monUsername={username} />}
+        {onglet === "reglages" && <Reglages sessionToken={sessionToken} monUsername={username} onDeconnexion={deconnecter} />}
+        {onglet === "admin" && statut?.est_equipe && <BureauAdmin sessionToken={sessionToken} role={statut.role} />}
 
       {bienvenueOuverte && <BienvenueGrind sessionToken={sessionToken} onTermine={() => setBienvenueOuverte(false)} />}
 
